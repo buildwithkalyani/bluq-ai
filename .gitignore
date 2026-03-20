@@ -34,3 +34,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Drizzle migrations (keep schema.ts but ignore sql migration files)
+drizzle/*.sql
+drizzle/meta/
+
+# Editor
+.cursor/
+.vscode/
