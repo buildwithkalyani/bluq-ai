@@ -1,8 +1,6 @@
 import { pgTable, uuid, text, timestamp, unique, index, foreignKey, check, jsonb, date, integer, numeric, boolean } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
-
-
 export const orgs = pgTable("orgs", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	name: text().notNull(),
@@ -36,15 +34,15 @@ export const workspaceMembers = pgTable("workspace_members", {
 	index("idx_wm_user").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
 	index("idx_wm_workspace").using("btree", table.workspaceId.asc().nullsLast().op("uuid_ops")),
 	foreignKey({
-			columns: [table.userId],
-			foreignColumns: [users.id],
-			name: "workspace_members_user_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.userId],
+		foreignColumns: [users.id],
+		name: "workspace_members_user_id_fkey"
+	}).onDelete("cascade"),
 	foreignKey({
-			columns: [table.workspaceId],
-			foreignColumns: [orgs.id],
-			name: "workspace_members_workspace_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.workspaceId],
+		foreignColumns: [orgs.id],
+		name: "workspace_members_workspace_id_fkey"
+	}).onDelete("cascade"),
 	unique("workspace_members_workspace_id_user_id_key").on(table.workspaceId, table.userId),
 	check("workspace_members_status_check", sql`status = ANY (ARRAY['pending'::text, 'active'::text, 'deactivated'::text])`),
 ]);
@@ -60,33 +58,31 @@ export const whatsappUpdates = pgTable("whatsapp_updates", {
 	parsedJson: jsonb("parsed_json"),
 	matchedTaskId: uuid("matched_task_id"),
 	status: text().default('received').notNull(),
-	// TODO: failed to parse database type 'extensions.vector(1536)'
-	embedding: unknown("embedding"),
 	receivedAt: timestamp("received_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 }, (table) => [
 	index("idx_wa_project").using("btree", table.projectId.asc().nullsLast().op("uuid_ops")),
 	index("idx_wa_status").using("btree", table.status.asc().nullsLast().op("text_ops")),
 	index("idx_wa_workspace").using("btree", table.workspaceId.asc().nullsLast().op("uuid_ops")),
 	foreignKey({
-			columns: [table.matchedTaskId],
-			foreignColumns: [tasks.id],
-			name: "whatsapp_updates_matched_task_id_fkey"
-		}),
+		columns: [table.matchedTaskId],
+		foreignColumns: [tasks.id],
+		name: "whatsapp_updates_matched_task_id_fkey"
+	}),
 	foreignKey({
-			columns: [table.projectId],
-			foreignColumns: [projects.id],
-			name: "whatsapp_updates_project_id_fkey"
-		}),
+		columns: [table.projectId],
+		foreignColumns: [projects.id],
+		name: "whatsapp_updates_project_id_fkey"
+	}),
 	foreignKey({
-			columns: [table.senderUserId],
-			foreignColumns: [users.id],
-			name: "whatsapp_updates_sender_user_id_fkey"
-		}),
+		columns: [table.senderUserId],
+		foreignColumns: [users.id],
+		name: "whatsapp_updates_sender_user_id_fkey"
+	}),
 	foreignKey({
-			columns: [table.workspaceId],
-			foreignColumns: [orgs.id],
-			name: "whatsapp_updates_workspace_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.workspaceId],
+		foreignColumns: [orgs.id],
+		name: "whatsapp_updates_workspace_id_fkey"
+	}).onDelete("cascade"),
 	check("whatsapp_updates_status_check", sql`status = ANY (ARRAY['received'::text, 'processing'::text, 'parsed'::text, 'failed'::text])`),
 ]);
 
@@ -101,8 +97,6 @@ export const auditEvents = pgTable("audit_events", {
 	actorType: text("actor_type").default('user').notNull(),
 	payload: jsonb(),
 	aiAnalysis: text("ai_analysis"),
-	// TODO: failed to parse database type 'extensions.vector(1536)'
-	embedding: unknown("embedding"),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 }, (table) => [
 	index("idx_audit_created").using("btree", table.createdAt.asc().nullsLast().op("timestamptz_ops")),
@@ -110,20 +104,20 @@ export const auditEvents = pgTable("audit_events", {
 	index("idx_audit_type").using("btree", table.eventType.asc().nullsLast().op("text_ops")),
 	index("idx_audit_workspace").using("btree", table.workspaceId.asc().nullsLast().op("uuid_ops")),
 	foreignKey({
-			columns: [table.actorId],
-			foreignColumns: [users.id],
-			name: "audit_events_actor_id_fkey"
-		}),
+		columns: [table.actorId],
+		foreignColumns: [users.id],
+		name: "audit_events_actor_id_fkey"
+	}),
 	foreignKey({
-			columns: [table.projectId],
-			foreignColumns: [projects.id],
-			name: "audit_events_project_id_fkey"
-		}),
+		columns: [table.projectId],
+		foreignColumns: [projects.id],
+		name: "audit_events_project_id_fkey"
+	}),
 	foreignKey({
-			columns: [table.workspaceId],
-			foreignColumns: [orgs.id],
-			name: "audit_events_workspace_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.workspaceId],
+		foreignColumns: [orgs.id],
+		name: "audit_events_workspace_id_fkey"
+	}).onDelete("cascade"),
 	check("audit_events_actor_type_check", sql`actor_type = ANY (ARRAY['user'::text, 'ai'::text, 'system'::text, 'whatsapp'::text])`),
 ]);
 
@@ -136,12 +130,12 @@ export const dprs = pgTable("dprs", {
 	reportDate: date("report_date").default(sql`CURRENT_DATE`).notNull(),
 	labourCount: integer("labour_count"),
 	workDone: text("work_done"),
-	percentComplete: numeric("percent_complete", { precision: 5, scale:  2 }),
+	percentComplete: numeric("percent_complete", { precision: 5, scale: 2 }),
 	remarks: text(),
 	delayReason: text("delay_reason"),
 	delayDays: integer("delay_days"),
-	locationLat: numeric("location_lat", { precision: 10, scale:  7 }),
-	locationLng: numeric("location_lng", { precision: 10, scale:  7 }),
+	locationLat: numeric("location_lat", { precision: 10, scale: 7 }),
+	locationLng: numeric("location_lng", { precision: 10, scale: 7 }),
 	source: text().default('whatsapp').notNull(),
 	whatsappUpdateId: uuid("whatsapp_update_id"),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
@@ -150,30 +144,30 @@ export const dprs = pgTable("dprs", {
 	index("idx_dprs_project").using("btree", table.projectId.asc().nullsLast().op("uuid_ops")),
 	index("idx_dprs_workspace").using("btree", table.workspaceId.asc().nullsLast().op("uuid_ops")),
 	foreignKey({
-			columns: [table.projectId],
-			foreignColumns: [projects.id],
-			name: "dprs_project_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.projectId],
+		foreignColumns: [projects.id],
+		name: "dprs_project_id_fkey"
+	}).onDelete("cascade"),
 	foreignKey({
-			columns: [table.reportedBy],
-			foreignColumns: [users.id],
-			name: "dprs_reported_by_fkey"
-		}),
+		columns: [table.reportedBy],
+		foreignColumns: [users.id],
+		name: "dprs_reported_by_fkey"
+	}),
 	foreignKey({
-			columns: [table.taskId],
-			foreignColumns: [tasks.id],
-			name: "dprs_task_id_fkey"
-		}),
+		columns: [table.taskId],
+		foreignColumns: [tasks.id],
+		name: "dprs_task_id_fkey"
+	}),
 	foreignKey({
-			columns: [table.whatsappUpdateId],
-			foreignColumns: [whatsappUpdates.id],
-			name: "dprs_whatsapp_update_id_fkey"
-		}),
+		columns: [table.whatsappUpdateId],
+		foreignColumns: [whatsappUpdates.id],
+		name: "dprs_whatsapp_update_id_fkey"
+	}),
 	foreignKey({
-			columns: [table.workspaceId],
-			foreignColumns: [orgs.id],
-			name: "dprs_workspace_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.workspaceId],
+		foreignColumns: [orgs.id],
+		name: "dprs_workspace_id_fkey"
+	}).onDelete("cascade"),
 	check("dprs_source_check", sql`source = ANY (ARRAY['whatsapp'::text, 'web'::text])`),
 ]);
 
@@ -184,28 +178,28 @@ export const dprPhotos = pgTable("dpr_photos", {
 	dprId: uuid("dpr_id"),
 	fileUrl: text("file_url").notNull(),
 	fileName: text("file_name"),
-	geoLat: numeric("geo_lat", { precision: 10, scale:  7 }),
-	geoLng: numeric("geo_lng", { precision: 10, scale:  7 }),
+	geoLat: numeric("geo_lat", { precision: 10, scale: 7 }),
+	geoLng: numeric("geo_lng", { precision: 10, scale: 7 }),
 	capturedAt: timestamp("captured_at", { withTimezone: true, mode: 'string' }),
 	uploadedAt: timestamp("uploaded_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 }, (table) => [
 	index("idx_photos_dpr").using("btree", table.dprId.asc().nullsLast().op("uuid_ops")),
 	index("idx_photos_workspace").using("btree", table.workspaceId.asc().nullsLast().op("uuid_ops")),
 	foreignKey({
-			columns: [table.dprId],
-			foreignColumns: [dprs.id],
-			name: "dpr_photos_dpr_id_fkey"
-		}).onDelete("set null"),
+		columns: [table.dprId],
+		foreignColumns: [dprs.id],
+		name: "dpr_photos_dpr_id_fkey"
+	}).onDelete("set null"),
 	foreignKey({
-			columns: [table.projectId],
-			foreignColumns: [projects.id],
-			name: "dpr_photos_project_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.projectId],
+		foreignColumns: [projects.id],
+		name: "dpr_photos_project_id_fkey"
+	}).onDelete("cascade"),
 	foreignKey({
-			columns: [table.workspaceId],
-			foreignColumns: [orgs.id],
-			name: "dpr_photos_workspace_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.workspaceId],
+		foreignColumns: [orgs.id],
+		name: "dpr_photos_workspace_id_fkey"
+	}).onDelete("cascade"),
 ]);
 
 export const projects = pgTable("projects", {
@@ -227,15 +221,15 @@ export const projects = pgTable("projects", {
 }, (table) => [
 	index("idx_projects_workspace").using("btree", table.workspaceId.asc().nullsLast().op("uuid_ops")),
 	foreignKey({
-			columns: [table.createdBy],
-			foreignColumns: [users.id],
-			name: "projects_created_by_fkey"
-		}),
+		columns: [table.createdBy],
+		foreignColumns: [users.id],
+		name: "projects_created_by_fkey"
+	}),
 	foreignKey({
-			columns: [table.workspaceId],
-			foreignColumns: [orgs.id],
-			name: "projects_workspace_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.workspaceId],
+		foreignColumns: [orgs.id],
+		name: "projects_workspace_id_fkey"
+	}).onDelete("cascade"),
 	check("projects_status_check", sql`status = ANY (ARRAY['active'::text, 'on_hold'::text, 'completed'::text, 'archived'::text])`),
 ]);
 
@@ -243,7 +237,7 @@ export const shareTokens = pgTable("share_tokens", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	workspaceId: uuid("workspace_id").notNull(),
 	projectId: uuid("project_id").notNull(),
-	token: text().default(encode(extensions.gen_random_bytes(32), \'hex\'::text)).notNull(),
+	token: text().default(sql`encode(gen_random_bytes(32), 'hex')`).notNull(),
 	createdBy: uuid("created_by"),
 	permissions: text().default('read').notNull(),
 	expiresAt: timestamp("expires_at", { withTimezone: true, mode: 'string' }).notNull(),
@@ -253,20 +247,20 @@ export const shareTokens = pgTable("share_tokens", {
 	index("idx_share_token").using("btree", table.token.asc().nullsLast().op("text_ops")),
 	index("idx_share_workspace").using("btree", table.workspaceId.asc().nullsLast().op("uuid_ops")),
 	foreignKey({
-			columns: [table.createdBy],
-			foreignColumns: [users.id],
-			name: "share_tokens_created_by_fkey"
-		}),
+		columns: [table.createdBy],
+		foreignColumns: [users.id],
+		name: "share_tokens_created_by_fkey"
+	}),
 	foreignKey({
-			columns: [table.projectId],
-			foreignColumns: [projects.id],
-			name: "share_tokens_project_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.projectId],
+		foreignColumns: [projects.id],
+		name: "share_tokens_project_id_fkey"
+	}).onDelete("cascade"),
 	foreignKey({
-			columns: [table.workspaceId],
-			foreignColumns: [orgs.id],
-			name: "share_tokens_workspace_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.workspaceId],
+		foreignColumns: [orgs.id],
+		name: "share_tokens_workspace_id_fkey"
+	}).onDelete("cascade"),
 	unique("share_tokens_token_key").on(table.token),
 	check("share_tokens_permissions_check", sql`permissions = 'read'::text`),
 ]);
@@ -284,20 +278,20 @@ export const projectMembers = pgTable("project_members", {
 	index("idx_pm_user").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
 	index("idx_pm_workspace").using("btree", table.workspaceId.asc().nullsLast().op("uuid_ops")),
 	foreignKey({
-			columns: [table.projectId],
-			foreignColumns: [projects.id],
-			name: "project_members_project_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.projectId],
+		foreignColumns: [projects.id],
+		name: "project_members_project_id_fkey"
+	}).onDelete("cascade"),
 	foreignKey({
-			columns: [table.userId],
-			foreignColumns: [users.id],
-			name: "project_members_user_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.userId],
+		foreignColumns: [users.id],
+		name: "project_members_user_id_fkey"
+	}).onDelete("cascade"),
 	foreignKey({
-			columns: [table.workspaceId],
-			foreignColumns: [orgs.id],
-			name: "project_members_workspace_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.workspaceId],
+		foreignColumns: [orgs.id],
+		name: "project_members_workspace_id_fkey"
+	}).onDelete("cascade"),
 	unique("project_members_project_id_user_id_key").on(table.projectId, table.userId),
 	check("project_members_access_check", sql`access = ANY (ARRAY['editor'::text, 'viewer'::text, 'no_access'::text])`),
 ]);
@@ -316,7 +310,7 @@ export const tasks = pgTable("tasks", {
 	actualStart: date("actual_start"),
 	actualEnd: date("actual_end"),
 	durationDays: integer("duration_days"),
-	percentComplete: numeric("percent_complete", { precision: 5, scale:  2 }).default('0'),
+	percentComplete: numeric("percent_complete", { precision: 5, scale: 2 }).default('0'),
 	contractor: text(),
 	area: text(),
 	isMilestone: boolean("is_milestone").default(false),
@@ -330,25 +324,25 @@ export const tasks = pgTable("tasks", {
 	index("idx_tasks_status").using("btree", table.projectId.asc().nullsLast().op("text_ops"), table.status.asc().nullsLast().op("uuid_ops")),
 	index("idx_tasks_workspace").using("btree", table.workspaceId.asc().nullsLast().op("uuid_ops")),
 	foreignKey({
-			columns: [table.assignedTo],
-			foreignColumns: [users.id],
-			name: "tasks_assigned_to_fkey"
-		}),
+		columns: [table.assignedTo],
+		foreignColumns: [users.id],
+		name: "tasks_assigned_to_fkey"
+	}),
 	foreignKey({
-			columns: [table.parentTaskId],
-			foreignColumns: [table.id],
-			name: "tasks_parent_task_id_fkey"
-		}),
+		columns: [table.parentTaskId],
+		foreignColumns: [table.id],
+		name: "tasks_parent_task_id_fkey"
+	}),
 	foreignKey({
-			columns: [table.projectId],
-			foreignColumns: [projects.id],
-			name: "tasks_project_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.projectId],
+		foreignColumns: [projects.id],
+		name: "tasks_project_id_fkey"
+	}).onDelete("cascade"),
 	foreignKey({
-			columns: [table.workspaceId],
-			foreignColumns: [orgs.id],
-			name: "tasks_workspace_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.workspaceId],
+		foreignColumns: [orgs.id],
+		name: "tasks_workspace_id_fkey"
+	}).onDelete("cascade"),
 	check("tasks_priority_check", sql`priority = ANY (ARRAY['low'::text, 'medium'::text, 'high'::text, 'critical'::text])`),
 	check("tasks_status_check", sql`status = ANY (ARRAY['not_started'::text, 'in_progress'::text, 'completed'::text, 'running_late'::text, 'delayed'::text])`),
 ]);
@@ -365,20 +359,20 @@ export const taskDependencies = pgTable("task_dependencies", {
 	index("idx_deps_successor").using("btree", table.successorId.asc().nullsLast().op("uuid_ops")),
 	index("idx_deps_workspace").using("btree", table.workspaceId.asc().nullsLast().op("uuid_ops")),
 	foreignKey({
-			columns: [table.predecessorId],
-			foreignColumns: [tasks.id],
-			name: "task_dependencies_predecessor_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.predecessorId],
+		foreignColumns: [tasks.id],
+		name: "task_dependencies_predecessor_id_fkey"
+	}).onDelete("cascade"),
 	foreignKey({
-			columns: [table.successorId],
-			foreignColumns: [tasks.id],
-			name: "task_dependencies_successor_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.successorId],
+		foreignColumns: [tasks.id],
+		name: "task_dependencies_successor_id_fkey"
+	}).onDelete("cascade"),
 	foreignKey({
-			columns: [table.workspaceId],
-			foreignColumns: [orgs.id],
-			name: "task_dependencies_workspace_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.workspaceId],
+		foreignColumns: [orgs.id],
+		name: "task_dependencies_workspace_id_fkey"
+	}).onDelete("cascade"),
 	unique("task_dependencies_predecessor_id_successor_id_key").on(table.predecessorId, table.successorId),
 	check("task_dependencies_dependency_type_check", sql`dependency_type = ANY (ARRAY['FS'::text, 'FF'::text, 'SS'::text, 'SF'::text])`),
 ]);
@@ -401,20 +395,20 @@ export const documents = pgTable("documents", {
 	index("idx_docs_project").using("btree", table.projectId.asc().nullsLast().op("uuid_ops")),
 	index("idx_docs_workspace").using("btree", table.workspaceId.asc().nullsLast().op("uuid_ops")),
 	foreignKey({
-			columns: [table.projectId],
-			foreignColumns: [projects.id],
-			name: "documents_project_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.projectId],
+		foreignColumns: [projects.id],
+		name: "documents_project_id_fkey"
+	}).onDelete("cascade"),
 	foreignKey({
-			columns: [table.uploadedBy],
-			foreignColumns: [users.id],
-			name: "documents_uploaded_by_fkey"
-		}),
+		columns: [table.uploadedBy],
+		foreignColumns: [users.id],
+		name: "documents_uploaded_by_fkey"
+	}),
 	foreignKey({
-			columns: [table.workspaceId],
-			foreignColumns: [orgs.id],
-			name: "documents_workspace_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.workspaceId],
+		foreignColumns: [orgs.id],
+		name: "documents_workspace_id_fkey"
+	}).onDelete("cascade"),
 ]);
 
 export const scheduleVersions = pgTable("schedule_versions", {
@@ -428,22 +422,20 @@ export const scheduleVersions = pgTable("schedule_versions", {
 	isBaseline: boolean("is_baseline").default(false),
 	isLocked: boolean("is_locked").default(false),
 	generatedBy: text("generated_by").default('ai').notNull(),
-	// TODO: failed to parse database type 'extensions.vector(1536)'
-	embedding: unknown("embedding"),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 }, (table) => [
 	index("idx_sv_project").using("btree", table.projectId.asc().nullsLast().op("uuid_ops")),
 	index("idx_sv_workspace").using("btree", table.workspaceId.asc().nullsLast().op("uuid_ops")),
 	foreignKey({
-			columns: [table.projectId],
-			foreignColumns: [projects.id],
-			name: "schedule_versions_project_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.projectId],
+		foreignColumns: [projects.id],
+		name: "schedule_versions_project_id_fkey"
+	}).onDelete("cascade"),
 	foreignKey({
-			columns: [table.workspaceId],
-			foreignColumns: [orgs.id],
-			name: "schedule_versions_workspace_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.workspaceId],
+		foreignColumns: [orgs.id],
+		name: "schedule_versions_workspace_id_fkey"
+	}).onDelete("cascade"),
 	unique("schedule_versions_project_id_version_number_key").on(table.projectId, table.versionNumber),
 	check("schedule_versions_generated_by_check", sql`generated_by = ANY (ARRAY['ai'::text, 'manual'::text, 'import'::text])`),
 ]);
@@ -464,14 +456,14 @@ export const reports = pgTable("reports", {
 	index("idx_reports_project").using("btree", table.projectId.asc().nullsLast().op("date_ops"), table.reportDate.asc().nullsLast().op("date_ops")),
 	index("idx_reports_workspace").using("btree", table.workspaceId.asc().nullsLast().op("uuid_ops")),
 	foreignKey({
-			columns: [table.projectId],
-			foreignColumns: [projects.id],
-			name: "reports_project_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.projectId],
+		foreignColumns: [projects.id],
+		name: "reports_project_id_fkey"
+	}).onDelete("cascade"),
 	foreignKey({
-			columns: [table.workspaceId],
-			foreignColumns: [orgs.id],
-			name: "reports_workspace_id_fkey"
-		}).onDelete("cascade"),
+		columns: [table.workspaceId],
+		foreignColumns: [orgs.id],
+		name: "reports_workspace_id_fkey"
+	}).onDelete("cascade"),
 	check("reports_type_check", sql`type = ANY (ARRAY['daily'::text, 'weekly'::text])`),
 ]);
