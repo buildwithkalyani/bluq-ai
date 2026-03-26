@@ -467,3 +467,19 @@ export const reports = pgTable("reports", {
 	}).onDelete("cascade"),
 	check("reports_type_check", sql`type = ANY (ARRAY['daily'::text, 'weekly'::text])`),
 ]);
+
+export const demoRequests = pgTable("demo_requests", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	name: text(),
+	email: text().notNull(),
+	phone: text(),
+	companyName: text("company_name").notNull(),
+	companySize: text("company_size"),
+	role: text(),
+	message: text(),
+	source: text().default("website"),
+	status: text().default("pending").notNull(),
+	emailSent: boolean("email_sent").default(false),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow(),
+  });
