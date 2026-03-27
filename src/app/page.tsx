@@ -5,6 +5,8 @@ export default function Home() {
   const [firm, setFirm] = useState("");
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
   useEffect(() => {
     const io = new IntersectionObserver((entries) => {
       entries.forEach((e) => {
@@ -23,9 +25,69 @@ export default function Home() {
     return () => io.disconnect();
   }, []);
 
-  function submitDemo() {
-    if (!firm || !email) { alert("Please enter your firm name and work email."); return; }
-    setSubmitted(true);
+  async function submitDemo(e?: React.FormEvent) {
+    // Prevent page refresh when hitting Enter
+    if (e) e.preventDefault();
+
+    // 1. Basic empty check
+    if (!firm) { 
+      alert("Please enter your firm name."); 
+      return; 
+    }
+    if (!email) { 
+      alert("Please enter your work email."); 
+      return; 
+    }
+
+    // 2. Specific Email Validation Checks
+    if (email.includes(" ")) {
+      alert("Email addresses cannot contain spaces. Please check for accidental spaces at the beginning or end.");
+      return;
+    }
+    
+    if (!email.includes("@")) {
+      alert("Your email is missing the '@' symbol. Please enter a complete email address.");
+      return;
+    }
+
+    if (!email.includes(".")) {
+      alert("Your email is missing a domain extension (like .com, .in, or .ai).");
+      return;
+    }
+
+    // Final pattern check
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      alert("This email format looks incorrect. Please double-check it.");
+      return;
+    }
+    
+    setIsLoading(true);
+
+    try {
+      const response = await fetch("https://bluq-ai-production.up.railway.app/demo-requests", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          companyName: firm,
+          email: email,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to submit request.");
+      }
+
+      setSubmitted(true);
+      
+    } catch (error) {
+      console.error("Submission Error:", error);
+      alert("Something went wrong while connecting to the server. Please try again or contact us directly.");
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   return (
@@ -261,11 +323,27 @@ export default function Home() {
               <div className="stag" style={{ margin: "0 auto 16px", display: "inline-flex" }}>Book a Demo</div>
               <h2>See BluQ on your actual projects.</h2>
               <p>Book a focused 30-minute session. Bring your own schedule file and we&apos;ll walk through exactly how BluQ would work on your projects from day one.</p>
-              <div className="cta-form">
+              
+              {/* Form wrapper handles the "Enter" key trigger */}
+              <form className="cta-form" onSubmit={submitDemo}>
                 <input className="inp" type="text" placeholder="Firm name" value={firm} onChange={(e) => setFirm(e.target.value)} />
                 <input className="inp" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-                <button className="btn-submit" onClick={submitDemo}>Book My Demo →</button>
-              </div>
+                <button 
+                  type="submit" // Changed to type submit
+                  className="btn-submit" 
+                  disabled={isLoading}
+                  style={{ 
+                    opacity: isLoading ? 0.7 : 1, 
+                    cursor: isLoading ? "not-allowed" : "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center"
+                  }}
+                >
+                  {isLoading ? "Sending..." : "Book My Demo →"}
+                </button>
+              </form>
+              
               <p className="cta-note">Early access · Onboarding support included</p>
             </>
           )}
