@@ -5,6 +5,8 @@ export default function Home() {
   const [firm, setFirm] = useState("");
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+
   useEffect(() => {
     const io = new IntersectionObserver((entries) => {
       entries.forEach((e) => {
@@ -23,18 +25,32 @@ export default function Home() {
     return () => io.disconnect();
   }, []);
 
+  // Lock body scroll when mobile menu is open
+  useEffect(() => {
+    if (menuOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => { document.body.style.overflow = ""; };
+  }, [menuOpen]);
+
   function submitDemo() {
     if (!firm || !email) { alert("Please enter your firm name and work email."); return; }
     setSubmitted(true);
+  }
+
+  function closeMenu() {
+    setMenuOpen(false);
   }
 
   return (
     <>
       {/* NAV */}
       <nav>
-      <a href="#" className="logo" style={{display:"flex", alignItems:"center", height:"100%"}}>
-  <img src="/bluq-logo.png" alt="BluQ" style={{height:"28px", width:"auto"}} />
-</a>
+        <a href="#" className="logo" style={{ display: "flex", alignItems: "center", height: "100%" }}>
+          <img src="/bluq-logo.png" alt="BluQ" style={{ height: "22px", width: "auto" }} />
+        </a>
         <ul className="nav-links">
           <li><a href="#features">Features</a></li>
           <li><a href="#how-it-works">How It Works</a></li>
@@ -44,8 +60,28 @@ export default function Home() {
           <div className="nav-divider" />
           <a href="/login" className="btn-ghost">Log In</a>
           <a href="#demo" className="btn-blue">Book a Demo</a>
+          <button
+            className={`hamburger${menuOpen ? " open" : ""}`}
+            onClick={() => setMenuOpen(!menuOpen)}
+            aria-label="Toggle menu"
+          >
+            <span /><span /><span />
+          </button>
         </div>
       </nav>
+
+      {/* MOBILE MENU */}
+      {menuOpen && (
+        <div className="mobile-menu open">
+          <a href="#features" onClick={closeMenu}>Features</a>
+          <a href="#how-it-works" onClick={closeMenu}>How It Works</a>
+          <a href="#faq" onClick={closeMenu}>FAQ</a>
+          <div className="mobile-ctas">
+            <a href="/login" className="btn-ghost" onClick={closeMenu}>Log In</a>
+            <a href="#demo" className="btn-blue" onClick={closeMenu} style={{ textAlign: "center" }}>Book a Demo</a>
+          </div>
+        </div>
+      )}
 
       {/* HERO */}
       <div className="hero">
@@ -292,7 +328,6 @@ export default function Home() {
         </div>
         <div className="fbot">
           <p>© 2026 BluQ Technologies. All rights reserved.</p>
-    
         </div>
       </footer>
     </>
