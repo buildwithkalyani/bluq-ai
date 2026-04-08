@@ -3,10 +3,12 @@ import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   getDelayRows,
+  getDelayRowsByArea,
   getDelayDeepDive,
   DelayRow,
   DelayDeepDive,
 } from "@/lib/mock-data-extended";
+import { getProjects } from "@/lib/mock-data";
 
 const Card = ({
   children,
@@ -152,33 +154,61 @@ export default function DelayAnalyticsPage() {
   const [groupBy, setGroupBy] = useState(0);
   const [rows, setRows] = useState<DelayRow[]>([]);
   const [deepDive, setDeepDive] = useState<DelayDeepDive | null>(null);
+  const [projectEndDate, setProjectEndDate] = useState<string>("—");
 
   const searchParams = useSearchParams();
   const projectId = Number(searchParams.get("projectId") ?? "0");
   const prevProjectId = useRef(projectId);
 
-  // Fetch rows when projectId changes — auto-select first row
+  // Load project end date
+  useEffect(() => {
+    getProjects().then(projects => {
+      const p = projects.find(p => p.id === projectId);
+      if (p) setProjectEndDate(p.endDate);
+    });
+  }, [projectId]);
+
+  // Fetch rows when projectId or groupBy changes
   useEffect(() => {
     const projectChanged = prevProjectId.current !== projectId;
     prevProjectId.current = projectId;
 
-    getDelayRows(projectId).then((data) => {
+    const fetcher = groupBy === 0 ? getDelayRows : getDelayRowsByArea;
+    fetcher(projectId).then((data) => {
       setRows(data);
-      // Auto-select the first row (or null if no delays for this project)
-      if (projectChanged || selected === null) {
-        setSelected(data.length > 0 ? data[0].id : null);
-      }
+      setSelected(data.length > 0 ? data[0].id : null);
     });
-  }, [projectId]);
+  }, [projectId, groupBy]);
 
   // Fetch deep dive when selection changes
   useEffect(() => {
-    if (selected === null) {
-      setDeepDive(null);
-      return;
-    }
-    getDelayDeepDive(selected).then((d) => setDeepDive(d ?? null));
+    if (selected === null) { setDeepDive(null); return; }
+    getDelayDeepDive(selected).then(d => setDeepDive(d ?? null));
   }, [selected]);
+
+  // Compute total slippage from all delay rows
+  const totalSlipDays = rows.reduce((sum, r) => {
+    const match = r.impact.match(/\+(\d+)/);
+    return sum + (match ? Number(match[1]) : 0);
+  }, 0);
+
+  // Predicted end date = project end + total slip
+  const predictedEndDate = (() => {
+    if (!projectEndDate || projectEndDate === "—") return "—";
+    try {
+      const d = new Date(projectEndDate);
+      d.setDate(d.getDate() + totalSlipDays);
+      return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    } catch { return "—"; }
+  })();
+
+  const plannedEndFormatted = (() => {
+    if (!projectEndDate || projectEndDate === "—") return "—";
+    try {
+      const d = new Date(projectEndDate);
+      return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    } catch { return projectEndDate; }
+  })();
 
   return (
     <div className="p-5 overflow-y-auto h-full">
@@ -223,7 +253,7 @@ export default function DelayAnalyticsPage() {
                 PLANNED
               </div>
               <div className="text-sm font-bold text-[#57606a] font-mono">
-                Apr 30
+                {plannedEndFormatted}
               </div>
             </div>
             <span className="text-base text-[#CF222E]">→</span>
@@ -232,12 +262,12 @@ export default function DelayAnalyticsPage() {
                 PREDICTED
               </div>
               <div className="text-sm font-bold text-[#CF222E] font-mono">
-                May 8
+                {totalSlipDays > 0 ? predictedEndDate : plannedEndFormatted}
               </div>
             </div>
           </div>
           <div className="text-[11px] font-bold text-[#CF222E] font-mono mt-1">
-            +8 days slippage
+            {totalSlipDays > 0 ? `+${totalSlipDays} days slippage` : "On schedule"}
           </div>
         </div>
       </Card>

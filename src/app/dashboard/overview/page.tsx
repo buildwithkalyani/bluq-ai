@@ -198,7 +198,10 @@ export default function OverviewPage() {
 
       {/* Modal Trigger */}
       {isCreateModalOpen && (
-        <CreateProjectModal onClose={() => setIsCreateModalOpen(false)} />
+        <CreateProjectModal
+          onClose={() => setIsCreateModalOpen(false)}
+          onCreate={(project) => setProjects(prev => [...prev, project])}
+        />
       )}
     </div>
   );

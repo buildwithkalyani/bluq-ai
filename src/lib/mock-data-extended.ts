@@ -100,21 +100,40 @@ export interface DelayDeepDive {
   onCriticalPath: boolean;
 }
 
-const DELAY_ROWS: DelayRow[] = [
+const DELAY_ROWS_BY_CONTRACTOR: DelayRow[] = [
   // ── Al Nakheel Tower (projectId: 0) ──────────────────
   { id: 0, projectId: 0, name: "Rajesh Kumar",  count: "2", avg: "3.5 days", critical: "Foundation Works", impact: "+5 days" },
-  { id: 1, projectId: 0, name: "Ahmed Hassan",  count: "1", avg: "7 days",   critical: "Waterproofing",   impact: "+8 days" },
-  { id: 2, projectId: 0, name: "Mohammad Ali",  count: "1", avg: "1 day",    critical: "Formwork",         impact: "None" },
+  { id: 1, projectId: 0, name: "Ahmed Hassan",  count: "1", avg: "7 days",   critical: "Waterproofing",    impact: "+8 days" },
+  { id: 2, projectId: 0, name: "Mohammad Ali",  count: "1", avg: "1 day",    critical: "Formwork",          impact: "None" },
 
-  // ── Marina Heights (projectId: 1) ─────────────────────
-  { id: 3, projectId: 1, name: "Gulf MEP Ltd",  count: "1", avg: "2 days",   critical: "Electrical Rough-In", impact: "+2 days" },
+  // ── Orchid Poorva (projectId: 1) ──────────────────────
+  { id: 3, projectId: 1, name: "Rajesh Kumar",  count: "1", avg: "2 days",   critical: "Plastering 7th Flr", impact: "+2 days" },
 
   // ── Palm Residences (projectId: 2) — no delays ────────
 
   // ── Creek Office Park (projectId: 3) ──────────────────
-  { id: 4, projectId: 3, name: "Rajesh Kumar",  count: "1", avg: "5 days",   critical: "Piling Works",  impact: "+5 days" },
-  { id: 5, projectId: 3, name: "Mohammad Ali",  count: "1", avg: "1 day",    critical: "Scaffolding",   impact: "None" },
+  { id: 4, projectId: 3, name: "Rajesh Kumar",  count: "1", avg: "5 days",   critical: "Piling Works",    impact: "+5 days" },
+  { id: 5, projectId: 3, name: "Mohammad Ali",  count: "1", avg: "1 day",    critical: "Scaffolding",     impact: "None" },
 ];
+
+const DELAY_ROWS_BY_AREA: DelayRow[] = [
+  // ── Al Nakheel Tower (projectId: 0) ──────────────────
+  { id: 10, projectId: 0, name: "Zone A — Ground",   count: "2", avg: "3.5 days", critical: "Foundation Works", impact: "+5 days" },
+  { id: 11, projectId: 0, name: "Zone A — Basement", count: "1", avg: "7 days",   critical: "Waterproofing",    impact: "+8 days" },
+  { id: 12, projectId: 0, name: "Zone A — L1-L2",    count: "1", avg: "1 day",    critical: "Formwork",          impact: "None" },
+
+  // ── Orchid Poorva (projectId: 1) ──────────────────────
+  { id: 13, projectId: 1, name: "7th Floor",          count: "1", avg: "2 days",   critical: "Plastering 7th Flr", impact: "+2 days" },
+
+  // ── Palm Residences (projectId: 2) — no delays ────────
+
+  // ── Creek Office Park (projectId: 3) ──────────────────
+  { id: 14, projectId: 3, name: "Grid C3-C5",         count: "1", avg: "5 days",   critical: "Piling Works",    impact: "+5 days" },
+  { id: 15, projectId: 3, name: "Level 3",             count: "1", avg: "1 day",    critical: "Scaffolding",     impact: "None" },
+];
+
+// Keep legacy export name pointing to contractor rows for backward compat
+const DELAY_ROWS = DELAY_ROWS_BY_CONTRACTOR;
 
 const DELAY_DEEP_DIVES: DelayDeepDive[] = [
   // ── Al Nakheel Tower (projectId: 0) ──────────────────
@@ -229,10 +248,113 @@ const DELAY_DEEP_DIVES: DelayDeepDive[] = [
     ],
     onCriticalPath: false,
   },
+
+  // ── Area-based deep dives (IDs 10–15) ─────────────────
+  {
+    contractorId: 10, projectId: 0,
+    title: "Zone A — Ground Floor Delay",
+    contractor: "Rajesh Kumar",
+    delayDays: "3.5 days avg delay",
+    downstreamImpact: [
+      { task: "Rebar Installation", days: "+5 days" },
+      { task: "Waterproofing", days: "+5 days", cascading: true },
+    ],
+    rootCause: "Zone A ground floor was impacted by cement delivery delays (Mar 12–14) and rain on Mar 15. Two concurrent events stalled the pour and extended curing time by 48 hours.",
+    patternDetected: null,
+    supplierReliability: null,
+    recommendations: [
+      { action: "Maintain cement buffer stock at Zone A", detail: "Keep 3-day inventory on site to prevent supply-chain delays from halting pour schedules." },
+      { action: "Install weather-proof curing covers", detail: "Prevents rain from extending curing cycles on freshly poured slabs." },
+    ],
+    onCriticalPath: true,
+  },
+  {
+    contractorId: 11, projectId: 0,
+    title: "Zone A — Basement Delay",
+    contractor: "Ahmed Hassan",
+    delayDays: "7 days delayed",
+    downstreamImpact: [
+      { task: "External Cladding", days: "+8 days" },
+      { task: "Window Installation", days: "+8 days" },
+    ],
+    rootCause: "Waterproofing membrane delivery for the basement was delayed 5 days due to supplier stockout. First application on Zone A-L1 failed moisture test — full strip and reapply cost 2 additional days.",
+    patternDetected: "Supplier Al Rashid Materials has caused 3 delays in 60 days affecting this zone.",
+    supplierReliability: "Low (38%)",
+    recommendations: [
+      { action: "Dual-source waterproofing for Zone A Basement", detail: "Engage Gulf Coatings LLC as backup supplier for remaining scope." },
+      { action: "Mandatory moisture test before application", detail: "Add a 24hr pre-test checklist to prevent rework failures." },
+    ],
+    onCriticalPath: true,
+  },
+  {
+    contractorId: 12, projectId: 0,
+    title: "Zone A — L1/L2 Delay",
+    contractor: "Mohammad Ali",
+    delayDays: "1 day delayed",
+    downstreamImpact: [],
+    rootCause: "Plywood delivery for formwork arrived in the afternoon instead of morning on Mar 14. Crew completed a half-shift and resumed normally the following day.",
+    patternDetected: null,
+    supplierReliability: null,
+    recommendations: [
+      { action: "No action required", detail: "Delay is within float and has no impact on Zone A-L1/L2 deadlines." },
+    ],
+    onCriticalPath: false,
+  },
+  {
+    contractorId: 13, projectId: 1,
+    title: "7th Floor — Plastering Delay",
+    contractor: "Rajesh Kumar",
+    delayDays: "2 days delayed",
+    downstreamImpact: [
+      { task: "Painting 7th Flr", days: "+2 days" },
+    ],
+    rootCause: "Cement shortage on 7th floor on Mar 16 — only 250 SqFt completed against 500 SqFt target. Rajesh Kumar reported the issue via WhatsApp at 2:15 PM.",
+    patternDetected: null,
+    supplierReliability: null,
+    recommendations: [
+      { action: "Pre-stage floor materials 1 day ahead", detail: "Deliver plastering materials to each floor the evening before to avoid morning shortages." },
+    ],
+    onCriticalPath: false,
+  },
+  {
+    contractorId: 14, projectId: 3,
+    title: "Grid C3-C5 — Piling Delay",
+    contractor: "Rajesh Kumar",
+    delayDays: "5 days delayed",
+    downstreamImpact: [
+      { task: "MEP Conduit", days: "+5 days" },
+      { task: "Scaffolding", days: "+3 days", cascading: true },
+    ],
+    rootCause: "Piling rig breakdown on Mar 5 at Grid C3 (2 days). Rock layer at Grid C4 required specialist drill bits sourced from Abu Dhabi — 2-day lead time plus 1 day crew retraining.",
+    patternDetected: "Equipment failure on 2 of last 3 Rajesh Kumar projects. Rig maintenance logs show overdue servicing.",
+    supplierReliability: null,
+    recommendations: [
+      { action: "Enforce rig maintenance schedule", detail: "Require maintenance logs before mobilisation on Grid C5 onwards." },
+      { action: "Pre-survey Grids C6-C9", detail: "Geotechnical survey to identify rock layers early and pre-order drill bits." },
+    ],
+    onCriticalPath: true,
+  },
+  {
+    contractorId: 15, projectId: 3,
+    title: "Level 3 — Scaffolding Delay",
+    contractor: "Mohammad Ali",
+    delayDays: "1 day delayed",
+    downstreamImpact: [],
+    rootCause: "Scaffold tube delivery on Mar 12 was 15% short. Crew erected available material and completed the rest the following day.",
+    patternDetected: null,
+    supplierReliability: null,
+    recommendations: [
+      { action: "No action required", detail: "Delay is within float. Continue monitoring Level 3 scaffold completion." },
+    ],
+    onCriticalPath: false,
+  },
 ];
 
 export const getDelayRows = (projectId: number): Promise<DelayRow[]> =>
-  Promise.resolve(DELAY_ROWS.filter((r) => r.projectId === projectId));
+  Promise.resolve(DELAY_ROWS_BY_CONTRACTOR.filter(r => r.projectId === projectId));
+
+export const getDelayRowsByArea = (projectId: number): Promise<DelayRow[]> =>
+  Promise.resolve(DELAY_ROWS_BY_AREA.filter(r => r.projectId === projectId));
 
 export const getDelayDeepDive = (contractorId: number): Promise<DelayDeepDive | undefined> =>
   Promise.resolve(DELAY_DEEP_DIVES.find((d) => d.contractorId === contractorId));
@@ -277,8 +399,9 @@ export interface Project {
 
 const PROJECTS: Project[] = [
   { id: 0, name: "Al Nakheel Tower" },
-  { id: 1, name: "Orchid Proova" },
-  { id: 2, name: "Oasis Residency" },
+  { id: 1, name: "Orchid Poorva" },
+  { id: 2, name: "Palm Residences" },
+  { id: 3, name: "Creek Office Park" },
 ];
 
 export const getProjects = (): Promise<Project[]> => Promise.resolve(PROJECTS);
@@ -305,26 +428,32 @@ export interface WhatsAppMessage {
 const WHATSAPP_CONVOS_BY_PROJECT: Record<number, WhatsAppConvo[]> = {
   // Al Nakheel Tower
   0: [
-    { id: 10, name: "Rajesh Kumar", type: "EOD",     time: "6:14 PM",  status: "✅ Complete", task: "Foundation Works — 75%",                photos: 3, color: "#1A7F37" },
-    { id: 11, name: "Ahmed Hassan", type: "Warning", time: "11:43 AM", status: "⚠️ Flagged",  task: "Rebar Installation — Labor Issue (High)", photos: 0, color: "#CF222E" },
-    { id: 12, name: "Ahmed Hassan", type: "EOD",     time: "6:22 PM",  status: "✅ Complete", task: "Rebar Installation — 60%",              photos: 2, color: "#1A7F37" },
-    { id: 13, name: "Mohammad Ali", type: "EOD",     time: "—",        status: "⏳ Pending",  task: "Reminder sent at 6:30 PM",              photos: 0, color: "#9A6700" },
+    { id: 10, name: "Rajesh Kumar", type: "EOD",     time: "6:14 PM",  status: "✅ Complete", task: "Foundation Works — 75%",                  photos: 3, color: "#1A7F37" },
+    { id: 11, name: "Ahmed Hassan", type: "Warning", time: "11:43 AM", status: "⚠️ Flagged",  task: "Rebar Installation — Labor Issue (High)",  photos: 0, color: "#CF222E" },
+    { id: 12, name: "Ahmed Hassan", type: "EOD",     time: "6:22 PM",  status: "✅ Complete",  task: "Rebar Installation — 60%",                photos: 2, color: "#1A7F37" },
+    { id: 13, name: "Mohammad Ali", type: "EOD",     time: "—",        status: "⏳ Pending",   task: "Reminder sent at 6:30 PM",                photos: 0, color: "#9A6700" },
   ],
 
-  // Orchid Proova — includes Rajesh's 3-phase bot flow
+  // Orchid Poorva — Rajesh Kumar 3-phase bot flow (the reference flow)
   1: [
-    { id: 20, name: "Rajesh Kumar", type: "Warning", time: "5:30 PM", status: "Target Missed", task: "Plastering 7th Flr",      photos: 2, color: "#CF222E" },
+    { id: 20, name: "Rajesh Kumar", type: "Warning", time: "5:30 PM", status: "Target Missed", task: "Plastering 7th Flr",       photos: 2, color: "#CF222E" },
     { id: 21, name: "Suresh Patel", type: "EOD",     time: "6:00 PM", status: "✅ Complete",   task: "Shuttering 4th Flr — 80%", photos: 2, color: "#1A7F37" },
     { id: 22, name: "Vikram Singh", type: "EOD",     time: "5:45 PM", status: "✅ Complete",   task: "Painting Block-B — 100%",  photos: 5, color: "#1A7F37" },
     { id: 23, name: "Anil Sharma",  type: "Warning", time: "3:15 PM", status: "Pipe Leak",     task: "Plumbing 2nd Flr",         photos: 1, color: "#CF222E" },
     { id: 24, name: "Deepak Yadav", type: "EOD",     time: "6:20 PM", status: "✅ Complete",   task: "Bar Bending Slab-6 — 55%", photos: 0, color: "#1A7F37" },
   ],
 
-  // Oasis Residency
+  // Palm Residences
   2: [
-    { id: 30, name: "Ramesh Gupta",  type: "EOD",     time: "6:05 PM", status: "✅ Complete",  task: "Foundation Pile Work — 40%", photos: 3, color: "#1A7F37" },
-    { id: 31, name: "Sanjay Mishra", type: "Warning", time: "1:30 PM", status: "Rain Delay",   task: "Excavation Zone-C",          photos: 0, color: "#CF222E" },
-    { id: 32, name: "Kiran Joshi",   type: "EOD",     time: "5:50 PM", status: "✅ Complete",  task: "RCC Column Pour — 100%",     photos: 4, color: "#1A7F37" },
+    { id: 30, name: "Gulf MEP Ltd",  type: "EOD",     time: "6:05 PM", status: "✅ Complete",  task: "Plumbing Rough-In — 90%",   photos: 3, color: "#1A7F37" },
+    { id: 31, name: "Gulf MEP Ltd",  type: "EOD",     time: "5:50 PM", status: "✅ Complete",  task: "Tile Work — 50%",            photos: 2, color: "#1A7F37" },
+  ],
+
+  // Creek Office Park
+  3: [
+    { id: 40, name: "Rajesh Kumar",  type: "Warning", time: "2:45 PM", status: "⚠️ Delayed",  task: "Piling Works — Rig Breakdown", photos: 1, color: "#CF222E" },
+    { id: 41, name: "Ahmed Hassan",  type: "Warning", time: "10:00 AM",status: "⚠️ Blocked",   task: "MEP Conduit — Permit Pending", photos: 0, color: "#CF222E" },
+    { id: 42, name: "Mohammad Ali",  type: "EOD",     time: "6:10 PM", status: "✅ Complete",  task: "Scaffolding — 10%",            photos: 0, color: "#1A7F37" },
   ],
 };
 
@@ -374,15 +503,15 @@ const RAJESH_3PHASE_FLOW: WhatsAppMessage[] = [
   },
 ];
 
-// Standard EOD flow (used as default for convos without a custom thread)
+// Standard EOD flow
 const STANDARD_EOD_FLOW: WhatsAppMessage[] = [
-  { bot: "Hi! Time for your daily update for Al Nakheel Tower. Which task did you work on today?\n1. Foundation Works\n2. Rebar Installation", reply: "1" },
-  { bot: "Got it — Foundation Works. What % is complete now?", reply: "75" },
+  { bot: "Hi! 👋 Time for your daily EOD update.\nWhich task did you work on today?", reply: "1" },
+  { bot: "Got it. What % is complete now?", reply: "75" },
   { bot: "How many workers were on site today?", reply: "12" },
-  { bot: "Any materials used or delivered today? Reply or send SKIP", reply: "Cement: 20 bags delivered" },
-  { bot: "Any issues or blockers? Reply or send SKIP", reply: "Cement delivery delayed by supplier, expected tomorrow" },
+  { bot: "Any materials used or delivered today? Reply or send SKIP", reply: "SKIP" },
+  { bot: "Any issues or blockers? Reply or send SKIP", reply: "SKIP" },
   { bot: "Please share site photos. Send photos or reply SKIP", reply: "📸 3 photos attached" },
-  { bot: "✅ Update saved! Summary:\nFoundation Works — 75% — 12 workers\nHave a good evening!", reply: "" },
+  { bot: "✅ Update saved! Have a good evening!", reply: "" },
 ];
 
 // Warning flow — labor issue
@@ -405,7 +534,7 @@ const WHATSAPP_MESSAGES_BY_CONVO: Record<number, WhatsAppMessage[]> = {
   12: STANDARD_EOD_FLOW,
   13: PENDING_REMINDER_FLOW,
 
-  // Orchid Proova
+  // Orchid Poorva — Rajesh Kumar 3-phase flow is the reference
   20: RAJESH_3PHASE_FLOW,
   21: STANDARD_EOD_FLOW,
   22: STANDARD_EOD_FLOW,
@@ -414,13 +543,20 @@ const WHATSAPP_MESSAGES_BY_CONVO: Record<number, WhatsAppMessage[]> = {
   ],
   24: STANDARD_EOD_FLOW,
 
-  // Oasis Residency
+  // Palm Residences
   30: STANDARD_EOD_FLOW,
-  31: [
-    { bot: "⚠️ *Weather Alert: Rain Delay*\n\nTask: Excavation Zone-C\nHeavy rain forecast for today. Site supervisor Sanjay Mishra has paused excavation.\n\nExpected resume: Tomorrow 7:00 AM (weather permitting).\n\n[Button: ✅ Acknowledged]\n[Button: 📋 Reassign Crew]", reply: "✅ Acknowledged" },
-    { bot: "Noted. Crew will stand down for today. We'll send the resume notification tomorrow morning.", reply: "" },
+  31: STANDARD_EOD_FLOW,
+
+  // Creek Office Park
+  40: [
+    { bot: "⚠️ *Auto-Alert: Equipment Breakdown*\n\nTask: Piling Works — Grid C3-C5\nRajesh Kumar reported that the piling rig has broken down.\n\nEstimated downtime: 2 days.\n\nEscalating to PMC for recovery planning.\n\n[Button: ✅ Acknowledged]\n[Button: 📋 View Impact]", reply: "✅ Acknowledged" },
+    { bot: "Noted. Procurement has been alerted to source a backup rig. You will receive an update within 4 hours.", reply: "" },
   ],
-  32: STANDARD_EOD_FLOW,
+  41: [
+    { bot: "⚠️ *Auto-Alert: Permit Pending*\n\nTask: MEP Conduit — Zone A\nMunicipality permit for underground conduit has not been approved.\n\nWork cannot begin until permit is granted.\n\nPMC has been notified.\n\n[Button: ✅ Acknowledged]", reply: "✅ Acknowledged" },
+    { bot: "Understood. We will follow up with the municipality office and update you by EOD.", reply: "" },
+  ],
+  42: STANDARD_EOD_FLOW,
 };
 
 // ── Exported fetchers ────────────────────────────────────────

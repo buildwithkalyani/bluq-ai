@@ -5,18 +5,35 @@ import { useRouter } from "next/navigation";
 import {
   parseCSVPreview,
   BLUQ_FIELDS,
-  getScheduleTasks,
-  ScheduleTask,
 } from "@/lib/mock-data";
 import { Card, SectionTitle, Btn } from "@/components/ui/bluq-ui";
 import { useProjectSync } from "@/lib/use-project-sync";
 
 type Step = "upload" | "map" | "preview";
 
+type BaselineVersion = {
+  version: number;
+  fileName: string;
+  uploadedAt: string;
+  taskCount: number;
+  note: string;
+};
+
+const MOCK_HISTORY: Record<number, BaselineVersion[]> = {
+  0: [
+    { version: 1, fileName: "Al_Nakheel_Baseline_v1.csv", uploadedAt: "2025-02-14 09:22", taskCount: 12, note: "Initial baseline — contract award" },
+  ],
+  1: [
+    { version: 2, fileName: "Marina_Heights_Rev2.csv",     uploadedAt: "2025-03-01 11:05", taskCount: 9,  note: "Revised after design change" },
+    { version: 1, fileName: "Marina_Heights_Baseline.csv", uploadedAt: "2025-01-20 14:30", taskCount: 8,  note: "Initial baseline" },
+  ],
+  2: [],
+  3: [],
+};
+
 function ImportCSVContent() {
   const router = useRouter();
-  const { projectId, currentProjectName, projects, loading } =
-    useProjectSync();
+  const { projectId, currentProjectName, projects, loading } = useProjectSync();
 
   const [step, setStep] = useState<Step>("upload");
   const [fileName, setFileName] = useState("");
@@ -25,22 +42,23 @@ function ImportCSVContent() {
   const [rows, setRows] = useState<string[][]>([]);
   const [mappings, setMappings] = useState<Record<string, string>>({});
   const [importing, setImporting] = useState(false);
-  const [existingTasks, setExistingTasks] = useState<ScheduleTask[]>([]);
-  const [checkingTasks, setCheckingTasks] = useState(true);
+  const [uploadHistory, setUploadHistory] = useState<BaselineVersion[]>([]);
 
   const currentProject = projects.find((p) => p.id === projectId);
 
-  // Check if project already has a schedule
   useEffect(() => {
     if (projectId == null) return;
-    setCheckingTasks(true);
-    getScheduleTasks(projectId).then((tasks) => {
-      setExistingTasks(tasks);
-      setCheckingTasks(false);
-    });
+    setUploadHistory(MOCK_HISTORY[projectId] ?? []);
+    // Reset wizard when project changes
+    setStep("upload");
+    setHeaders([]);
+    setRows([]);
+    setMappings({});
+    setFileName("");
   }, [projectId]);
 
-  const hasExistingSchedule = existingTasks.length > 0;
+  const isRebaseline = uploadHistory.length > 0;
+  const nextVersion = isRebaseline ? uploadHistory[0].version + 1 : 1;
 
   const handleFile = useCallback(async (file: File) => {
     setFileName(file.name);
@@ -48,7 +66,6 @@ function ImportCSVContent() {
     setHeaders(mock.headers);
     setRows(mock.rows);
 
-    // Auto-map obvious columns
     const autoMap: Record<string, string> = {};
     mock.headers.forEach((h) => {
       const lower = h.toLowerCase();
@@ -78,10 +95,7 @@ function ImportCSVContent() {
       e.preventDefault();
       setDragging(false);
       const file = e.dataTransfer.files[0];
-      if (
-        file &&
-        (file.name.endsWith(".csv") || file.name.endsWith(".xlsx"))
-      ) {
+      if (file && (file.name.endsWith(".csv") || file.name.endsWith(".xlsx"))) {
         handleFile(file);
       }
     },
@@ -90,28 +104,30 @@ function ImportCSVContent() {
 
   const handleImport = () => {
     setImporting(true);
-    // TODO: Replace with actual import API call
-    // await fetch('/api/schedule/import', {
-    //   method: 'POST',
-    //   body: JSON.stringify({ projectId, mappings, rows, type: 'baseline' })
-    // })
     setTimeout(() => {
       setImporting(false);
       alert(
-        `Import complete! ${rows.length} tasks added to ${currentProjectName} as baseline schedule.`
+        `${isRebaseline ? "Re-baseline" : "Import"} complete! ${rows.length} tasks added to ${currentProjectName} as Baseline v${nextVersion}.`
       );
+      // Prepend new version to history
+      const newEntry: BaselineVersion = {
+        version: nextVersion,
+        fileName,
+        uploadedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
+        taskCount: rows.length,
+        note: isRebaseline ? `Re-baseline v${nextVersion}` : "Initial baseline",
+      };
+      setUploadHistory([newEntry, ...uploadHistory]);
       setStep("upload");
       setHeaders([]);
       setRows([]);
       setMappings({});
       setFileName("");
-      // Refresh existing tasks check
-      getScheduleTasks(projectId).then(setExistingTasks);
     }, 1500);
   };
 
-  // ─── LOADING STATE ──────────────────────────────────────────
-  if (loading || checkingTasks) {
+  // ─── LOADING ────────────────────────────────────────────────
+  if (loading) {
     return (
       <div className="p-5">
         <div className="text-sm text-[#8C959F]">Loading...</div>
@@ -119,7 +135,7 @@ function ImportCSVContent() {
     );
   }
 
-  // ─── NO PROJECT SELECTED ───────────────────────────────────
+  // ─── NO PROJECT ─────────────────────────────────────────────
   if (!currentProject) {
     return (
       <div className="p-5">
@@ -127,9 +143,7 @@ function ImportCSVContent() {
         <Card className="mt-4">
           <div className="text-center py-12">
             <div className="text-4xl mb-3">📋</div>
-            <div className="text-sm font-semibold text-[#24292f] mb-1">
-              No project selected
-            </div>
+            <div className="text-sm font-semibold text-[#24292f] mb-1">No project selected</div>
             <div className="text-xs text-[#8C959F] mb-4">
               Select a project from the dropdown above, or create a new one.
             </div>
@@ -139,28 +153,20 @@ function ImportCSVContent() {
     );
   }
 
-  // ─── ALREADY HAS SCHEDULE ──────────────────────────────────
-  if (hasExistingSchedule) {
-    // Group tasks by status for the summary
-    const statusCounts = existingTasks.reduce(
-      (acc, t) => {
-        acc[t.status] = (acc[t.status] || 0) + 1;
-        return acc;
-      },
-      {} as Record<string, number>
-    );
-
-    const completedTasks = existingTasks.filter(
-      (t) => t.status === "completed"
-    ).length;
-    const avgProgress = Math.round(
-      existingTasks.reduce((sum, t) => sum + t.pct, 0) / existingTasks.length
-    );
-
-    return (
-      <div className="p-5 overflow-y-auto h-full">
-        <div className="flex items-center justify-between mb-4">
-          <SectionTitle>Import Schedule</SectionTitle>
+  // ─── MAIN PAGE ──────────────────────────────────────────────
+  return (
+    <div className="p-5 overflow-y-auto h-full space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <SectionTitle>
+          {isRebaseline ? `Re-baseline Schedule` : "Import Schedule"}
+        </SectionTitle>
+        <div className="flex items-center gap-2">
+          {isRebaseline && (
+            <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-[#fff8c5] text-[#9A6700]">
+              v{nextVersion} next
+            </span>
+          )}
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#ddf4ff] rounded-md">
             <span className="w-2 h-2 rounded-full bg-[#3A4EA2]" />
             <span className="text-[12px] font-semibold text-[#3A4EA2]">
@@ -168,132 +174,61 @@ function ImportCSVContent() {
             </span>
           </div>
         </div>
-
-        <Card>
-          <div className="text-center py-10">
-            {/* Green check icon */}
-            <div className="w-12 h-12 rounded-full bg-[#dafbe1] flex items-center justify-center mx-auto mb-4">
-              <span className="text-[#1A7F37] text-xl font-bold">✓</span>
-            </div>
-
-            <div className="text-sm font-bold text-[#24292f] mb-1">
-              Baseline schedule already imported
-            </div>
-            <div className="text-xs text-[#8C959F] mb-6">
-              {existingTasks.length} tasks · {avgProgress}% overall progress ·{" "}
-              {completedTasks} completed
-            </div>
-
-            {/* Task summary pills */}
-            <div className="flex flex-wrap justify-center gap-2 mb-6">
-              {statusCounts.inProgress && (
-                <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#ddf4ff] text-[#3A4EA2]">
-                  {statusCounts.inProgress} In Progress
-                </span>
-              )}
-              {statusCounts.runningLate && (
-                <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#fff8c5] text-[#9A6700]">
-                  {statusCounts.runningLate} Running Late
-                </span>
-              )}
-              {statusCounts.delayed && (
-                <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#ffebe9] text-[#CF222E]">
-                  {statusCounts.delayed} Delayed
-                </span>
-              )}
-              {statusCounts.notStarted && (
-                <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#f0f1f3] text-[#8C959F]">
-                  {statusCounts.notStarted} Not Started
-                </span>
-              )}
-              {statusCounts.completed && (
-                <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#dafbe1] text-[#1A7F37]">
-                  {statusCounts.completed} Completed
-                </span>
-              )}
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex items-center justify-center gap-3">
-              <Btn
-                onClick={() =>
-                  router.push(
-                    `/dashboard/schedule/gantt?projectId=${projectId}`
-                  )
-                }
-              >
-                View Gantt Chart →
-              </Btn>
-              <Btn
-                onClick={() =>
-                  router.push(
-                    `/dashboard/schedule/list-view?projectId=${projectId}`
-                  )
-                }
-              >
-                View List →
-              </Btn>
-            </div>
-          </div>
-        </Card>
-
-        {/* Info card about actuals */}
-        <div className="mt-4 p-4 bg-[#ddf4ff] border border-[#54aeff44] rounded-lg flex items-start gap-3">
-          <span className="text-sm mt-0.5">💬</span>
-          <div>
-            <div className="text-[12px] font-bold text-[#3A4EA2] mb-0.5">
-              Actuals come from the field
-            </div>
-            <div className="text-[12px] text-[#3A4EA2] leading-relaxed">
-              Progress updates are collected automatically via WhatsApp from
-              your contractors. View them in the{" "}
-              <span
-                className="underline cursor-pointer font-semibold"
-                onClick={() =>
-                  router.push(
-                    `/dashboard/whatsapp-feed?projectId=${projectId}`
-                  )
-                }
-              >
-                WhatsApp Feed
-              </span>
-              .
-            </div>
-          </div>
-        </div>
-
-        {/* Re-baseline hint for V2 */}
-        <div className="mt-3 p-3 bg-[#f6f8fa] border border-[#D0D7DE] rounded-lg flex items-start gap-3">
-          <span className="text-sm mt-0.5">📌</span>
-          <div className="text-[12px] text-[#57606a] leading-relaxed">
-            Need to update the baseline? Baseline versioning is coming soon —
-            you&apos;ll be able to import revised schedules and compare across
-            versions.
-          </div>
-        </div>
       </div>
-    );
-  }
 
-  // ─── NO SCHEDULE YET — SHOW IMPORT WIZARD ──────────────────
-  return (
-    <div className="p-5 overflow-y-auto h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <SectionTitle>Import Schedule</SectionTitle>
-        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#ddf4ff] rounded-md">
-          <span className="w-2 h-2 rounded-full bg-[#3A4EA2]" />
-          <span className="text-[12px] font-semibold text-[#3A4EA2]">
-            Importing into: {currentProjectName}
-          </span>
+      {/* Baseline history log — shown only when previous uploads exist */}
+      {uploadHistory.length > 0 && (
+        <div className="bg-white border border-[#D0D7DE] rounded-lg overflow-hidden">
+          <div className="px-4 py-2.5 bg-[#f6f8fa] border-b border-[#D0D7DE] flex items-center justify-between">
+            <span className="text-[12px] font-bold text-[#24292f]">
+              Baseline History
+            </span>
+            <span className="text-[11px] text-[#8C959F]">
+              {uploadHistory.length} version{uploadHistory.length > 1 ? "s" : ""}
+            </span>
+          </div>
+          <div className="divide-y divide-[#f0f1f3]">
+            {uploadHistory.map((v) => (
+              <div key={v.version} className="px-4 py-3 flex items-center gap-3">
+                <div className="w-7 h-7 rounded-full bg-[#ddf4ff] flex items-center justify-center shrink-0">
+                  <span className="text-[11px] font-bold text-[#3A4EA2]">v{v.version}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[12px] font-semibold text-[#24292f] truncate">
+                    {v.fileName}
+                  </div>
+                  <div className="text-[11px] text-[#8C959F]">{v.note}</div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-[11px] font-mono text-[#57606a]">{v.taskCount} tasks</div>
+                  <div className="text-[10px] text-[#8C959F] font-mono">{v.uploadedAt}</div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => router.push(`/dashboard/schedule/gantt?projectId=${projectId}`)}
+                    className="text-[11px] text-[#3A4EA2] hover:underline font-semibold"
+                  >
+                    View Gantt
+                  </button>
+                  <span className="text-[#D0D7DE]">·</span>
+                  <button
+                    onClick={() => router.push(`/dashboard/schedule/baseline?projectId=${projectId}`)}
+                    className="text-[11px] text-[#3A4EA2] hover:underline font-semibold"
+                  >
+                    Compare
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Step indicator */}
-      <div className="flex items-center gap-2 mb-6">
+      <div className="flex items-center gap-2">
         {[
-          { key: "upload", label: "1. Upload File" },
-          { key: "map", label: "2. Map Columns" },
+          { key: "upload", label: `1. ${isRebaseline ? "Upload New" : "Upload File"}` },
+          { key: "map",    label: "2. Map Columns" },
           { key: "preview", label: "3. Preview & Import" },
         ].map((s, i) => (
           <div key={s.key} className="flex items-center gap-2">
@@ -302,8 +237,7 @@ function ImportCSVContent() {
                 step === s.key
                   ? "bg-[#3A4EA2] text-white"
                   : headers.length > 0 &&
-                      (s.key === "upload" ||
-                        (s.key === "map" && step === "preview"))
+                      (s.key === "upload" || (s.key === "map" && step === "preview"))
                     ? "bg-[#dafbe1] text-[#1A7F37]"
                     : "bg-[#f0f1f3] text-[#8C959F]"
               }`}
@@ -319,31 +253,28 @@ function ImportCSVContent() {
       {step === "upload" && (
         <Card>
           <div
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragging(true);
-            }}
+            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
             onDragLeave={() => setDragging(false)}
             onDrop={handleDrop}
             className={`border-2 border-dashed rounded-lg p-16 text-center cursor-pointer transition-colors ${
-              dragging
-                ? "border-[#3A4EA2] bg-[#ddf4ff]"
-                : "border-[#D0D7DE] hover:border-[#8C959F]"
+              dragging ? "border-[#3A4EA2] bg-[#ddf4ff]" : "border-[#D0D7DE] hover:border-[#8C959F]"
             }`}
           >
-            <div className="text-5xl mb-3">📄</div>
+            <div className="text-5xl mb-3">{isRebaseline ? "🔄" : "📄"}</div>
             <div className="text-sm font-semibold text-[#24292f] mb-1">
-              Drag & drop your schedule file here
+              {isRebaseline
+                ? `Upload Baseline v${nextVersion} for ${currentProjectName}`
+                : "Drag & drop your schedule file here"}
             </div>
             <div className="text-xs text-[#8C959F] mb-1">
-              This will become the baseline schedule for{" "}
-              <span className="font-semibold text-[#24292f]">
-                {currentProjectName}
-              </span>
+              {isRebaseline
+                ? "This will replace the active baseline — previous versions are kept in history above"
+                : `This will become the baseline schedule for `}
+              {!isRebaseline && (
+                <span className="font-semibold text-[#24292f]">{currentProjectName}</span>
+              )}
             </div>
-            <div className="text-xs text-[#8C959F] mb-4">
-              Supports .csv and .xlsx files
-            </div>
+            <div className="text-xs text-[#8C959F] mb-4">Supports .csv and .xlsx files</div>
             <label>
               <input
                 type="file"
@@ -361,9 +292,7 @@ function ImportCSVContent() {
           </div>
 
           <div className="mt-4 p-3 bg-[#f6f8fa] rounded-md">
-            <div className="text-[11px] font-bold text-[#57606a] mb-2">
-              EXPECTED COLUMNS
-            </div>
+            <div className="text-[11px] font-bold text-[#57606a] mb-2">EXPECTED COLUMNS</div>
             <div className="flex flex-wrap gap-1.5">
               {BLUQ_FIELDS.filter((f) => f !== "— Skip Column —").map((f) => (
                 <span
@@ -383,45 +312,30 @@ function ImportCSVContent() {
         <Card>
           <div className="flex items-center justify-between mb-4">
             <div>
-              <div className="text-sm font-bold text-[#24292f]">
-                Map Your Columns
-              </div>
+              <div className="text-sm font-bold text-[#24292f]">Map Your Columns</div>
               <div className="text-xs text-[#8C959F] mt-0.5">
                 📎 {fileName} — {rows.length} rows detected
               </div>
             </div>
             <div className="flex gap-2">
-              <Btn small onClick={() => setStep("upload")}>
-                ← Back
-              </Btn>
-              <Btn small primary onClick={() => setStep("preview")}>
-                Next: Preview →
-              </Btn>
+              <Btn small onClick={() => setStep("upload")}>← Back</Btn>
+              <Btn small primary onClick={() => setStep("preview")}>Next: Preview →</Btn>
             </div>
           </div>
 
           <div className="space-y-2">
             {headers.map((h) => (
-              <div
-                key={h}
-                className="flex items-center gap-3 py-2 px-3 rounded-md bg-[#f6f8fa]"
-              >
-                <div className="w-48 text-xs font-semibold text-[#24292f] font-mono">
-                  {h}
-                </div>
+              <div key={h} className="flex items-center gap-3 py-2 px-3 rounded-md bg-[#f6f8fa]">
+                <div className="w-48 text-xs font-semibold text-[#24292f] font-mono">{h}</div>
                 <span className="text-[#8C959F] text-sm">→</span>
                 <select
                   value={mappings[h] || ""}
-                  onChange={(e) =>
-                    setMappings({ ...mappings, [h]: e.target.value })
-                  }
+                  onChange={(e) => setMappings({ ...mappings, [h]: e.target.value })}
                   className="flex-1 border border-[#D0D7DE] rounded-md px-3 py-1.5 text-xs bg-white text-[#24292f] focus:outline-none focus:ring-2 focus:ring-[#3A4EA2]"
                 >
                   <option value="">Select field...</option>
                   {BLUQ_FIELDS.map((f) => (
-                    <option key={f} value={f}>
-                      {f}
-                    </option>
+                    <option key={f} value={f}>{f}</option>
                   ))}
                 </select>
                 {mappings[h] && mappings[h] !== "— Skip Column —" && (
@@ -431,20 +345,14 @@ function ImportCSVContent() {
             ))}
           </div>
 
-          {/* Sample data preview */}
           <div className="mt-4 border-t border-[#e1e4e8] pt-4">
-            <div className="text-[11px] font-bold text-[#57606a] mb-2">
-              SAMPLE DATA (first 2 rows)
-            </div>
+            <div className="text-[11px] font-bold text-[#57606a] mb-2">SAMPLE DATA (first 2 rows)</div>
             <div className="overflow-x-auto">
               <table className="w-full text-[11px] border-collapse">
                 <thead>
                   <tr className="bg-[#f6f8fa]">
                     {headers.map((h) => (
-                      <th
-                        key={h}
-                        className="px-2 py-1.5 text-left font-bold text-[#57606a] border-b border-[#e1e4e8] whitespace-nowrap"
-                      >
+                      <th key={h} className="px-2 py-1.5 text-left font-bold text-[#57606a] border-b border-[#e1e4e8] whitespace-nowrap">
                         {h}
                       </th>
                     ))}
@@ -454,12 +362,7 @@ function ImportCSVContent() {
                   {rows.slice(0, 2).map((row, ri) => (
                     <tr key={ri} className="border-b border-[#f0f1f3]">
                       {row.map((cell, ci) => (
-                        <td
-                          key={ci}
-                          className="px-2 py-1.5 text-[#24292f] whitespace-nowrap font-mono"
-                        >
-                          {cell}
-                        </td>
+                        <td key={ci} className="px-2 py-1.5 text-[#24292f] whitespace-nowrap font-mono">{cell}</td>
                       ))}
                     </tr>
                   ))}
@@ -475,39 +378,30 @@ function ImportCSVContent() {
         <Card>
           <div className="flex items-center justify-between mb-4">
             <div>
-              <div className="text-sm font-bold text-[#24292f]">
-                Review & Import
-              </div>
+              <div className="text-sm font-bold text-[#24292f]">Review & Import</div>
               <div className="text-xs text-[#8C959F] mt-0.5">
-                {rows.length} tasks will be imported as baseline into{" "}
+                {rows.length} tasks will be imported as{" "}
                 <span className="font-semibold text-[#24292f]">
-                  {currentProjectName}
-                </span>
+                  Baseline v{nextVersion}
+                </span>{" "}
+                into <span className="font-semibold text-[#24292f]">{currentProjectName}</span>
               </div>
             </div>
             <div className="flex gap-2">
-              <Btn small onClick={() => setStep("map")}>
-                ← Back
-              </Btn>
+              <Btn small onClick={() => setStep("map")}>← Back</Btn>
               <Btn small primary onClick={handleImport} disabled={importing}>
-                {importing ? "Importing..." : "✓ Import as Baseline"}
+                {importing ? "Importing..." : `✓ ${isRebaseline ? `Set as Baseline v${nextVersion}` : "Import as Baseline"}`}
               </Btn>
             </div>
           </div>
 
-          {/* Mapped preview table */}
           <div className="overflow-x-auto">
             <table className="w-full text-[11px] border-collapse">
               <thead>
                 <tr className="bg-[#f6f8fa]">
                   {headers.map((h) => (
-                    <th
-                      key={h}
-                      className="px-2 py-1.5 text-left border-b border-[#e1e4e8] whitespace-nowrap"
-                    >
-                      <div className="font-bold text-[#3A4EA2]">
-                        {mappings[h] || "—"}
-                      </div>
+                    <th key={h} className="px-2 py-1.5 text-left border-b border-[#e1e4e8] whitespace-nowrap">
+                      <div className="font-bold text-[#3A4EA2]">{mappings[h] || "—"}</div>
                       <div className="font-normal text-[#8C959F]">{h}</div>
                     </th>
                   ))}
@@ -515,17 +409,9 @@ function ImportCSVContent() {
               </thead>
               <tbody>
                 {rows.map((row, ri) => (
-                  <tr
-                    key={ri}
-                    className="border-b border-[#f0f1f3] hover:bg-[#f6f8fa]"
-                  >
+                  <tr key={ri} className="border-b border-[#f0f1f3] hover:bg-[#f6f8fa]">
                     {row.map((cell, ci) => (
-                      <td
-                        key={ci}
-                        className="px-2 py-1.5 text-[#24292f] whitespace-nowrap font-mono"
-                      >
-                        {cell}
-                      </td>
+                      <td key={ci} className="px-2 py-1.5 text-[#24292f] whitespace-nowrap font-mono">{cell}</td>
                     ))}
                   </tr>
                 ))}
@@ -533,32 +419,40 @@ function ImportCSVContent() {
             </table>
           </div>
 
-          {/* Summary */}
           <div className="mt-4 p-3 bg-[#dafbe1] rounded-md flex items-center gap-2">
             <span className="text-[#1A7F37] font-bold text-sm">✓</span>
             <span className="text-xs text-[#1A7F37] font-semibold">
-              {rows.length} tasks ready as baseline for {currentProjectName} •{" "}
-              {
-                Object.values(mappings).filter(
-                  (v) => v && v !== "— Skip Column —"
-                ).length
-              }{" "}
-              columns mapped
+              {rows.length} tasks ready as Baseline v{nextVersion} for {currentProjectName} •{" "}
+              {Object.values(mappings).filter((v) => v && v !== "— Skip Column —").length} columns mapped
             </span>
           </div>
         </Card>
       )}
+
+      {/* Actuals info */}
+      <div className="p-4 bg-[#ddf4ff] border border-[#54aeff44] rounded-lg flex items-start gap-3">
+        <span className="text-sm mt-0.5">💬</span>
+        <div>
+          <div className="text-[12px] font-bold text-[#3A4EA2] mb-0.5">Actuals come from the field</div>
+          <div className="text-[12px] text-[#3A4EA2] leading-relaxed">
+            Progress updates are collected automatically via WhatsApp from your contractors. View them in the{" "}
+            <span
+              className="underline cursor-pointer font-semibold"
+              onClick={() => router.push(`/dashboard/whatsapp-feed?projectId=${projectId}`)}
+            >
+              WhatsApp Feed
+            </span>
+            .
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
 export default function ImportCSVPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="p-5 text-sm text-[#8C959F]">Loading...</div>
-      }
-    >
+    <Suspense fallback={<div className="p-5 text-sm text-[#8C959F]">Loading...</div>}>
       <ImportCSVContent />
     </Suspense>
   );

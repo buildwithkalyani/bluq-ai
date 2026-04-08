@@ -35,7 +35,7 @@ export interface Project {
 
 const PROJECTS: Project[] = [
   { id: 0, name: "Al Nakheel Tower",   code: "ANT-2026-001",  pct: 42, status: "runningLate", tasks: 24, tasksDone: 10, workers: 30, issues: 3, stage: "Foundation",  startDate: "Mar 1, 2026",   endDate: "Sep 30, 2026", address: "Dubai Marina, Dubai" },
-  { id: 1, name: "Marina Heights",     code: "MH-2026-002",   pct: 67, status: "inProgress",  tasks: 18, tasksDone: 12, workers: 28, issues: 1, stage: "Structure",   startDate: "Jan 15, 2026",  endDate: "Nov 15, 2026", address: "JBR, Dubai" },
+  { id: 1, name: "Orchid Poorva",       code: "OP-2026-002",   pct: 67, status: "inProgress",  tasks: 18, tasksDone: 12, workers: 28, issues: 1, stage: "Structure",   startDate: "Jan 15, 2026",  endDate: "Nov 15, 2026", address: "JBR, Dubai" },
   { id: 2, name: "Palm Residences",    code: "PR-2026-003",   pct: 91, status: "inProgress",  tasks: 12, tasksDone: 11, workers: 15, issues: 0, stage: "Finishing",   startDate: "Sep 1, 2025",   endDate: "Apr 30, 2026", address: "Palm Jumeirah, Dubai" },
   { id: 3, name: "Creek Office Park",  code: "COP-2026-004",  pct: 15, status: "delayed",     tasks: 30, tasksDone: 4,  workers: 22, issues: 4, stage: "Foundation",  startDate: "Feb 10, 2026",  endDate: "Dec 20, 2026", address: "Creek Harbour, Dubai" },
 ];
@@ -57,6 +57,11 @@ export interface ScheduleTask {
   delay: string | null;
   space: string;
   photos: string[];
+  phase: string;
+  milestone?: boolean;
+  parentTaskId?: string;       // sub-task parent
+  baselineStart?: string;      // planned start for baseline comparison
+  baselineEnd?: string;        // planned end for baseline comparison
   // Gantt positioning (will come from API calculated)
   left: number;
   width: number;
@@ -71,57 +76,153 @@ export interface TaskDependency {
 }
 
 const SCHEDULE_TASKS: ScheduleTask[] = [
-  //Nakheel Tower( projectID: )
-  { id: "foundation",  projectId: 0,   name: "Foundation Works",   left: 5,  width: 42, pct: 75, status: "runningLate", critical: true,  group: "rajesh", startDate: "Mar 1",  endDate: "Mar 22", duration: "22d", contractor: "Rajesh Kumar",  delay: "3d late",  space: "Zone A — Ground",    photos: ["foundation_progress_001.jpg", "foundation_progress_002.jpg", "foundation_progress_003.jpg"] },
-  { id: "rebar",    projectId: 0,       name: "Rebar Installation", left: 28, width: 30, pct: 60, status: "inProgress",  critical: false, group: "rajesh", startDate: "Mar 8",  endDate: "Mar 29", duration: "21d", contractor: "Rajesh Kumar",  delay: null,       space: "Zone A — L1",        photos: ["rebar_east_wing.jpg", "rebar_west_wing.jpg"] },
-  { id: "formwork",  projectId: 0,      name: "Formwork",           left: 38, width: 25, pct: 45, status: "inProgress",  critical: false, group: "rajesh", startDate: "Mar 12", endDate: "Apr 5",  duration: "25d", contractor: "Rajesh Kumar",  delay: null,       space: "Zone A — L1-L2",     photos: [] },
-  { id: "waterproofing", projectId: 0,  name: "Waterproofing",      left: 48, width: 28, pct: 30, status: "delayed",     critical: true,  group: "ahmed",  startDate: "Mar 5",  endDate: "Mar 20", duration: "16d", contractor: "Ahmed Hassan",  delay: "7d late",  space: "Zone A — Basement",  photos: ["waterproofing_membrane_01.jpg"] },
-  { id: "mep",  projectId: 0,  name: "MEP Rough-In",       left: 68, width: 27, pct: 0,  status: "notStarted",  critical: true,  group: "ahmed",  startDate: "Mar 22", endDate: "Apr 12", duration: "22d", contractor: "Ahmed Hassan",  delay: null,       space: "Zone A-B — L1-L3",   photos: [] },
-  // ── Marina Heights (projectId: 1) ─────────────────────
-  { id: "mh_structure",  projectId: 1, name: "Structure Works",    left: 5,  width: 35, pct: 67, status: "inProgress",  critical: true,  group: "ali",    startDate: "2025-03-01", endDate: "2025-03-25", duration: "25d", contractor: "Ali Contractors", delay: null,      space: "Level 4", photos: [] },
-  { id: "mh_scaffolding",projectId: 1, name: "Scaffolding",        left: 10, width: 28, pct: 80, status: "inProgress",  critical: false, group: "ali",    startDate: "2025-03-05", endDate: "2025-03-28", duration: "23d", contractor: "Ali Contractors", delay: null,      space: "Level 4", photos: [] },
-  { id: "mh_electrical", projectId: 1, name: "Electrical Rough-In",left: 30, width: 25, pct: 20, status: "runningLate", critical: true,  group: "gulf",   startDate: "2025-03-15", endDate: "2025-04-08", duration: "24d", contractor: "Gulf MEP Ltd",   delay: "2d late", space: "Level 3", photos: [] },
-
-  // ── Palm Residences (projectId: 2) ────────────────────
-  { id: "pr_plumbing",   projectId: 2, name: "Plumbing Rough-In",  left: 5,  width: 20, pct: 90, status: "inProgress",  critical: false, group: "gulf",   startDate: "2025-03-01", endDate: "2025-03-20", duration: "19d", contractor: "Gulf MEP Ltd",   delay: null,      space: "Unit 12B", photos: [] },
-  { id: "pr_tiling",     projectId: 2, name: "Tile Work",          left: 18, width: 22, pct: 50, status: "inProgress",  critical: false, group: "gulf",   startDate: "2025-03-10", endDate: "2025-04-01", duration: "22d", contractor: "Gulf MEP Ltd",   delay: null,      space: "Unit 12A", photos: [] },
-  { id: "pr_painting",   projectId: 2, name: "Painting",           left: 35, width: 18, pct: 0,  status: "notStarted",  critical: false, group: "gulf",   startDate: "2025-03-25", endDate: "2025-04-12", duration: "18d", contractor: "Gulf MEP Ltd",   delay: null,      space: "Unit 12A", photos: [] },
-
-  // ── Creek Office Park (projectId: 3) ──────────────────
-  { id: "cop_piling",    projectId: 3, name: "Piling Works",       left: 5,  width: 30, pct: 15, status: "delayed",     critical: true,  group: "rajesh", startDate: "2025-03-01", endDate: "2025-03-28", duration: "27d", contractor: "Rajesh Kumar",   delay: "5d late", space: "Grid C3-C5", photos: [] },
-  { id: "cop_mep",       projectId: 3, name: "MEP Conduit",        left: 20, width: 25, pct: 0,  status: "notStarted",  critical: true,  group: "ahmed",  startDate: "2025-03-15", endDate: "2025-04-08", duration: "24d", contractor: "Ahmed Hassan",   delay: null,      space: "Zone A",    photos: [] },
-  { id: "cop_scaffold",  projectId: 3, name: "Scaffolding",        left: 15, width: 20, pct: 10, status: "runningLate", critical: false, group: "mohammad", startDate: "2025-03-10", endDate: "2025-03-30", duration: "20d", contractor: "Mohammad Ali", delay: "1d late", space: "Level 3",   photos: [] },
-];;
-
-const SCHEDULE_DEPS: TaskDependency[] = [
   // ── Al Nakheel Tower (projectId: 0) ──────────────────
-  { from: "foundation",    to: "rebar",          type: "FS", label: "Finish-to-Start" },
-  { from: "rebar",         to: "formwork",       type: "SS", label: "Start-to-Start" },
-  { from: "foundation",    to: "waterproofing",  type: "FS", label: "Finish-to-Start" },
-  { from: "waterproofing", to: "mep",            type: "FS", label: "Finish-to-Start" },
-  { from: "formwork",      to: "mep",            type: "FF", label: "Finish-to-Finish" },
+  // Foundation phase
+  { id: "foundation",        projectId: 0, name: "Foundation Works",          left: 5,  width: 42, pct: 75, status: "runningLate", critical: true,  group: "rajesh", startDate: "2025-03-01", endDate: "2025-03-22", duration: "22d", baselineStart: "2025-03-01", baselineEnd: "2025-03-19", contractor: "Rajesh Kumar", delay: "3d late", space: "Zone A — Ground",   phase: "Foundation", photos: [] },
+  { id: "foundation_excav",  projectId: 0, name: "Excavation",                left: 0,  width: 0,  pct: 100,status: "completed",   critical: false, group: "rajesh", startDate: "2025-03-01", endDate: "2025-03-05", duration: "4d",  baselineStart: "2025-03-01", baselineEnd: "2025-03-05", contractor: "Rajesh Kumar", delay: null,      space: "Zone A — Ground",   phase: "Foundation", parentTaskId: "foundation", photos: [] },
+  { id: "foundation_pour",   projectId: 0, name: "Concrete Pour",             left: 0,  width: 0,  pct: 80, status: "runningLate", critical: true,  group: "rajesh", startDate: "2025-03-06", endDate: "2025-03-18", duration: "12d", baselineStart: "2025-03-06", baselineEnd: "2025-03-15", contractor: "Rajesh Kumar", delay: "3d late", space: "Zone A — Ground",   phase: "Foundation", parentTaskId: "foundation", photos: [] },
+  { id: "foundation_cure",   projectId: 0, name: "Curing",                    left: 0,  width: 0,  pct: 20, status: "inProgress",  critical: false, group: "rajesh", startDate: "2025-03-19", endDate: "2025-03-22", duration: "3d",  baselineStart: "2025-03-16", baselineEnd: "2025-03-19", contractor: "Rajesh Kumar", delay: null,      space: "Zone A — Ground",   phase: "Foundation", parentTaskId: "foundation", photos: [] },
+  { id: "rebar",             projectId: 0, name: "Rebar Installation",        left: 28, width: 30, pct: 60, status: "inProgress",  critical: false, group: "rajesh", startDate: "2025-03-08", endDate: "2025-03-29", duration: "21d", baselineStart: "2025-03-08", baselineEnd: "2025-03-29", contractor: "Rajesh Kumar", delay: null,      space: "Zone A — L1",       phase: "Foundation", photos: [] },
+  { id: "waterproofing",     projectId: 0, name: "Waterproofing",             left: 48, width: 28, pct: 30, status: "delayed",     critical: true,  group: "ahmed",  startDate: "2025-03-05", endDate: "2025-03-20", duration: "16d", baselineStart: "2025-03-05", baselineEnd: "2025-03-12", contractor: "Ahmed Hassan", delay: "7d late", space: "Zone A — Basement",  phase: "Foundation", photos: [] },
+  { id: "waterproof_primer", projectId: 0, name: "Primer Application",        left: 0,  width: 0,  pct: 60, status: "inProgress",  critical: false, group: "ahmed",  startDate: "2025-03-05", endDate: "2025-03-10", duration: "5d",  baselineStart: "2025-03-05", baselineEnd: "2025-03-08", contractor: "Ahmed Hassan", delay: null,      space: "Zone A — Basement",  phase: "Foundation", parentTaskId: "waterproofing", photos: [] },
+  { id: "waterproof_membrane",projectId:0, name: "Membrane Installation",     left: 0,  width: 0,  pct: 0,  status: "delayed",     critical: true,  group: "ahmed",  startDate: "2025-03-14", endDate: "2025-03-20", duration: "7d",  baselineStart: "2025-03-09", baselineEnd: "2025-03-12", contractor: "Ahmed Hassan", delay: "7d late", space: "Zone A — Basement",  phase: "Foundation", parentTaskId: "waterproofing", photos: [] },
+  // Structure phase
+  { id: "formwork",          projectId: 0, name: "Formwork",                  left: 38, width: 25, pct: 45, status: "inProgress",  critical: false, group: "rajesh", startDate: "2025-03-12", endDate: "2025-04-05", duration: "25d", baselineStart: "2025-03-12", baselineEnd: "2025-04-02", contractor: "Rajesh Kumar", delay: null,      space: "Zone A — L1-L2",    phase: "Structure",  photos: [] },
+  { id: "formwork_shuttering",projectId:0, name: "Shuttering Setup",          left: 0,  width: 0,  pct: 80, status: "inProgress",  critical: false, group: "rajesh", startDate: "2025-03-12", endDate: "2025-03-22", duration: "10d", baselineStart: "2025-03-12", baselineEnd: "2025-03-22", contractor: "Rajesh Kumar", delay: null,      space: "Zone A — L1",       phase: "Structure",  parentTaskId: "formwork", photos: [] },
+  { id: "formwork_columns",  projectId: 0, name: "Column Formwork",           left: 0,  width: 0,  pct: 20, status: "inProgress",  critical: false, group: "rajesh", startDate: "2025-03-23", endDate: "2025-04-05", duration: "13d", baselineStart: "2025-03-23", baselineEnd: "2025-04-02", contractor: "Rajesh Kumar", delay: null,      space: "Zone A — L2",       phase: "Structure",  parentTaskId: "formwork", photos: [] },
+  // MEP phase
+  { id: "mep",               projectId: 0, name: "MEP Rough-In",              left: 68, width: 27, pct: 0,  status: "notStarted",  critical: true,  group: "ahmed",  startDate: "2025-03-22", endDate: "2025-04-12", duration: "22d", baselineStart: "2025-03-22", baselineEnd: "2025-04-12", contractor: "Ahmed Hassan", delay: null,      space: "Zone A-B — L1-L3",  phase: "MEP",        photos: [] },
+  { id: "mep_electrical",    projectId: 0, name: "Electrical Conduit",        left: 0,  width: 0,  pct: 0,  status: "notStarted",  critical: false, group: "ahmed",  startDate: "2025-03-22", endDate: "2025-04-02", duration: "11d", baselineStart: "2025-03-22", baselineEnd: "2025-04-02", contractor: "Ahmed Hassan", delay: null,      space: "Zone A — L1-L2",    phase: "MEP",        parentTaskId: "mep", photos: [] },
+  { id: "mep_plumbing",      projectId: 0, name: "Plumbing Rough-In",         left: 0,  width: 0,  pct: 0,  status: "notStarted",  critical: true,  group: "ahmed",  startDate: "2025-03-25", endDate: "2025-04-08", duration: "14d", baselineStart: "2025-03-25", baselineEnd: "2025-04-08", contractor: "Ahmed Hassan", delay: null,      space: "Zone B — L1-L3",    phase: "MEP",        parentTaskId: "mep", photos: [] },
+  { id: "mep_hvac",          projectId: 0, name: "HVAC Ducting",              left: 0,  width: 0,  pct: 0,  status: "notStarted",  critical: false, group: "ahmed",  startDate: "2025-04-01", endDate: "2025-04-12", duration: "11d", baselineStart: "2025-04-01", baselineEnd: "2025-04-12", contractor: "Ahmed Hassan", delay: null,      space: "Zone A-B — L3",     phase: "MEP",        parentTaskId: "mep", photos: [] },
 
-  // ── Marina Heights (projectId: 1) ─────────────────────
-  { from: "mh_structure",   to: "mh_scaffolding",  type: "SS", label: "Start-to-Start" },
-  { from: "mh_scaffolding", to: "mh_electrical",   type: "FS", label: "Finish-to-Start" },
+  // ── Orchid Poorva (projectId: 1) ──────────────────────
+  { id: "mh_structure",   projectId: 1, name: "Shuttering 4th Flr", left: 5,  width: 35, pct: 80, status: "inProgress",  critical: true,  group: "suresh",  startDate: "2025-03-01", endDate: "2025-03-25", duration: "25d", contractor: "Suresh Patel",  delay: null,      space: "4th Floor", phase: "Structure", photos: [] },
+  { id: "mh_scaffolding", projectId: 1, name: "Plastering 7th Flr", left: 10, width: 28, pct: 50, status: "runningLate", critical: false, group: "rajesh",  startDate: "2025-03-05", endDate: "2025-03-28", duration: "23d", contractor: "Rajesh Kumar",  delay: "Target missed", space: "7th Floor", phase: "Finishing", photos: [] },
+  { id: "mh_electrical",  projectId: 1, name: "Painting Block-B",   left: 30, width: 25, pct: 100,status: "completed",   critical: false, group: "vikram",  startDate: "2025-03-15", endDate: "2025-04-08", duration: "24d", contractor: "Vikram Singh",  delay: null,      space: "Block B",   phase: "Finishing", photos: [] },
 
   // ── Palm Residences (projectId: 2) ────────────────────
-  { from: "pr_plumbing",   to: "pr_tiling",      type: "FS", label: "Finish-to-Start" },
-  { from: "pr_tiling",     to: "pr_painting",    type: "FS", label: "Finish-to-Start" },
+  { id: "pr_plumbing",    projectId: 2, name: "Plumbing Rough-In",  left: 5,  width: 20, pct: 90, status: "inProgress",  critical: false, group: "gulf", startDate: "2025-03-01", endDate: "2025-03-20", duration: "19d", contractor: "Gulf MEP Ltd", delay: null, space: "Unit 12B", phase: "MEP",       photos: [] },
+  { id: "pr_tiling",      projectId: 2, name: "Tile Work",          left: 18, width: 22, pct: 50, status: "inProgress",  critical: false, group: "gulf", startDate: "2025-03-10", endDate: "2025-04-01", duration: "22d", contractor: "Gulf MEP Ltd", delay: null, space: "Unit 12A", phase: "Finishing", photos: [] },
+  { id: "pr_painting",    projectId: 2, name: "Painting",           left: 35, width: 18, pct: 0,  status: "notStarted",  critical: false, group: "gulf", startDate: "2025-03-25", endDate: "2025-04-12", duration: "18d", contractor: "Gulf MEP Ltd", delay: null, space: "Unit 12A", phase: "Finishing", photos: [] },
 
   // ── Creek Office Park (projectId: 3) ──────────────────
-  { from: "cop_piling",    to: "cop_mep",        type: "FS", label: "Finish-to-Start" },
-  { from: "cop_piling",    to: "cop_scaffold",   type: "SS", label: "Start-to-Start" },
-  { from: "cop_scaffold",  to: "cop_mep",        type: "FF", label: "Finish-to-Finish" },
+  { id: "cop_piling",     projectId: 3, name: "Piling Works",       left: 5,  width: 30, pct: 15, status: "delayed",     critical: true,  group: "rajesh",   startDate: "2025-03-01", endDate: "2025-03-28", duration: "27d", contractor: "Rajesh Kumar",  delay: "5d late", space: "Grid C3-C5", phase: "Foundation", photos: [] },
+  { id: "cop_mep",        projectId: 3, name: "MEP Conduit",        left: 20, width: 25, pct: 0,  status: "notStarted",  critical: true,  group: "ahmed",    startDate: "2025-03-15", endDate: "2025-04-08", duration: "24d", contractor: "Ahmed Hassan",  delay: null,      space: "Zone A",     phase: "MEP",        photos: [] },
+  { id: "cop_scaffold",   projectId: 3, name: "Scaffolding",        left: 15, width: 20, pct: 10, status: "runningLate", critical: false, group: "mohammad", startDate: "2025-03-10", endDate: "2025-03-30", duration: "20d", contractor: "Mohammad Ali", delay: "1d late", space: "Level 3",    phase: "Structure",  photos: [] },
 ];
 
-// ← end of SCHEDULE_DEPS array (line 87)
+const SCHEDULE_DEPS: TaskDependency[] = [
+  // ── Al Nakheel Tower (projectId: 0) ──────────────────────────────────────────
+  //
+  // FOUNDATION sub-task chain
+  // Excavation must fully finish before concrete can be poured — you can't pour
+  // into an unsupported face.
+  { from: "foundation_excav",     to: "foundation_pour",      type: "FS", label: "Finish-to-Start" },
+  // Curing begins the moment the last truck leaves — continuous wet-cure regime.
+  { from: "foundation_pour",      to: "foundation_cure",      type: "FS", label: "Finish-to-Start" },
+  // Rebar for superstructure columns is cast into the slab starter bars —
+  // can only begin once the slab pour is complete and partially cured (3 days).
+  { from: "foundation_pour",      to: "rebar",                type: "FS", label: "Finish-to-Start" },
+
+  // WATERPROOFING sub-task chain
+  // Concrete must achieve initial cure before primer will bond — minimum 7 days.
+  { from: "foundation_cure",      to: "waterproof_primer",    type: "FS", label: "Finish-to-Start" },
+  // Membrane goes over the primed surface only after primer tacks off (~24 h).
+  { from: "waterproof_primer",    to: "waterproof_membrane",  type: "FS", label: "Finish-to-Start" },
+
+  // STRUCTURE — Formwork sub-task chain
+  // Shuttering (base panels) can mobilise once rebar starter bars are in place
+  // so it runs SS with rebar — carpenters work behind the steel fixers.
+  { from: "rebar",                to: "formwork_shuttering",  type: "SS", label: "Start-to-Start" },
+  // Column formwork is fixed only after the base shuttering is plumbed & braced.
+  { from: "formwork_shuttering",  to: "formwork_columns",     type: "FS", label: "Finish-to-Start" },
+
+  // MEP sub-task chain
+  // MEP rough-in cannot start until the structural shell is closed — formwork
+  // (concrete columns/walls) must be fully struck and inspected.
+  { from: "formwork_columns",     to: "mep_electrical",       type: "FS", label: "Finish-to-Start" },
+  // Waterproofing must be signed-off before plumbing is buried in the slab to
+  // avoid breaking the waterproof layer retrospectively.
+  { from: "waterproof_membrane",  to: "mep_plumbing",         type: "FS", label: "Finish-to-Start" },
+  // Electrical conduits run first (embedded in walls/slab); plumbing follows
+  // once conduit routes are confirmed to avoid clashes.
+  { from: "mep_electrical",       to: "mep_plumbing",         type: "FS", label: "Finish-to-Start" },
+  // HVAC ductwork is the bulkiest item — starts as soon as plumbing is roughed
+  // in so both trades can work in parallel in adjacent zones.
+  { from: "mep_plumbing",         to: "mep_hvac",             type: "SS", label: "Start-to-Start" },
+
+  // ── Marina Heights (projectId: 1) ────────────────────────────────────────────
+  //
+  // Scaffolding must be erected floor-by-floor as the structure rises —
+  // it cannot go up ahead of the slab, but it starts on day 1 alongside it.
+  { from: "mh_structure",   to: "mh_scaffolding",  type: "SS", label: "Start-to-Start" },
+  // Electrical rough-in only begins once the structural frame is complete and
+  // scaffolding is fully certified for MEP operatives to work from.
+  { from: "mh_scaffolding", to: "mh_electrical",   type: "FS", label: "Finish-to-Start" },
+
+  // ── Palm Residences (projectId: 2) ───────────────────────────────────────────
+  //
+  // Plumbing must be pressure-tested and signed off before any tiles are laid
+  // — once tiled, leaks cause strip-out costing 10× more to rectify.
+  { from: "pr_plumbing",  to: "pr_tiling",   type: "FS", label: "Finish-to-Start" },
+  // Painting follows tiling: tile grout must cure (≥72 h) and tilers must
+  // have vacated so paint is not contaminated by tile adhesive dust.
+  { from: "pr_tiling",    to: "pr_painting", type: "FS", label: "Finish-to-Start" },
+
+  // ── Creek Office Park (projectId: 3) ─────────────────────────────────────────
+  //
+  // Piling must reach designed set before any above-ground scaffold loads the
+  // ground — pile integrity test takes ~5 days after last pile.
+  { from: "cop_piling",   to: "cop_scaffold", type: "FS", label: "Finish-to-Start" },
+  // MEP conduit in the basement slab is cast-in; piling must be 100% complete
+  // and the pile cap concreted before MEP can begin.
+  { from: "cop_piling",   to: "cop_mep",      type: "FS", label: "Finish-to-Start" },
+  // MEP conduit installation cannot begin until scaffold platforms give safe
+  // access to the ceiling/wall zones where conduit runs.
+  { from: "cop_scaffold", to: "cop_mep",      type: "FS", label: "Finish-to-Start" },
+];
 
 export const getScheduleTasks = (projectId: number): Promise<ScheduleTask[]> =>
-  Promise.resolve(SCHEDULE_TASKS.filter(t => t.projectId === projectId));
+  Promise.resolve(SCHEDULE_TASKS.filter(t => t.projectId === projectId && !t.milestone));
 
 export const getScheduleDeps = (projectId: number): Promise<TaskDependency[]> =>
   Promise.resolve(SCHEDULE_DEPS);
+
+// ─── PROJECT ISSUES ──────────────────────────────────────────
+export interface ProjectIssue {
+  severity: "HIGH" | "MED" | "LOW";
+  task: string;
+  reporter: string;
+  date: string;
+  desc: string;
+  age: string;
+  contact: string;
+  phone: string;
+  role: string;
+}
+
+const PROJECT_ISSUES: Record<number, ProjectIssue[]> = {
+  0: [
+    { severity: "HIGH", task: "Foundation Works",    reporter: "Rajesh Kumar", date: "Mar 15", desc: "Cement delivery delayed by supplier, expected tomorrow",             age: "2 days open", contact: "Rajesh Kumar", phone: "+971 50 123 4567", role: "Contractor — Foundation" },
+    { severity: "MED",  task: "Rebar Installation",  reporter: "Ahmed Hassan", date: "Mar 14", desc: "3 workers absent, waiting for replacements from subcontractor",       age: "3 days open", contact: "Ahmed Hassan",  phone: "+971 50 234 5678", role: "Contractor — Rebar & MEP" },
+    { severity: "LOW",  task: "MEP Conduit — Zone A",reporter: "Ahmed Hassan", date: "Mar 15", desc: "Minor cable routing conflict with HVAC duct — needs coordination",   age: "1 day open",  contact: "Mohammad Ali",  phone: "+971 50 345 6789", role: "MEP Coordinator" },
+  ],
+  1: [
+    { severity: "HIGH", task: "Plastering 7th Flr",  reporter: "Rajesh Kumar", date: "Mar 16", desc: "Target of 500 SqFt missed — cement unavailable on site, only 250 SqFt completed", age: "1 day open", contact: "Rajesh Kumar", phone: "+91 98200 12345", role: "Contractor — Plastering" },
+    { severity: "MED",  task: "Plumbing 2nd Flr",    reporter: "Anil Sharma",  date: "Mar 15", desc: "Pipe leak reported in Unit 204 — plumber dispatched for inspection",               age: "2 days open", contact: "Anil Sharma",  phone: "+91 98200 67890", role: "Contractor — Plumbing" },
+  ],
+  2: [],
+  3: [
+    { severity: "HIGH", task: "Piling Works",        reporter: "Rajesh Kumar", date: "Mar 12", desc: "Piling rig breakdown — replacement part on order, 5 day delay expected", age: "6 days open", contact: "Rajesh Kumar", phone: "+971 50 123 4567", role: "Contractor — Foundation" },
+    { severity: "HIGH", task: "MEP Conduit",         reporter: "Ahmed Hassan", date: "Mar 14", desc: "Municipality permit for underground conduit not yet approved",         age: "4 days open", contact: "Ahmed Hassan",  phone: "+971 50 234 5678", role: "Contractor — MEP" },
+    { severity: "MED",  task: "Scaffolding",         reporter: "Mohammad Ali", date: "Mar 15", desc: "Scaffolding inspection overdue — safety officer not available",        age: "3 days open", contact: "Mohammad Ali",  phone: "+971 50 345 6789", role: "Scaffolding Contractor" },
+    { severity: "LOW",  task: "Site Preparation",    reporter: "Mohammad Ali", date: "Mar 16", desc: "Minor drainage issue near Grid C4 — being addressed",                 age: "2 days open", contact: "Mohammad Ali",  phone: "+971 50 345 6789", role: "Site Supervisor" },
+  ],
+};
+
+export const getProjectIssues = (projectId: number): Promise<ProjectIssue[]> =>
+  Promise.resolve(PROJECT_ISSUES[projectId] ?? []);
 
 
 // ─── ANALYTICS ───────────────────────────────────────────────
