@@ -2,12 +2,13 @@ import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
 import { dprs } from "../db/schema.js";
 import { eq, and, desc } from "drizzle-orm";
+import { verifySession } from "../lib/verifySession.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function dprsRoute(app: FastifyInstance) {
 
-  app.get("/dprs", async (request, reply) => {
+  app.get("/dprs", { preHandler: verifySession }, async (request, reply) => {
     try {
       const { projectId, workspaceId } = request.query as { projectId: string; workspaceId: string };
       if (!projectId || !workspaceId) return reply.status(400).send({ error: "projectId and workspaceId required" });
@@ -22,7 +23,7 @@ export async function dprsRoute(app: FastifyInstance) {
     }
   });
 
-  app.post("/dprs", async (request, reply) => {
+  app.post("/dprs", { preHandler: verifySession }, async (request, reply) => {
     try {
       const body = request.body as {
         workspaceId: string;
@@ -51,7 +52,7 @@ export async function dprsRoute(app: FastifyInstance) {
     }
   });
 
-  app.patch("/dprs/:id", async (request, reply) => {
+  app.patch("/dprs/:id", { preHandler: verifySession }, async (request, reply) => {
     try {
       const { id } = request.params as { id: string };
       if (!UUID_REGEX.test(id)) {

@@ -9,6 +9,10 @@ export const auth = betterAuth({
   }),
   secret: process.env.BETTER_AUTH_SECRET,
   baseURL: process.env.BETTER_AUTH_URL,
+  session: {
+    expiresIn: 60 * 60 * 24 * 30,        // 30 days
+    updateAge: 60 * 60 * 24,              // extend session if user active within 24h
+  },
   emailAndPassword: {
     enabled: true,
   },

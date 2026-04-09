@@ -2,12 +2,13 @@ import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
 import { projects } from "../db/schema.js";
 import { eq } from "drizzle-orm";
+import { verifySession } from "../lib/verifySession.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function projectsRoute(app: FastifyInstance) {
 
-  app.get("/projects", async (request, reply) => {
+  app.get("/projects", { preHandler: verifySession }, async (request, reply) => {
     try {
       const { workspaceId } = request.query as { workspaceId: string };
       if (!workspaceId) return reply.status(400).send({ error: "workspaceId is required" });
@@ -22,7 +23,7 @@ export async function projectsRoute(app: FastifyInstance) {
     }
   });
 
-  app.post("/projects", async (request, reply) => {
+  app.post("/projects", { preHandler: verifySession }, async (request, reply) => {
     try {
       const body = request.body as {
         workspaceId: string;
@@ -49,7 +50,7 @@ export async function projectsRoute(app: FastifyInstance) {
     }
   });
 
-  app.patch("/projects/:id", async (request, reply) => {
+  app.patch("/projects/:id", { preHandler: verifySession }, async (request, reply) => {
     try {
       const { id } = request.params as { id: string };
       if (!UUID_REGEX.test(id)) {
@@ -65,7 +66,7 @@ export async function projectsRoute(app: FastifyInstance) {
     }
   });
 
-  app.delete("/projects/:id", async (request, reply) => {
+  app.delete("/projects/:id", { preHandler: verifySession }, async (request, reply) => {
     try {
       const { id } = request.params as { id: string };
       if (!UUID_REGEX.test(id)) {
