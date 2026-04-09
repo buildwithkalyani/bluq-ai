@@ -1,31 +1,45 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { authClient } from "@/lib/auth-client";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirect = searchParams.get("redirect") || "/dashboard/overview";
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    // TODO: Replace with actual auth call
-    // await fetch('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) })
-    setTimeout(() => {
-      localStorage.setItem("bluq_token", "mock_token_123");
-      router.push("/dashboard/overview");
-    }, 600);
+    setError("");
+
+    const { error: authError } = await authClient.signIn.email({
+      email,
+      password,
+    });
+
+    if (authError) {
+      setError(authError.message || "Invalid email or password.");
+      setLoading(false);
+      return;
+    }
+
+    router.push(redirect);
   };
 
-  const handleGoogleLogin = () => {
-    // TODO: Replace with actual Google OAuth
-    // window.location.href = '/api/auth/google'
-    localStorage.setItem("bluq_token", "mock_google_token");
-    router.push("/dashboard/overview");
+  const handleGoogleLogin = async () => {
+    setError("");
+    await authClient.signIn.social({
+      provider: "google",
+      callbackURL: redirect,
+    });
   };
 
   return (
@@ -33,11 +47,9 @@ export default function LoginPage() {
       <div className="bg-white border border-[#D0D7DE] rounded-lg w-[400px] p-8 shadow-sm">
         {/* Header */}
         <div className="text-center mb-6">
-          <div className="tracking-tight">
-          <a href="#" className="logo" style={{display:"flex", alignItems:"center", justifyContent:"center", height:"100%"}}>
-  <img src="/bluq-logo.png" alt="BluQ" style={{height:"15px", width:"auto"}} />
-</a>
-          </div>
+          <a href="/" className="logo" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+            <img src="/bluq-logo.png" alt="BluQ" style={{ height: "15px", width: "auto" }} />
+          </a>
           <div className="text-[13px] text-[#57606a] mt-1">
             Project intelligence for construction
           </div>
@@ -61,6 +73,12 @@ export default function LoginPage() {
 
         {/* Email Login */}
         <form onSubmit={handleLogin}>
+          {error && (
+            <div className="mb-3 text-[12px] text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+              {error}
+            </div>
+          )}
+
           <div className="mb-3.5">
             <label className="block text-xs font-semibold text-[#57606a] mb-1">
               Email
@@ -99,7 +117,7 @@ export default function LoginPage() {
         </form>
 
         <div className="text-center text-xs text-[#57606a] mt-4">
-          Don't have an account?{" "}
+          Don&apos;t have an account?{" "}
           <Link
             href="/signup"
             className="text-[#3A4EA2] font-semibold cursor-pointer hover:underline"
