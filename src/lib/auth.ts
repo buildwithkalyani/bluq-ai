@@ -24,9 +24,9 @@ export const auth = betterAuth({
   },
   plugins: [
     emailOTP({
-      sendVerificationOTP: async ({ email, otp }) => {
-        // We'll connect Resend here in Week 2
-        console.log(`OTP for ${email}: ${otp}`);
+      sendVerificationOTP: async ({ email, otp: _otp }) => {
+        // TODO: Connect Resend email here
+        console.log(`OTP requested for ${email}`);
       },
     }),
   ],

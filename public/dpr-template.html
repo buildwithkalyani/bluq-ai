@@ -1,0 +1,334 @@
+<!--
+  ═══════════════════════════════════════════════════════════════
+  BLUQ DPR PDF TEMPLATE
+  ═══════════════════════════════════════════════════════════════
+  
+  This HTML file is rendered server-side by Puppeteer (Kalyani's backend).
+  
+  Usage in backend:
+    const browser = await puppeteer.launch();
+    const page = await browser.newPage();
+    await page.setContent(templateHTML, { waitUntil: 'networkidle0' });
+    const pdf = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' } });
+  
+  Template variables (replace with actual data):
+    {{company_name}}, {{project_name}}, {{project_code}}, {{report_date}},
+    {{overall_progress}}, {{tasks_at_risk}}, {{workers_on_site}}, {{schedule_variance}},
+    {{executive_summary}}, {{ai_narrative}}, {{ai_recommendations}}
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      color: #24292f;
+      font-size: 11px;
+      line-height: 1.5;
+      background: #fff;
+    }
+
+    .page { padding: 0; }
+
+    /* ─── HEADER ─────────────────────────────── */
+    .header {
+      border-bottom: 3px solid #0969DA;
+      padding-bottom: 14px;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .header .company {
+      font-size: 10px;
+      font-weight: 700;
+      color: #0969DA;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+    .header .title {
+      font-size: 18px;
+      font-weight: 800;
+      margin-top: 4px;
+      color: #24292f;
+    }
+    .header .subtitle {
+      font-size: 11px;
+      color: #57606a;
+      margin-top: 2px;
+    }
+
+    /* ─── METRICS ROW ────────────────────────── */
+    .metrics {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .metric {
+      flex: 1;
+      border: 1px solid #D0D7DE;
+      border-radius: 6px;
+      padding: 10px;
+      text-align: center;
+    }
+    .metric .value {
+      font-size: 20px;
+      font-weight: 700;
+      font-family: 'DM Mono', monospace;
+    }
+    .metric .label {
+      font-size: 9px;
+      color: #57606a;
+      margin-top: 2px;
+    }
+    .metric.blue .value { color: #0969DA; }
+    .metric.red .value { color: #CF222E; }
+    .metric.amber .value { color: #9A6700; }
+    .metric.green .value { color: #1A7F37; }
+
+    /* ─── SECTIONS ───────────────────────────── */
+    .section { margin-bottom: 18px; }
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #0969DA;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .section-body {
+      font-size: 11px;
+      color: #57606a;
+      line-height: 1.6;
+    }
+
+    /* ─── TABLE ───────────────────────────────── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 16px;
+    }
+    th {
+      background: #f6f8fa;
+      padding: 6px 8px;
+      text-align: left;
+      font-weight: 700;
+      color: #57606a;
+      font-size: 10px;
+      border-bottom: 1px solid #e1e4e8;
+    }
+    td {
+      padding: 6px 8px;
+      border-bottom: 1px solid #f0f1f3;
+      font-size: 11px;
+    }
+
+    /* ─── STATUS BADGES ───────────────────────── */
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 1px 8px;
+      border-radius: 999px;
+      font-size: 9px;
+      font-weight: 600;
+      font-family: 'DM Mono', monospace;
+    }
+    .status .dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+    }
+    .status.in-progress { background: #ddf4ff; color: #0969DA; }
+    .status.in-progress .dot { background: #0969DA; }
+    .status.running-late { background: #fff8c5; color: #9A6700; }
+    .status.running-late .dot { background: #9A6700; }
+    .status.delayed { background: #ffebe9; color: #CF222E; }
+    .status.delayed .dot { background: #CF222E; }
+
+    /* ─── AI SECTION ──────────────────────────── */
+    .ai-section {
+      background: #0D1117;
+      border-radius: 6px;
+      padding: 14px;
+      color: #c9d1d9;
+      margin-bottom: 16px;
+    }
+    .ai-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #3FB950;
+      font-family: 'DM Mono', monospace;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .ai-label .pulse {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #3FB950;
+    }
+    .ai-body { font-size: 11px; line-height: 1.6; }
+    .ai-body strong { color: #f0f6fc; }
+
+    /* ─── DELAY RISK TABLE ────────────────────── */
+    .risk-high { color: #CF222E; font-weight: 700; }
+    .risk-medium { color: #9A6700; font-weight: 600; }
+
+    /* ─── FOOTER ──────────────────────────────── */
+    .footer {
+      border-top: 1px solid #e1e4e8;
+      padding-top: 10px;
+      margin-top: 24px;
+      text-align: center;
+      font-size: 9px;
+      color: #8C959F;
+    }
+
+    @media print {
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .page { page-break-after: always; }
+      .ai-section { -webkit-print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <!-- HEADER -->
+    <div class="header">
+      <div class="company">{{company_name}}</div>
+      <div class="title">Daily Progress Report</div>
+      <div class="subtitle">{{project_name}} &bull; {{project_code}} &bull; {{report_date}}</div>
+    </div>
+
+    <!-- METRICS ROW -->
+    <div class="metrics">
+      <div class="metric blue">
+        <div class="value">{{overall_progress}}%</div>
+        <div class="label">Overall Progress</div>
+      </div>
+      <div class="metric red">
+        <div class="value">{{tasks_at_risk}}</div>
+        <div class="label">Tasks at Risk</div>
+      </div>
+      <div class="metric amber">
+        <div class="value">{{workers_on_site}}</div>
+        <div class="label">Workers On-Site</div>
+      </div>
+      <div class="metric red">
+        <div class="value">{{schedule_variance}}</div>
+        <div class="label">Schedule Variance</div>
+      </div>
+    </div>
+
+    <!-- EXECUTIVE SUMMARY -->
+    <div class="section">
+      <div class="section-title">Executive Summary</div>
+      <div class="section-body">{{executive_summary}}</div>
+    </div>
+
+    <!-- CONTRACTOR PROGRESS TABLE -->
+    <div class="section">
+      <div class="section-title">Contractor Progress</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Contractor</th>
+            <th>Task</th>
+            <th>Progress</th>
+            <th>Workers</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- {{#each contractors}} -->
+          <tr>
+            <td>Rajesh K.</td>
+            <td>Foundation Works</td>
+            <td style="font-family: 'DM Mono', monospace; font-weight: 700;">75%</td>
+            <td>12</td>
+            <td><span class="status running-late"><span class="dot"></span>Running Late</span></td>
+          </tr>
+          <tr>
+            <td>Ahmed H.</td>
+            <td>Rebar Installation</td>
+            <td style="font-family: 'DM Mono', monospace; font-weight: 700;">60%</td>
+            <td>8</td>
+            <td><span class="status in-progress"><span class="dot"></span>In Progress</span></td>
+          </tr>
+          <tr>
+            <td>Mohammad A.</td>
+            <td>Formwork</td>
+            <td style="font-family: 'DM Mono', monospace; font-weight: 700;">45%</td>
+            <td>10</td>
+            <td><span class="status in-progress"><span class="dot"></span>In Progress</span></td>
+          </tr>
+          <!-- {{/each}} -->
+        </tbody>
+      </table>
+    </div>
+
+    <!-- AI NARRATIVE -->
+    <div class="ai-section">
+      <div class="ai-label"><span class="pulse"></span> AI ANALYSIS</div>
+      <div class="ai-body">{{ai_narrative}}</div>
+    </div>
+
+    <!-- DELAY RISK TABLE -->
+    <div class="section">
+      <div class="section-title">Delay Risk Assessment</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Task</th>
+            <th>Risk Level</th>
+            <th>Delay</th>
+            <th>Impact</th>
+            <th>Root Cause</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Foundation Works</td>
+            <td><span class="risk-high">HIGH</span></td>
+            <td style="font-family: 'DM Mono', monospace;">3d late</td>
+            <td style="font-family: 'DM Mono', monospace; color: #CF222E;">+5 days</td>
+            <td>Material shortage — cement delivery delayed</td>
+          </tr>
+          <tr>
+            <td>Waterproofing</td>
+            <td><span class="risk-high">HIGH</span></td>
+            <td style="font-family: 'DM Mono', monospace;">7d late</td>
+            <td style="font-family: 'DM Mono', monospace; color: #CF222E;">+8 days</td>
+            <td>Supplier stockout + rework after moisture test failure</td>
+          </tr>
+          <tr>
+            <td>Formwork</td>
+            <td><span class="risk-medium">MED</span></td>
+            <td style="font-family: 'DM Mono', monospace;">1d late</td>
+            <td style="font-family: 'DM Mono', monospace; color: #1A7F37;">None</td>
+            <td>Plywood delivery arrived late</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- AI RECOMMENDATIONS -->
+    <div class="ai-section">
+      <div class="ai-label"><span class="pulse"></span> AI RECOMMENDATIONS</div>
+      <div class="ai-body">{{ai_recommendations}}</div>
+    </div>
+
+    <!-- FOOTER -->
+    <div class="footer">
+      Generated by BLUQ &bull; {{report_date}} &bull; Confidential
+    </div>
+  </div>
+</body>
+</html>
