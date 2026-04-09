@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { authClient } from "@/lib/auth-client";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -10,24 +11,35 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [agreed, setAgreed] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!agreed) return;
     setLoading(true);
-    // TODO: Replace with actual auth call
-    // await fetch('/api/auth/signup', { method: 'POST', body: JSON.stringify({ email, password }) })
-    setTimeout(() => {
-      localStorage.setItem("bluq_token", "mock_token_123");
-      router.push("/dashboard/overview");
-    }, 600);
+    setError("");
+
+    const { error: authError } = await authClient.signUp.email({
+      email,
+      password,
+      name: email.split("@")[0],
+    });
+
+    if (authError) {
+      setError(authError.message || "Could not create account. Please try again.");
+      setLoading(false);
+      return;
+    }
+
+    router.push("/dashboard/overview");
   };
 
-  const handleGoogleSignup = () => {
-    // TODO: Replace with actual Google OAuth
-    // window.location.href = '/api/auth/google'
-    localStorage.setItem("bluq_token", "mock_google_token");
-    router.push("/dashboard/overview");
+  const handleGoogleSignup = async () => {
+    setError("");
+    await authClient.signIn.social({
+      provider: "google",
+      callbackURL: "/dashboard/overview",
+    });
   };
 
   return (
@@ -35,17 +47,15 @@ export default function SignupPage() {
       <div className="bg-white border border-[#D0D7DE] rounded-lg w-[400px] p-8 shadow-sm">
         {/* Header */}
         <div className="text-center mb-6">
-          <div className="tracking-tight">
-          <a href="#" className="logo" style={{display:"flex", alignItems:"center", justifyContent:"center", height:"100%"}}>
-  <img src="/bluq-logo.png" alt="BluQ" style={{height:"15px", width:"auto"}} />
-</a>
-          </div>
+          <a href="/" className="logo" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+            <img src="/bluq-logo.png" alt="BluQ" style={{ height: "15px", width: "auto" }} />
+          </a>
           <div className="text-[13px] text-[#57606a] mt-1">
             Project intelligence for construction
           </div>
         </div>
 
-        {/* Google Login */}
+        {/* Google Signup */}
         <button
           onClick={handleGoogleSignup}
           className="w-full bg-[#f6f8fa] border border-[#D0D7DE] rounded-md px-4 py-2.5 text-[13px] font-semibold text-[#24292f] flex items-center justify-center gap-2 cursor-pointer hover:bg-[#eef1f5] transition-colors mb-4"
@@ -63,9 +73,15 @@ export default function SignupPage() {
 
         {/* Email Signup */}
         <form onSubmit={handleSignup}>
+          {error && (
+            <div className="mb-3 text-[12px] text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+              {error}
+            </div>
+          )}
+
           <div className="mb-3.5">
             <label className="block text-xs font-semibold text-[#57606a] mb-1">
-              Email or Mobile Number
+              Email
             </label>
             <input
               type="email"

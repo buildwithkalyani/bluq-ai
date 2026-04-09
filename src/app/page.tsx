@@ -1,12 +1,15 @@
 "use client";
+import Image from "next/image";
 import { useEffect, useState } from "react";
 
 export default function Home() {
   const [firm, setFirm] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [errors, setErrors] = useState<{ email?: string; phone?: string; firm?: string }>({});
 
   useEffect(() => {
     const io = new IntersectionObserver((entries) => {
@@ -36,45 +39,29 @@ export default function Home() {
     return () => { document.body.style.overflow = ""; };
   }, [menuOpen]);
 
-  async function submitDemo(e?: React.FormEvent) {
-    if (e) e.preventDefault();
+  function validate() {
+    const newErrors: { email?: string; phone?: string; firm?: string } = {};
+    if (!firm.trim()) newErrors.firm = "Firm name is required";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) newErrors.email = "Please enter a valid email";
+    if (!/^\+?[0-9]{7,15}$/.test(phone.replace(/[\s\-()]/g, ""))) newErrors.phone = "Please enter a valid mobile number";
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  }
 
-    if (!firm) { alert("Please enter your firm name."); return; }
-    if (!email) { alert("Please enter your work email."); return; }
-
-    if (email.includes(" ")) {
-      alert("Email addresses cannot contain spaces. Please check for accidental spaces at the beginning or end.");
-      return;
-    }
-    if (!email.includes("@")) {
-      alert("Your email is missing the '@' symbol. Please enter a complete email address.");
-      return;
-    }
-    if (!email.includes(".")) {
-      alert("Your email is missing a domain extension (like .com, .in, or .ai).");
-      return;
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      alert("This email format looks incorrect. Please double-check it.");
-      return;
-    }
-
+  async function submitDemo() {
+    if (!validate()) return;
     setIsLoading(true);
-
     try {
       const response = await fetch("https://bluq-ai-production.up.railway.app/demo-requests", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ companyName: firm, email }),
+        body: JSON.stringify({ companyName: firm, email, phone }),
       });
-
       if (!response.ok) throw new Error("Failed to submit request.");
       setSubmitted(true);
     } catch (error) {
       console.error("Submission Error:", error);
-      alert("Something went wrong while connecting to the server. Please try again or contact us directly.");
+      alert("Something went wrong. Please try again or contact us directly.");
     } finally {
       setIsLoading(false);
     }
@@ -89,7 +76,7 @@ export default function Home() {
       {/* NAV */}
       <nav>
         <a href="#" className="logo" style={{ display: "flex", alignItems: "center", height: "100%" }}>
-          <img src="/bluq-logo.png" alt="BluQ" style={{ height: "22px", width: "auto" }} />
+          <Image src="/bluq-logo.png" alt="BluQ" width={100} height={28} style={{ height: "28px", width: "auto" }} />
         </a>
         <ul className="nav-links">
           <li><a href="#features">Features</a></li>
@@ -99,7 +86,7 @@ export default function Home() {
         <div className="nav-r">
           <div className="nav-divider" />
           <a href="/login" className="btn-ghost">Log In</a>
-          <a href="#demo" className="btn-blue">Book a Demo</a>
+          <a href="#demo" className="btn-blue">Book a Free Demo</a>
           <button
             className={`hamburger${menuOpen ? " open" : ""}`}
             onClick={() => setMenuOpen(!menuOpen)}
@@ -118,7 +105,7 @@ export default function Home() {
           <a href="#faq" onClick={closeMenu}>FAQ</a>
           <div className="mobile-ctas">
             <a href="/login" className="btn-ghost" onClick={closeMenu}>Log In</a>
-            <a href="#demo" className="btn-blue" onClick={closeMenu} style={{ textAlign: "center" }}>Book a Demo</a>
+            <a href="#demo" className="btn-blue" onClick={closeMenu} style={{ textAlign: "center" }}>Book a Free Demo</a>
           </div>
         </div>
       )}
@@ -334,12 +321,16 @@ export default function Home() {
             </>
           ) : (
             <>
-              <div className="stag" style={{ margin: "0 auto 16px", display: "inline-flex" }}>Book a Demo</div>
+              <div className="stag" style={{ margin: "0 auto 16px", display: "inline-flex" }}>Book a Free Demo</div>
               <h2>See BluQ on your actual projects.</h2>
               <p>Book a focused 30-minute session. Bring your own schedule file and we&apos;ll walk through exactly how BluQ would work on your projects from day one.</p>
               <div className="cta-form">
                 <input className="inp" type="text" placeholder="Firm name" value={firm} onChange={(e) => setFirm(e.target.value)} />
+                {errors.firm && <span className="err">{errors.firm}</span>}
                 <input className="inp" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+                {errors.email && <span className="err">{errors.email}</span>}
+                <input className="inp" type="tel" placeholder="Mobile number" value={phone} onChange={(e) => setPhone(e.target.value)} />
+                {errors.phone && <span className="err">{errors.phone}</span>}
                 <button className="btn-submit" onClick={submitDemo} disabled={isLoading}>
                   {isLoading ? "Submitting..." : "Book My Demo →"}
                 </button>
