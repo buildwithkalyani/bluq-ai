@@ -36,7 +36,10 @@ const NAV_ITEMS = [
     icon: "💬",
     label: "WhatsApp",
     href: "/dashboard/whatsapp-feed",
-    subTabs: [{ label: "WhatsApp Feed", href: "/dashboard/whatsapp-feed" }],
+    subTabs: [
+      { label: "WhatsApp Feed", href: "/dashboard/whatsapp-feed" },
+      { label: "Bot Control",   href: "/dashboard/whatsapp-bot" },
+    ],
   },
   {
     id: "documents",
