@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useMemo } from "react";
+import { useEffect, useState, useRef, useMemo, Suspense } from 'react';
 import { useSearchParams } from "next/navigation";
 import { getScheduleTasks, getScheduleDeps, type ScheduleTask, type TaskDependency } from "@/lib/mock-data";
 
@@ -627,7 +627,7 @@ function getActivePreset(zoom: number): string | null {
 // ─────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────
-export default function GanttChart() {
+function GanttChartContent() {
   const searchParams = useSearchParams();
   const projectId = Number(searchParams.get("projectId") ?? "0");
   
@@ -846,8 +846,8 @@ export default function GanttChart() {
         delay: null,
         left: 0,
         width: 0,
-        photos: [],
-      }]);
+        photos: [] as string[],
+      } as any]);
     } else {
       setTasks(p => p.map(t => t.id === targetId
         ? { ...t, ...data, duration: `${diffDays(data.startDate, data.endDate)}d` }
@@ -1379,5 +1379,13 @@ export default function GanttChart() {
       {/* Modal */}
       <TaskModal isOpen={modalConfig.isOpen} mode={modalConfig.mode} task={tasks.find(t => t.id === modalConfig.taskId)} tasks={filteredTasks} deps={deps} onClose={() => setModalConfig({ ...modalConfig, isOpen: false })} onSave={handleSaveModal} onDelete={handleDeleteTask} />
     </div>
+  );
+}
+
+export default function GanttChart() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-[#8C959F]">Loading...</div>}>
+      <GanttChartContent />
+    </Suspense>
   );
 }

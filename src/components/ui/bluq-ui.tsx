@@ -189,8 +189,8 @@ export function Select({
 // ─── UPDATED PROJECT SELECTOR in bluq-ui.tsx ─────────────────
 export function ProjectSelector({
   selected,
-  options = [],
-  onSelect,
+  options: _options = [],
+  onSelect: _onSelect,
 }: {
   selected: string;
   options: string[];

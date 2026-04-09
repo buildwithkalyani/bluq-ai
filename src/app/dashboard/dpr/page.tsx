@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, Suspense } from 'react';
 import { useSearchParams } from "next/navigation";
 import {
   getDPRHistory,
@@ -21,7 +21,7 @@ const REPORT_SECTIONS = [
   { id: "site_photos",       label: "Site Photos",           defaultChecked: true },
 ];
 
-export default function DPRPage() {
+function DPRPageContent() {
   const searchParams = useSearchParams();
   const urlProjectId = Number(searchParams.get("projectId") ?? "0");
 
@@ -381,5 +381,13 @@ export default function DPRPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function DPRPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-[#8C959F]">Loading...</div>}>
+      <DPRPageContent />
+    </Suspense>
   );
 }

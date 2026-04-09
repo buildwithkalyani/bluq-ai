@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { getScheduleTasks } from "@/lib/mock-data";
 import { getAnalytics } from "@/lib/mock-data";
@@ -9,7 +9,7 @@ const Card = ({ children, className = "", style }: { children: React.ReactNode; 
   <div className={`bg-white border border-[#D0D7DE] rounded-lg p-4 ${className}`} style={style}>{children}</div>
 );
 
-export default function SCurvePage() {
+function SCurveContent() {
   const searchParams = useSearchParams();
   const projectId = Number(searchParams.get("projectId") ?? "0");
 
@@ -158,5 +158,13 @@ export default function SCurvePage() {
         </div>
       </Card>
     </div>
+  );
+}
+
+export default function SCurvePage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-[#8C959F]">Loading...</div>}>
+      <SCurveContent />
+    </Suspense>
   );
 }

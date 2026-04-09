@@ -3,6 +3,10 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import dotenv from "dotenv";
 import { healthRoute } from "./routes/health.js";
+import { projectsRoute } from "./routes/projects.js";
+import { tasksRoute } from "./routes/tasks.js";
+import { dprsRoute } from "./routes/dprs.js";
+import { demoRequestsRoute } from "./routes/demo-requests.js";
 
 dotenv.config();
 
@@ -24,6 +28,10 @@ async function start() {
   });
 
   await app.register(healthRoute);
+  await app.register(projectsRoute);
+  await app.register(tasksRoute);
+  await app.register(dprsRoute);
+  await app.register(demoRequestsRoute);
 
   try {
     await app.listen({ 

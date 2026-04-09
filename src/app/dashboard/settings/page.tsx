@@ -1,10 +1,8 @@
 "use client";
 
-import ProjectSettingsPage from "@/app/settings/page";
+import ProjectSettingsPage from "@/app/dashboard/settings/project/page";
 
 export default function DashboardSettingsPage() {
-  // Dashboard shell expects `/dashboard/settings` to exist; render the
-  // same UI as the standalone `/settings` route.
   return <ProjectSettingsPage />;
 }
 

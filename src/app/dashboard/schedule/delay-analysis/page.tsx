@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from "next/navigation";
 import {
   getDelayRows,
@@ -149,7 +149,7 @@ function AIPanel({ data }: { data: DelayDeepDive }) {
 }
 
 // ─── Main Page ──────────────────────────────────────────────────────────────
-export default function DelayAnalyticsPage() {
+function DelayAnalyticsPageContent() {
   const [selected, setSelected] = useState<number | null>(null);
   const [groupBy, setGroupBy] = useState(0);
   const [rows, setRows] = useState<DelayRow[]>([]);
@@ -351,5 +351,13 @@ export default function DelayAnalyticsPage() {
       {/* AI Detail Panel for selected row */}
       {deepDive && <AIPanel data={deepDive} />}
     </div>
+  );
+}
+
+export default function DelayAnalyticsPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-[#8C959F]">Loading...</div>}>
+      <DelayAnalyticsPageContent />
+    </Suspense>
   );
 }

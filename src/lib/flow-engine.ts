@@ -263,7 +263,7 @@ async function handleIssueDetected(
   await saveState(state);
 }
 
-async function handleEveningPrompt(
+async function _handleEveningPrompt(
   state: ConversationState,
   profile: WorkerProfile
 ) {

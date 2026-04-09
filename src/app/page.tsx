@@ -5,6 +5,7 @@ export default function Home() {
   const [firm, setFirm] = useState("");
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -35,9 +36,48 @@ export default function Home() {
     return () => { document.body.style.overflow = ""; };
   }, [menuOpen]);
 
-  function submitDemo() {
-    if (!firm || !email) { alert("Please enter your firm name and work email."); return; }
-    setSubmitted(true);
+  async function submitDemo(e?: React.FormEvent) {
+    if (e) e.preventDefault();
+
+    if (!firm) { alert("Please enter your firm name."); return; }
+    if (!email) { alert("Please enter your work email."); return; }
+
+    if (email.includes(" ")) {
+      alert("Email addresses cannot contain spaces. Please check for accidental spaces at the beginning or end.");
+      return;
+    }
+    if (!email.includes("@")) {
+      alert("Your email is missing the '@' symbol. Please enter a complete email address.");
+      return;
+    }
+    if (!email.includes(".")) {
+      alert("Your email is missing a domain extension (like .com, .in, or .ai).");
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      alert("This email format looks incorrect. Please double-check it.");
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const response = await fetch("https://bluq-ai-production.up.railway.app/demo-requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyName: firm, email }),
+      });
+
+      if (!response.ok) throw new Error("Failed to submit request.");
+      setSubmitted(true);
+    } catch (error) {
+      console.error("Submission Error:", error);
+      alert("Something went wrong while connecting to the server. Please try again or contact us directly.");
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   function closeMenu() {
@@ -300,7 +340,9 @@ export default function Home() {
               <div className="cta-form">
                 <input className="inp" type="text" placeholder="Firm name" value={firm} onChange={(e) => setFirm(e.target.value)} />
                 <input className="inp" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-                <button className="btn-submit" onClick={submitDemo}>Book My Demo →</button>
+                <button className="btn-submit" onClick={submitDemo} disabled={isLoading}>
+                  {isLoading ? "Submitting..." : "Book My Demo →"}
+                </button>
               </div>
               <p className="cta-note">Early access · Onboarding support included</p>
             </>

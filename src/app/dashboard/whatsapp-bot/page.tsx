@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Card, Btn } from "@/components/ui/bluq-ui";
+import { Btn } from "@/components/ui/bluq-ui";
 import type { FlowPhase } from "@/lib/flow-engine";
 
 // ─── TYPES (matching flow-engine exports) ───────────────────

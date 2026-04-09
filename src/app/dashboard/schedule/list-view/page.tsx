@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useState, useMemo, useRef, Suspense } from 'react';
 import { useSearchParams } from "next/navigation";
 import {
   getScheduleTasks,
@@ -19,7 +19,7 @@ const avgPct = (ts: ScheduleTask[]) => {
   return parents.length ? Math.round(parents.reduce((s, t) => s + t.pct, 0) / parents.length) : 0;
 };
 
-export default function ListViewPage() {
+function ListViewPageContent() {
   const [tasks, setTasks]             = useState<ScheduleTask[]>([]);
   const [deps, setDeps]               = useState<TaskDependency[]>([]);
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
@@ -537,5 +537,13 @@ export default function ListViewPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function ListViewPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-[#8C959F]">Loading...</div>}>
+      <ListViewPageContent />
+    </Suspense>
   );
 }

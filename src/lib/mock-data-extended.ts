@@ -72,7 +72,7 @@ const AI_SCHEDULE_OUTPUT: AIScheduleReasoning[] = [
   },
 ];
 
-export const getAIScheduleOutput = (projectId: number): Promise<AIScheduleReasoning[]> =>
+export const getAIScheduleOutput = (_projectId: number): Promise<AIScheduleReasoning[]> =>
   Promise.resolve(AI_SCHEDULE_OUTPUT);
 
 // ─── DELAY ANALYSIS ──────────────────────────────────────────
@@ -133,7 +133,7 @@ const DELAY_ROWS_BY_AREA: DelayRow[] = [
 ];
 
 // Keep legacy export name pointing to contractor rows for backward compat
-const DELAY_ROWS = DELAY_ROWS_BY_CONTRACTOR;
+const _DELAY_ROWS = DELAY_ROWS_BY_CONTRACTOR;
 
 const DELAY_DEEP_DIVES: DelayDeepDive[] = [
   // ── Al Nakheel Tower (projectId: 0) ──────────────────
@@ -389,7 +389,7 @@ export const DPR_SECTIONS = [
   "Next Steps & Recommendations",
 ] as const;
 
-export const getDPRHistory = (projectId: number): Promise<DPREntry[]> => Promise.resolve(DPR_HISTORY);
+export const getDPRHistory = (_projectId: number): Promise<DPREntry[]> => Promise.resolve(DPR_HISTORY);
 
 // ─── PROJECTS ────────────────────────────────────────────────
 export interface Project {

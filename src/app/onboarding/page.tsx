@@ -75,7 +75,7 @@ export default function OnboardingPage() {
               Set Up Your Workspace
             </div>
             <p className="text-[13px] text-[#57606a] mb-5">
-              This is your company's home on Bluq. Your branding will appear on
+              This is your company&apos;s home on Bluq. Your branding will appear on
               reports shared with clients.
             </p>
             <FormField label="Company Name *">

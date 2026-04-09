@@ -26,7 +26,7 @@ export default function ShareTokenPage({
   const [tasks, setTasks] = useState<ScheduleTask[]>([]);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [invalid, setInvalid] = useState(false);
+  const [invalid, _setInvalid] = useState(false);
 
   useEffect(() => {
     // TODO: Replace with actual share token validation
