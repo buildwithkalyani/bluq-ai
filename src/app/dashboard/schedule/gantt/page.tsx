@@ -846,8 +846,8 @@ export default function GanttChart() {
         delay: null,
         left: 0,
         width: 0,
-        photos: [],
-      }]);
+        photos: [] as string[],
+      } as any]);
     } else {
       setTasks(p => p.map(t => t.id === targetId
         ? { ...t, ...data, duration: `${diffDays(data.startDate, data.endDate)}d` }

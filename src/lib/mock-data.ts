@@ -186,7 +186,7 @@ const SCHEDULE_DEPS: TaskDependency[] = [
 export const getScheduleTasks = (projectId: number): Promise<ScheduleTask[]> =>
   Promise.resolve(SCHEDULE_TASKS.filter(t => t.projectId === projectId && !t.milestone));
 
-export const getScheduleDeps = (projectId: number): Promise<TaskDependency[]> =>
+export const getScheduleDeps = (_projectId: number): Promise<TaskDependency[]> =>
   Promise.resolve(SCHEDULE_DEPS);
 
 // ─── PROJECT ISSUES ──────────────────────────────────────────
@@ -269,7 +269,7 @@ const ANALYTICS: AnalyticsData = {
   ],
 };
 
-export const getAnalytics = (projectId: number): Promise<AnalyticsData> => Promise.resolve(ANALYTICS);
+export const getAnalytics = (_projectId: number): Promise<AnalyticsData> => Promise.resolve(ANALYTICS);
 
 // ─── CSV IMPORT ──────────────────────────────────────────────
 export interface ColumnMapping {
