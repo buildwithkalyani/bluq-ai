@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "setup": "npm install && cd bluq-api && npm install"
   },
   "dependencies": {
     "@types/pg": "^8.18.0",
