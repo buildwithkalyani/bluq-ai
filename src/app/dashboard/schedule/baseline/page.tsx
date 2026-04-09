@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, Suspense } from 'react';
 import { useSearchParams } from "next/navigation";
 import { getScheduleTasks, STATUS_CONFIG, type ScheduleTask } from "@/lib/mock-data";
 
@@ -31,7 +31,7 @@ function SlippageBadge({ baselineEnd, actualEnd }: { baselineEnd?: string; actua
   );
 }
 
-export default function BaselineActualPage() {
+function BaselineActualPageContent() {
   const [tasks, setTasks] = useState<ScheduleTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [collapsedPhases, setCollapsedPhases] = useState<Set<string>>(new Set());
@@ -187,5 +187,13 @@ export default function BaselineActualPage() {
         );
       })}
     </div>
+  );
+}
+
+export default function BaselineActualPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-[#8C959F]">Loading...</div>}>
+      <BaselineActualPageContent />
+    </Suspense>
   );
 }
