@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export async function middleware(request: NextRequest) {
-  // We use fetch to call the Better Auth endpoint directly. 
+  // LOCAL DEV BYPASS: skip auth check so you can view pages without a database connection.
+  // Remove this block before deploying or committing.
+  if (process.env.NODE_ENV === "development") {
+    return NextResponse.next();
+  }
+
+  // We use fetch to call the Better Auth endpoint directly.
   // This prevents importing the `pg` database library into the Edge Runtime.
   const response = await fetch(new URL("/api/auth/get-session", request.url), {
     headers: {
       // Pass the cookie so Better Auth knows who is asking
-      cookie: request.headers.get("cookie") || "", 
+      cookie: request.headers.get("cookie") || "",
     },
   });
 
