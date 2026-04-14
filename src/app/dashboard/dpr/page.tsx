@@ -9,6 +9,11 @@ import {
   type Project,
 } from "@/lib/mock-data-extended";
 import { getScheduleTasks } from "@/lib/mock-data";
+import {
+  fetchDPRHistory,
+  generateReport,
+  pollReportStatus,
+} from "@/lib/api-client";
 import { Card, SectionTitle } from "@/components/ui/bluq-ui";
 
 const REPORT_SECTIONS = [
@@ -23,7 +28,11 @@ const REPORT_SECTIONS = [
 
 function DPRPageContent() {
   const searchParams = useSearchParams();
-  const urlProjectId = Number(searchParams.get("projectId") ?? "0");
+  const urlProjectId  = Number(searchParams.get("projectId") ?? "0");
+  // Real UUIDs — when present, use real API. Absent = mock/demo mode.
+  const projectUuid   = searchParams.get("projectUuid");
+  const workspaceId   = searchParams.get("workspaceId");
+  const isRealData    = !!(projectUuid && workspaceId);
 
   const [viewState, setViewState] = useState<string>("generate");
   const [history, setHistory] = useState<DPREntry[]>([]);
@@ -56,29 +65,43 @@ function DPRPageContent() {
   // Load history + schedule data when project changes
   useEffect(() => {
     setLoading(true);
-    Promise.all([
-      getDPRHistory(selectedProjectId),
-      getScheduleTasks(selectedProjectId),
-    ]).then(([h, tasks]) => {
-      setHistory(h || []);
 
-      const parents = tasks.filter(t => !t.parentTaskId);
-      if (parents.length > 0) {
-        const actual = Math.round(parents.reduce((s, t) => s + t.pct, 0) / parents.length);
-        setActualProgress(actual);
-        // Planned = simple estimate: average of baseline pct (using baselineEnd offset)
-        const planned = Math.min(100, actual + 5); // approximation until real baseline data is available
-        setPlannedProgress(planned);
-        setWorkersOnSite(parents.reduce((s, t) => s + (t.pct > 0 ? 8 : 0), 0)); // rough estimate
-      } else {
-        setActualProgress(0);
-        setPlannedProgress(0);
-        setWorkersOnSite(0);
-      }
-
-      setLoading(false);
-    }).catch(() => setLoading(false));
-  }, [selectedProjectId]);
+    if (isRealData) {
+      // Real backend data
+      fetchDPRHistory(projectUuid!, workspaceId!)
+        .then((h) => {
+          setHistory(h || []);
+          if (h.length > 0) {
+            const latest = h[0];
+            setActualProgress(latest.overallProgress);
+            setPlannedProgress(Math.min(100, latest.overallProgress + 5));
+            setWorkersOnSite(latest.workersOnSite);
+          }
+        })
+        .catch(console.error)
+        .finally(() => setLoading(false));
+    } else {
+      // Mock fallback
+      Promise.all([
+        getDPRHistory(selectedProjectId),
+        getScheduleTasks(selectedProjectId),
+      ]).then(([h, tasks]) => {
+        setHistory(h || []);
+        const parents = tasks.filter(t => !t.parentTaskId);
+        if (parents.length > 0) {
+          const actual = Math.round(parents.reduce((s, t) => s + t.pct, 0) / parents.length);
+          setActualProgress(actual);
+          setPlannedProgress(Math.min(100, actual + 5));
+          setWorkersOnSite(parents.reduce((s, t) => s + (t.pct > 0 ? 8 : 0), 0));
+        } else {
+          setActualProgress(0);
+          setPlannedProgress(0);
+          setWorkersOnSite(0);
+        }
+        setLoading(false);
+      }).catch(() => setLoading(false));
+    }
+  }, [selectedProjectId, projectUuid, workspaceId]);
 
   const selectedProject = projects.find(p => p.id === selectedProjectId);
 
@@ -105,9 +128,68 @@ function DPRPageContent() {
 
   const toggleSection = (id: string) => setSections(prev => ({ ...prev, [id]: !prev[id] }));
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
+    if (!isRealData) {
+      // Mock mode — simulate as before
+      setGenerating(true);
+      setTimeout(() => { setGenerating(false); alert("PDF Generated and downloaded successfully! (demo mode)"); }, 2000);
+      return;
+    }
+
     setGenerating(true);
-    setTimeout(() => { setGenerating(false); alert("PDF Generated and downloaded successfully!"); }, 2000);
+    try {
+      // 1. Queue the job
+      const enabledSections = Object.entries(sections)
+        .filter(([, on]) => on)
+        .map(([id]) => id);
+
+      const { jobId } = await generateReport({
+        projectId: projectUuid!,
+        workspaceId: workspaceId!,
+        reportDate,
+        sections: enabledSections,
+      });
+
+      // 2. Poll until done (max 120s, every 3s)
+      let attempts = 0;
+      const poll = async (): Promise<void> => {
+        attempts++;
+        const result = await pollReportStatus(jobId);
+
+        if (result.status === "completed" && result.signedUrl) {
+          // 3. Auto-download the PDF
+          const a = document.createElement("a");
+          a.href = result.signedUrl;
+          a.download = `DPR-${reportDate}.pdf`;
+          a.target = "_blank";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setGenerating(false);
+          return;
+        }
+
+        if (result.status === "failed") {
+          alert(`PDF generation failed: ${result.error ?? "Unknown error"}`);
+          setGenerating(false);
+          return;
+        }
+
+        if (attempts >= 40) {
+          alert("PDF generation is taking longer than expected. Check Reports History in a few minutes.");
+          setGenerating(false);
+          return;
+        }
+
+        // Still processing — poll again
+        setTimeout(poll, 3000);
+      };
+
+      setTimeout(poll, 3000);
+    } catch (err: any) {
+      alert(`Failed to generate report: ${err.message}`);
+      setGenerating(false);
+    }
   };
 
   if (loading) {

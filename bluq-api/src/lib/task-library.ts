@@ -1182,7 +1182,7 @@ export const CORE_TASKS: TaskTemplate[] = [
       { role: "Plumber", count: 1 },
       { role: "Helper", count: 2 }
     ],
-    predecessors: [{ taskCode: "MW-01", type: "FS", lagDays: 3 }],
+    predecessors: [{ taskCode: "MW-01", type: "FS", lagDays: 3, note: "all floors" }],
     isCodeRef: ["IS 13592", "IS 1729"],
     dsrRef: "DSR 17.11",
     safetyChecks: ["Connect to storm water drain"],
@@ -1200,7 +1200,7 @@ export const CORE_TASKS: TaskTemplate[] = [
       { role: "Plumber", count: 1 },
       { role: "Helper", count: 2 }
     ],
-    predecessors: [{ taskCode: "PB-02", type: "FS", lagDays: 0 }],
+    predecessors: [{ taskCode: "PB-02", type: "FS", lagDays: 0, note: "all floors" }],
     isCodeRef: ["IS 5329"],
     dsrRef: "DSR 17.11",
     safetyChecks: ["Extend 2m above terrace; cowl cap"],
@@ -1383,7 +1383,7 @@ export const CORE_TASKS: TaskTemplate[] = [
       { role: "Sr. Electrician", count: 1 },
       { role: "Helper", count: 2 }
     ],
-    predecessors: [{ taskCode: "EL-05", type: "FS", lagDays: 0 }],
+    predecessors: [{ taskCode: "EL-05", type: "FS", lagDays: 0, note: "all floors" }],
     isCodeRef: ["IS 8828", "IS 732"],
     dsrRef: "DSR 19.14",
     safetyChecks: ["DISCOM approval; bus bar sizing"],
@@ -1504,9 +1504,9 @@ export const CORE_TASKS: TaskTemplate[] = [
       { role: "Labourer", count: 2 }
     ],
     predecessors: [
-      { taskCode: "PT-01", type: "FS", lagDays: 1 },
+      { taskCode: "PT-01", type: "FS", lagDays: 1, note: "all floors" },
       { taskCode: "PT-02", type: "FS", lagDays: 1 },
-      { taskCode: "PT-03", type: "FS", lagDays: 1 }
+      { taskCode: "PT-03", type: "FS", lagDays: 1, note: "all floors" }
     ],
     isCodeRef: ["IS 2402"],
     dsrRef: "",
@@ -1691,7 +1691,7 @@ export const CORE_TASKS: TaskTemplate[] = [
       { role: "Stone Specialist", count: 1 },
       { role: "Helper", count: 2 }
     ],
-    predecessors: [{ taskCode: "SS-10", type: "FS", lagDays: 7 }],
+    predecessors: [{ taskCode: "SS-10", type: "FS", lagDays: 7, note: "all floors" }],
     isCodeRef: ["IS 1124", "IS 3622"],
     dsrRef: "DSR 11.15-11.18",
     safetyChecks: ["Nosing strip; anti-skid groove"],
@@ -1709,7 +1709,7 @@ export const CORE_TASKS: TaskTemplate[] = [
       { role: "Mason", count: 2 },
       { role: "Helper", count: 3 }
     ],
-    predecessors: [{ taskCode: "PT-01", type: "FS", lagDays: 3, note: "common areas" }],
+    predecessors: [{ taskCode: "PT-01", type: "FS", lagDays: 3, note: "all floors" }],
     isCodeRef: ["IS 15622"],
     dsrRef: "DSR 11.8",
     safetyChecks: ["Pattern layout approval; grouting"],
@@ -2001,8 +2001,8 @@ export const CORE_TASKS: TaskTemplate[] = [
       { role: "Helper", count: 1 }
     ],
     predecessors: [
-      { taskCode: "DW-05", type: "FS", lagDays: 3 },
-      { taskCode: "DW-06", type: "FS", lagDays: 3 },
+      { taskCode: "DW-05", type: "FS", lagDays: 3, note: "all floors" },
+      { taskCode: "DW-06", type: "FS", lagDays: 3, note: "all floors" },
       { taskCode: "DW-07", type: "FS", lagDays: 3 }
     ],
     isCodeRef: ["IS 2074"],
@@ -2238,7 +2238,7 @@ export const CORE_TASKS: TaskTemplate[] = [
       { role: "Technician", count: 1 },
       { role: "Helper", count: 1 }
     ],
-    predecessors: [{ taskCode: "EL-04", type: "FS", lagDays: 0 }],
+    predecessors: [{ taskCode: "EL-04", type: "FS", lagDays: 0, note: "all floors" }],
     isCodeRef: [],
     dsrRef: "",
     safetyChecks: ["DVR room; cable management"],
@@ -2929,7 +2929,7 @@ export const ADDITIONAL_TASKS: TaskTemplate[] = [
       { role: "Electrician", count: 1 },
       { role: "Helper", count: 2 }
     ],
-    predecessors: [{ taskCode: "EL-04", type: "FS", lagDays: 0 }],
+    predecessors: [{ taskCode: "EL-04", type: "FS", lagDays: 0, note: "all floors" }],
     isCodeRef: ["IS 2189", "NBC Part-IV"],
     dsrRef: "",
     safetyChecks: ["Zone-wise commissioning; panel integration; loop testing"],
@@ -4396,6 +4396,119 @@ export function getTask(code: string): TaskTemplate | undefined {
 /** Get all tasks for a phase */
 export function getTasksByPhase(phase: Phase): TaskTemplate[] {
   return [...ALL_TASKS.values()].filter(t => t.phase === phase);
+}
+
+// ---------------------------------------------------------------------------
+// 7. CONTRACTOR TYPE MAPPING
+// ---------------------------------------------------------------------------
+// Maps every task code to a single contractor type.
+// Rules engine calls this — it is NOT stored on TaskTemplate (computed at runtime).
+//
+// Grouping logic:
+//   Phase → Contractor Type → Floor/Area → Task (leaf)
+//
+// One task = one contractor. If work requires two trades, it is split into
+// separate tasks (e.g. PB-07 is Fire Fighting, not Plumbing, even though
+// pipes are involved).
+// ---------------------------------------------------------------------------
+
+export type ContractorType =
+  | "Civil"
+  | "Plumbing"
+  | "Electrical"
+  | "Waterproofing"
+  | "Flooring"
+  | "Carpentry"
+  | "Painting"
+  | "Fabrication"
+  | "Lift Company"
+  | "Fire Fighting"
+  | "HVAC"
+  | "Landscaping"
+  | "Specialist";
+
+export function getContractorType(code: string): ContractorType {
+  // ── Task-specific overrides (exceptions to prefix rules) ─────────────────
+
+  const overrides: Record<string, ContractorType> = {
+    // PL-range: plinth-level plumbing lines (PL-01 to PL-04 stay Civil)
+    "PL-05": "Plumbing",  // water supply connection at plinth
+    "PL-06": "Plumbing",  // drainage connection at plinth
+    "PL-07": "Plumbing",  // sump / underground tank
+
+    // PB-range: fire fighting exception
+    "PB-07": "Fire Fighting",  // wet riser pipeline
+
+    // EX-range: each has a different trade
+    "EX-02": "Fabrication",    // MS main gate
+    "EX-05": "Electrical",     // external street/gate lights
+    "EX-06": "Plumbing",       // overhead water tank
+    "EX-07": "Plumbing",       // borewell / water connection
+    "EX-08": "Plumbing",       // pump room
+    "EX-09": "Plumbing",       // STP / sewage connection
+    "EX-10": "Lift Company",   // lift installation
+    "EX-11": "Electrical",     // CCTV & intercom
+    "EX-12": "Landscaping",    // landscaping & irrigation
+
+    // HO-range: select tasks handled by specialist contractor
+    "HO-02": "Electrical",     // permanent DISCOM connection
+    "HO-03": "Plumbing",       // water department NOC / connection
+    "HO-04": "Fire Fighting",  // fire department NOC
+
+    // ADDITIONAL_TASKS exceptions
+    "DG-01": "Electrical",     // diesel generator set
+    "CW-01": "Fabrication",    // curtain wall aluminium framework
+    "CW-02": "Fabrication",    // curtain wall glazing
+    "TC-01": "Specialist",     // tower crane erection
+    "TC-02": "Specialist",     // tower crane dismantling
+    "SW-01": "Specialist",     // swimming pool shell
+    "SW-02": "Specialist",     // swimming pool finishing & plant
+    "SO-01": "Specialist",     // solar panels
+    "SO-02": "Specialist",     // solar inverter & BOS
+    "FC-01": "Carpentry",      // false ceiling (gypsum board)
+    "FD-01": "Fire Fighting",  // fire detection & alarm system
+  };
+
+  if (overrides[code]) return overrides[code];
+
+  // AI-generated novel tasks — default to Civil; PM reviews and can reassign
+  if (code.startsWith("AI-")) return "Civil";
+
+  // ── Prefix-based rules ───────────────────────────────────────────────────
+
+  const prefix = code.split("-")[0];
+
+  switch (prefix) {
+    // Civil trades
+    case "SP": return "Civil";   // site preparation
+    case "FN": return "Civil";   // foundation (isolated / combined)
+    case "PL": return "Civil";   // plinth works (PL-05/06/07 overridden above)
+    case "SS": return "Civil";   // superstructure — RCC frame
+    case "MW": return "Civil";   // masonry & blockwork
+    case "PT": return "Civil";   // plastering (done by civil/masonry contractor)
+    case "PF": return "Civil";   // pile foundation
+    case "RF": return "Civil";   // raft foundation
+    case "BM": return "Civil";   // basement construction
+    case "RW": return "Civil";   // retaining wall
+    case "HO": return "Civil";   // approvals & handover (HO-02/03/04 overridden)
+    case "EX": return "Civil";   // external works default (specific codes overridden)
+
+    // MEP & specialist trades
+    case "PB": return "Plumbing";
+    case "EL": return "Electrical";
+    case "WP": return "Waterproofing";
+    case "FL": return "Flooring";
+    case "PA": return "Painting";
+    case "HV": return "HVAC";
+
+    // Doors & windows: DW-01 to DW-03 = Carpentry, DW-04 to DW-07 = Fabrication (MS/aluminium)
+    case "DW": {
+      const num = parseInt(code.split("-")[1] ?? "0", 10);
+      return num <= 3 ? "Carpentry" : "Fabrication";
+    }
+
+    default: return "Civil";
+  }
 }
 
 /** Get total task count */

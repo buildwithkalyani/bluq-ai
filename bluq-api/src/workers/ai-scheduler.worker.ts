@@ -40,10 +40,11 @@ import { documents, tasks, scheduleVersions, taskDependencies } from "../db/sche
 import { eq, and } from "drizzle-orm";
 
 // Pipeline modules
-import { parseFile, parseFiles, fetchFileBuffer, type ParsedDocument } from "../lib/parsers.js";
+import { parseFiles, fetchFileBuffer } from "../lib/parsers.js";
 import { extractParameters, type ProjectParameters } from "../lib/parameter-extractor.js";
 import { selectTasks, printTaskSummary, type RulesEngineResult } from "../lib/rules-engine.js";
 import { calculateSchedule, type ScheduleResult, type ScheduledTask } from "../lib/duration-calculator.js";
+import { generateNovelTasks } from "../lib/novel-task-generator.js";
 
 // ---------------------------------------------------------------------------
 // JOB TYPES
@@ -126,7 +127,7 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
   taskCount: number;
   durationDays: number;
 }> {
-  const { projectId, workspaceId, userId } = job.data;
+  const { projectId, workspaceId } = job.data;
   const apiKey = process.env.ANTHROPIC_API_KEY;
 
   if (!apiKey) {
@@ -266,10 +267,19 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
       params.novelScopeItems.join(", ")
     );
 
-    // For MVP, we log these and flag them for the PM to add manually.
-    // In v2, this is where Claude generates tasks using a strict template.
-    // Those generated tasks would be flagged as source: "ai_generated"
-    // and shown to the PM with an "AI-generated, needs review" badge.
+    // Call Claude Haiku to generate tasks for items not in the 143-task library.
+    // These are appended after the main schedule and flagged source: "ai_generated".
+    // The PM sees them with an "AI-generated, needs review" badge.
+    novelTasks = await generateNovelTasks(
+      params.novelScopeItems,
+      params,
+      apiKey,
+      scheduleResult.summary.projectEndDate,
+    );
+
+    if (novelTasks.length > 0) {
+      console.log(`[worker] Generated ${novelTasks.length} novel tasks via Claude Haiku`);
+    }
   }
 
   // =========================================================================
@@ -358,8 +368,10 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     startDate: t.startDate,
     endDate: t.endDate,
     durationDays: t.finalDurationDays,
-    contractor: null as string | null,
-    area: t.floorLabel || null,
+    contractor: t.contractorType,
+    area: t.wingLabel
+      ? `${t.wingLabel} — ${t.floorLabel ?? ""}`.trim()
+      : (t.floorLabel ?? null),
     isMilestone: false,
     sortOrder: index,
   }));

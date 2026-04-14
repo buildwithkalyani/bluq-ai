@@ -30,6 +30,7 @@ import {
     type Phase,
     type BuildingType,
     type Predecessor,
+    type ContractorType,
     CORE_TASKS,
     ADDITIONAL_TASKS,
     ALL_TASKS,
@@ -37,6 +38,7 @@ import {
     BUILDING_TYPES,
     CONDITIONAL_RULES,
     getTask,
+    getContractorType,
   } from "./task-library.js";
   
   import { type ProjectParameters } from "./parameter-extractor.js";
@@ -56,7 +58,9 @@ import {
     // Calculated by rules engine
     floorNumber?: number;          // which floor this task is for (if per-floor)
     floorLabel?: string;           // "Ground Floor", "1st Floor", etc.
-    fullName: string;              // e.g., "Column reinforcement — 2nd Floor"
+    wingCode?: string;             // "WA", "WB", "T1" — set when project has multiple wings
+    wingLabel?: string;            // "Wing A", "Tower 1" — human-readable wing name
+    fullName: string;              // e.g., "Column reinforcement — Wing A 2nd Floor"
   
     // From library, potentially modified by regional params
     productivityRateMin: number;
@@ -76,6 +80,9 @@ import {
     source: "library" | "building_type" | "conditional_rule" | "regional";
     isPerFloor: boolean;
     isPerFlat: boolean;
+
+    // Contractor assignment — used for Gantt grouping, filtering, and color coding
+    contractorType: ContractorType;
   
     // Regional adjustments applied
     regionalAdjustments: {
@@ -259,26 +266,55 @@ import {
       const { task, source } = entry;
   
       if (task.perFloor) {
-        // Expand: one instance per floor (ground + upper floors)
-        const totalFloors = params.floors + 1; // +1 for ground floor
-        for (let floor = 0; floor < totalFloors; floor++) {
-          const floorCode = `${code}-F${floor}`;
-          const floorLabel = getFloorLabel(floor);
-          const predecessors = resolveFloorPredecessors(task.predecessors, floor, params.floors);
-  
-          expandedTasks.push(
-            buildSelectedTask(task, {
-              code: floorCode,
-              originalCode: code,
-              floorNumber: floor,
-              floorLabel,
-              fullName: `${task.name} — ${floorLabel}`,
-              predecessors,
-              source,
-              region,
-            })
-          );
-          floorsExpanded++;
+        if (params.wings && params.wings.length >= 2) {
+          // Multi-wing expansion: SS-01 → SS-01-WA-F0, SS-01-WA-F1, SS-01-WB-F0, ...
+          for (const wing of params.wings) {
+            const wingCode = nameToWingCode(wing.name);
+            const wingTotalFloors = wing.floors + 1; // +1 for ground floor
+            for (let floor = 0; floor < wingTotalFloors; floor++) {
+              const floorLabel = getFloorLabel(floor);
+              const predecessors = resolveFloorPredecessors(
+                task.predecessors, floor, wing.floors, wingCode
+              );
+              expandedTasks.push(
+                buildSelectedTask(task, {
+                  code: `${code}-W${wingCode}-F${floor}`,
+                  originalCode: code,
+                  floorNumber: floor,
+                  floorLabel,
+                  wingCode,
+                  wingLabel: wing.name,
+                  fullName: `${task.name} — ${wing.name} ${floorLabel}`,
+                  predecessors,
+                  source,
+                  region,
+                })
+              );
+              floorsExpanded++;
+            }
+          }
+        } else {
+          // Single-wing: existing behaviour (codes stay SS-01-F0, SS-01-F1, ...)
+          const totalFloors = params.floors + 1; // +1 for ground floor
+          for (let floor = 0; floor < totalFloors; floor++) {
+            const floorLabel = getFloorLabel(floor);
+            const predecessors = resolveFloorPredecessors(
+              task.predecessors, floor, params.floors
+            );
+            expandedTasks.push(
+              buildSelectedTask(task, {
+                code: `${code}-F${floor}`,
+                originalCode: code,
+                floorNumber: floor,
+                floorLabel,
+                fullName: `${task.name} — ${floorLabel}`,
+                predecessors,
+                source,
+                region,
+              })
+            );
+            floorsExpanded++;
+          }
         }
       } else if (task.perFlat) {
         // Per-flat tasks get a single entry — duration calculator will multiply
@@ -287,7 +323,7 @@ import {
             code,
             originalCode: code,
             fullName: `${task.name} (×${params.totalUnits} flats)`,
-            predecessors: resolveSimplePredecessors(task.predecessors, selectedCodes),
+            predecessors: resolveSimplePredecessors(task.predecessors, selectedCodes, params.floors, params.wings ?? undefined),
             source,
             region,
           })
@@ -299,7 +335,7 @@ import {
             code,
             originalCode: code,
             fullName: task.name,
-            predecessors: resolveSimplePredecessors(task.predecessors, selectedCodes),
+            predecessors: resolveSimplePredecessors(task.predecessors, selectedCodes, params.floors, params.wings ?? undefined),
             source,
             region,
           })
@@ -470,6 +506,28 @@ import {
     if (floor === 3) return "3rd Floor";
     return `${floor}th Floor`;
   }
+
+  /**
+   * Convert a wing name to a short alphanumeric code used in task codes.
+   * "Wing A" → "WA", "Tower 1" → "T1", "Block B" → "WB", "Phase 2" → "P2"
+   */
+  function nameToWingCode(name: string): string {
+    const n = name.trim();
+    // "Wing X" or "Block X" → "W" + X (strip spaces)
+    const wingMatch = n.match(/^(?:wing|block)\s*(.+)$/i);
+    if (wingMatch) return `W${wingMatch[1].replace(/\s+/g, "").toUpperCase()}`;
+    // "Tower X" → "T" + X
+    const towerMatch = n.match(/^tower\s*(.+)$/i);
+    if (towerMatch) return `T${towerMatch[1].replace(/\s+/g, "").toUpperCase()}`;
+    // "Phase X" → "P" + X
+    const phaseMatch = n.match(/^phase\s*(.+)$/i);
+    if (phaseMatch) return `P${phaseMatch[1].replace(/\s+/g, "").toUpperCase()}`;
+    // Single letter/number → "W" + it
+    if (/^[A-Za-z0-9]$/.test(n)) return `W${n.toUpperCase()}`;
+    // Fallback: take first char of each word, prefix with W
+    const initials = n.split(/\s+/).map(w => w[0]).join("").toUpperCase();
+    return `W${initials}`;
+  }
   
   /**
    * Resolve predecessors for floor-expanded tasks.
@@ -483,14 +541,20 @@ import {
   function resolveFloorPredecessors(
     predecessors: Predecessor[],
     currentFloor: number,
-    totalUpperFloors: number
+    totalUpperFloors: number,
+    wingCode?: string
   ): ResolvedPredecessor[] {
     const resolved: ResolvedPredecessor[] = [];
-  
+
+    // Helper: build a floor-aware task code, including wing prefix when present.
+    // Single-wing: "SS-01-F2"   Multi-wing: "SS-01-WA-F2"
+    const wfc = (base: string, f: number) =>
+      wingCode ? `${base}-W${wingCode}-F${f}` : `${base}-F${f}`;
+
     for (const pred of predecessors) {
       const predTask = getTask(pred.taskCode);
       if (!predTask) continue;
-  
+
       if (predTask.perFloor) {
         // Predecessor is also a per-floor task
         if (pred.note?.includes("for ground floor") && currentFloor === 0) {
@@ -503,21 +567,21 @@ import {
         } else if (pred.note?.includes("for upper floors") && currentFloor > 0) {
           // Upper floors depend on previous floor's version of this predecessor
           resolved.push({
-            taskCode: `${pred.taskCode}-F${currentFloor - 1}`,
+            taskCode: wfc(pred.taskCode, currentFloor - 1),
             type: pred.type,
             lagDays: pred.lagDays,
           });
         } else if (pred.note?.includes("per floor") || pred.note?.includes("same floor")) {
           // Same floor dependency
           resolved.push({
-            taskCode: `${pred.taskCode}-F${currentFloor}`,
+            taskCode: wfc(pred.taskCode, currentFloor),
             type: pred.type,
             lagDays: pred.lagDays,
           });
         } else {
           // Default: same floor
           resolved.push({
-            taskCode: `${pred.taskCode}-F${currentFloor}`,
+            taskCode: wfc(pred.taskCode, currentFloor),
             type: pred.type,
             lagDays: pred.lagDays,
           });
@@ -609,22 +673,63 @@ import {
   
   /**
    * Resolve predecessors for non-floor-expanded tasks.
-   * Checks if predecessor exists in selected tasks.
+   *
+   * When a non-perFloor task references a perFloor predecessor, we resolve it to
+   * the appropriate floor-specific code:
+   *   - note includes "GF" or "ground floor" → F0
+   *   - all other notes (terrace, all floors, all floors done, etc.) → F{topFloor}
+   * This matches the intent of building-level tasks that depend on the whole
+   * structure being up before they can start.
    */
   function resolveSimplePredecessors(
     predecessors: Predecessor[],
-    selectedCodes: Map<string, any>
+    selectedCodes: Map<string, any>,
+    totalUpperFloors: number,
+    wings?: Array<{ name: string; floors: number }>
   ): ResolvedPredecessor[] {
-    return predecessors
-      .filter(pred => {
-        // Keep if predecessor is in selected tasks OR if it's a floor-expanded task code
-        return selectedCodes.has(pred.taskCode) || pred.taskCode === "";
-      })
-      .map(pred => ({
-        taskCode: pred.taskCode,
-        type: pred.type,
-        lagDays: pred.lagDays,
-      }));
+    const resolved: ResolvedPredecessor[] = [];
+
+    for (const pred of predecessors) {
+      if (pred.taskCode === "") continue;
+
+      const predTask = getTask(pred.taskCode);
+      if (!predTask) continue;
+
+      if (predTask.perFloor) {
+        // This non-perFloor task depends on a perFloor task — resolve to the right floor.
+        const note = pred.note ?? "";
+        const isGroundFloor = note.includes("GF") || note.toLowerCase().includes("ground floor");
+
+        if (wings && wings.length >= 2) {
+          // Multi-wing: add one predecessor per wing pointing to that wing's target floor.
+          for (const wing of wings) {
+            const wc = nameToWingCode(wing.name);
+            const targetFloor = isGroundFloor ? 0 : wing.floors;
+            resolved.push({
+              taskCode: `${pred.taskCode}-W${wc}-F${targetFloor}`,
+              type: pred.type,
+              lagDays: pred.lagDays,
+            });
+          }
+        } else {
+          // Single-wing: original behaviour
+          const targetFloor = isGroundFloor ? 0 : totalUpperFloors;
+          resolved.push({
+            taskCode: `${pred.taskCode}-F${targetFloor}`,
+            type: pred.type,
+            lagDays: pred.lagDays,
+          });
+        }
+      } else if (selectedCodes.has(pred.taskCode)) {
+        resolved.push({
+          taskCode: pred.taskCode,
+          type: pred.type,
+          lagDays: pred.lagDays,
+        });
+      }
+    }
+
+    return resolved;
   }
   
   
@@ -643,6 +748,8 @@ import {
       region: typeof REGIONAL_PARAMS[RegionCode];
       floorNumber?: number;
       floorLabel?: string;
+      wingCode?: string;
+      wingLabel?: string;
     }
   ): SelectedTask {
     const { region } = options;
@@ -658,6 +765,8 @@ import {
       unit: template.unit,
       floorNumber: options.floorNumber,
       floorLabel: options.floorLabel,
+      wingCode: options.wingCode,
+      wingLabel: options.wingLabel,
       fullName: options.fullName,
   
       productivityRateMin: template.productivityRate.min,
@@ -675,7 +784,8 @@ import {
       source: options.source,
       isPerFloor: template.perFloor || false,
       isPerFlat: template.perFlat || false,
-  
+      contractorType: getContractorType(options.originalCode),
+
       regionalAdjustments: {
         labourCostIndex: region.labourCostIndex,
         materialCostIndex: region.materialCostIndex,

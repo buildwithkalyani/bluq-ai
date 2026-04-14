@@ -36,9 +36,11 @@ export interface ScheduledTask {
   fullName: string;
   unit: string;
 
-  // Floor info
+  // Floor / wing info
   floorNumber?: number;
   floorLabel?: string;
+  wingCode?: string;             // "WA", "WB" — set when project has multiple wings
+  wingLabel?: string;            // "Wing A", "Tower 1"
 
   // Calculated values
   estimatedQuantity: number;
@@ -72,6 +74,7 @@ export interface ScheduledTask {
   source: string;
   isPerFloor: boolean;
   isPerFlat: boolean;
+  contractorType: string;     // from getContractorType() — used for Gantt grouping
   regionalAdjustments: {
     labourCostIndex: number;
     materialCostIndex: number;

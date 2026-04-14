@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL!;
+const API_URL = process.env.FASTIFY_API_URL!;
 
 // Use this in Server Components and Server Actions to call the backend API.
 // It automatically attaches the current user's session token.

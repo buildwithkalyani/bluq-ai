@@ -42,3 +42,8 @@ drizzle/meta/
 # Editor
 .cursor/
 .vscode/
+
+# Open .gitignore in your project root and add:
+graphify-out/
+
+.claude/
