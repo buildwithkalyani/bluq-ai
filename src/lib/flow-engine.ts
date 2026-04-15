@@ -3,25 +3,31 @@ import { sendTextMessage, sendButtonMessage, sendListMessage } from "@/lib/whats
 import { Redis } from "@upstash/redis";
 
 // ─── REDIS CLIENT ─────────────────────────────────────────────
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL!,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-});
+let _redis: Redis | null = null;
+function getRedis(): Redis {
+  if (!_redis) {
+    _redis = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL!,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+    });
+  }
+  return _redis;
+}
 
 const STATE_TTL = 60 * 60 * 24; // 24 hours
 
 async function getState(phone: string): Promise<ConversationState | null> {
-  const raw = await redis.get<ConversationState>(`wa:state:${phone}`);
+  const raw = await getRedis().get<ConversationState>(`wa:state:${phone}`);
   if (!raw) return null;
   return { ...raw, lastUpdated: new Date(raw.lastUpdated) };
 }
 
 export async function saveState(state: ConversationState): Promise<void> {
-  await redis.set(`wa:state:${state.phone}`, state, { ex: STATE_TTL });
+  await getRedis().set(`wa:state:${state.phone}`, state, { ex: STATE_TTL });
 }
 
 async function getAllStates(): Promise<ConversationState[]> {
-  const keys = await redis.keys("wa:state:*");
+  const keys = await getRedis().keys("wa:state:*");
   if (!keys.length) return [];
   const states = await Promise.all(keys.map((k) => redis.get<ConversationState>(k)));
   return states

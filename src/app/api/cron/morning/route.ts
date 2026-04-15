@@ -1,5 +1,3 @@
-export const dynamic = "force-dynamic";
-
 import { NextRequest, NextResponse } from "next/server";
 import { getWorkersForToday, initWorkerState } from "@/lib/flow-engine";
 import { sendButtonMessage } from "@/lib/whatsapp";
