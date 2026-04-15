@@ -4,8 +4,8 @@ import { Redis } from "@upstash/redis";
 
 // ─── REDIS CLIENT ─────────────────────────────────────────────
 const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_URL!,
-  token: process.env.UPSTASH_REDIS_TOKEN!,
+  url: process.env.UPSTASH_REDIS_REST_URL!,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
 });
 
 const STATE_TTL = 60 * 60 * 24; // 24 hours
