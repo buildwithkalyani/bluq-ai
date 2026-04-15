@@ -15,23 +15,55 @@ import {
   Btn,
 } from "@/components/ui/bluq-ui";
 import ProjectDetailView from "./ProjectDetailView";
-import CreateProjectModal from "./CreateProjectModal"; 
+import CreateProjectModal from "./CreateProjectModal";
+import { useWorkspace } from "@/context/workspace";
+import { fetchProjects } from "@/lib/api-client";
 
 export default function OverviewPage() {
+  const { workspaceId, loading: wsLoading } = useWorkspace();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
-  
+
   // Modal State
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   useEffect(() => {
-    getProjects().then((data) => {
-      setProjects(data);
-      setLoading(false);
-    });
-  }, []);
+    if (wsLoading) return; // wait for workspace to resolve
+
+    if (workspaceId) {
+      // Real backend
+      fetchProjects(workspaceId)
+        .then((rows) => {
+          setProjects(
+            rows.map((p) => ({
+              id: p.id as any,
+              name: p.projectName,
+              code: p.projectCode ?? "",
+              pct: Number(p.percentComplete ?? 0),
+              status: "notStarted" as const,
+              tasks: 0,
+              tasksDone: 0,
+              workers: 0,
+              issues: 0,
+              stage: p.stage ?? "",
+              startDate: p.startDate ?? "",
+              endDate: p.endDate ?? "",
+              address: p.address ?? "",
+            }))
+          );
+        })
+        .catch(console.error)
+        .finally(() => setLoading(false));
+    } else {
+      // Mock fallback — demo / client preview mode
+      getProjects().then((data) => {
+        setProjects(data);
+        setLoading(false);
+      });
+    }
+  }, [workspaceId, wsLoading]);
 
   const filtered = projects.filter((p) =>
     p.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -200,7 +232,10 @@ export default function OverviewPage() {
       {isCreateModalOpen && (
         <CreateProjectModal
           onClose={() => setIsCreateModalOpen(false)}
-          onCreate={(project) => setProjects(prev => [...prev, project])}
+          onCreate={(project) => {
+            setProjects(prev => [...prev, project]);
+            setIsCreateModalOpen(false);
+          }}
         />
       )}
     </div>

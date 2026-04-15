@@ -4,6 +4,9 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, Suspense } from "react";
 import { getProjects, Project } from "@/lib/mock-data";
+import { WorkspaceProvider, useWorkspace } from "@/context/workspace";
+import { fetchProjects, createProject } from "@/lib/api-client";
+import { authClient } from "@/lib/auth-client";
 
 // ─── NAV CONFIGURATION ───────────────────────────────────────
 const NAV_ITEMS = [
@@ -93,11 +96,13 @@ function NewProjectModal({
   onClose: () => void;
   onCreated: (project: Project) => void;
 }) {
+  const { workspaceId } = useWorkspace();
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState("");
 
   // Auto-generate code from name
   useEffect(() => {
@@ -111,14 +116,47 @@ function NewProjectModal({
     }
   }, [name]);
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!name.trim()) return;
     setCreating(true);
+    setError("");
 
-    // TODO: Replace with actual API call
-    // const res = await fetch('/api/projects', { method: 'POST', body: JSON.stringify({ name, code, startDate, endDate }) })
+    if (workspaceId) {
+      // Real backend
+      try {
+        const p = await createProject({
+          workspaceId,
+          projectName: name.trim(),
+          projectCode: code || undefined,
+          startDate: startDate || undefined,
+          endDate: endDate || undefined,
+        });
+        onCreated({
+          id: p.id as any,
+          name: p.projectName,
+          code: p.projectCode ?? code,
+          pct: 0,
+          status: "notStarted",
+          tasks: 0,
+          tasksDone: 0,
+          workers: 0,
+          issues: 0,
+          stage: p.stage ?? "Pre-construction",
+          startDate: startDate || "TBD",
+          endDate: endDate || "TBD",
+          address: p.address ?? "",
+        });
+        return;
+      } catch (err: any) {
+        setError(err.message);
+        setCreating(false);
+        return;
+      }
+    }
+
+    // Mock fallback (demo mode)
     const newProject: Project = {
-      id: Date.now(), // temp ID — API will assign real one
+      id: Date.now(),
       name: name.trim(),
       code,
       pct: 0,
@@ -132,11 +170,7 @@ function NewProjectModal({
       endDate: endDate || "TBD",
       address: "",
     };
-
-    setTimeout(() => {
-      setCreating(false);
-      onCreated(newProject);
-    }, 500);
+    setTimeout(() => { setCreating(false); onCreated(newProject); }, 500);
   };
 
   return (
@@ -161,6 +195,11 @@ function NewProjectModal({
 
         {/* Form */}
         <div className="px-5 py-4 space-y-3.5">
+          {error && (
+            <div className="text-[12px] text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+              {error}
+            </div>
+          )}
           <div>
             <label className="block text-[11px] font-bold text-[#57606a] mb-1">
               PROJECT NAME *
@@ -240,22 +279,50 @@ function ProjectDropdown() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { workspaceId } = useWorkspace();
   const [projects, setProjects] = useState<Project[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [showNewModal, setShowNewModal] = useState(false);
 
   useEffect(() => {
-    getProjects().then(setProjects);
-  }, []);
+    if (workspaceId) {
+      // Real backend
+      fetchProjects(workspaceId).then((rows) => {
+        setProjects(rows.map((p) => ({
+          id: p.id as any,
+          name: p.projectName,
+          code: p.projectCode ?? "",
+          pct: Number(p.percentComplete ?? 0),
+          status: "notStarted" as const,
+          tasks: 0,
+          tasksDone: 0,
+          workers: 0,
+          issues: 0,
+          stage: p.stage ?? "",
+          startDate: p.startDate ?? "",
+          endDate: p.endDate ?? "",
+          address: p.address ?? "",
+        })));
+      }).catch(console.error);
+    } else {
+      // Mock fallback
+      getProjects().then(setProjects);
+    }
+  }, [workspaceId]);
 
   const currentId = searchParams.get("projectId") || "0";
   const selected =
-    projects.find((p) => p.id === Number(currentId))?.name ||
+    projects.find((p) => String(p.id) === currentId)?.name ||
     "Select Project...";
 
   const handleSelect = (name: string) => {
     const p = projects.find((proj) => proj.name === name);
-    if (p) router.push(`${pathname}?projectId=${p.id}`);
+    if (p) {
+      const params = workspaceId
+        ? `?projectId=${p.id}&workspaceId=${workspaceId}`
+        : `?projectId=${p.id}`;
+      router.push(`${pathname}${params}`);
+    }
     setIsOpen(false);
   };
 
@@ -265,10 +332,12 @@ function ProjectDropdown() {
   };
 
   const handleProjectCreated = (project: Project) => {
-    // Add to local list and select it
     setProjects((prev) => [...prev, project]);
     setShowNewModal(false);
-    router.push(`${pathname}?projectId=${project.id}`);
+    const params = workspaceId
+      ? `?projectId=${project.id}&workspaceId=${workspaceId}`
+      : `?projectId=${project.id}`;
+    router.push(`${pathname}${params}`);
   };
 
   return (
@@ -415,9 +484,16 @@ function Sidebar() {
 
 // ─── PROFILE DROPDOWN ────────────────────────────────────────
 function ProfileDropdown() {
+  const router = useRouter();
+  const { data: session } = authClient.useSession();
+  const { orgName } = useWorkspace();
   const [isOpen, setIsOpen] = useState(false);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [showPhotoModal, setShowPhotoModal] = useState(false);
+
+  const userName = session?.user?.name ?? "User";
+  const userEmail = session?.user?.email ?? "";
+  const initials = userName.split(" ").map((w: string) => w[0]?.toUpperCase()).join("").slice(0, 2) || "U";
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -428,10 +504,10 @@ function ProfileDropdown() {
     setShowPhotoModal(false);
   };
 
-  const handleLogout = () => {
-    // TODO: wire up your real logout logic here
-    alert("Logged out!");
+  const handleLogout = async () => {
     setIsOpen(false);
+    await authClient.signOut();
+    router.push("/login");
   };
 
   return (
@@ -445,7 +521,7 @@ function ProfileDropdown() {
           {photoUrl ? (
             <img src={photoUrl} alt="Profile" className="w-full h-full object-cover" />
           ) : (
-            "AP"
+            initials
           )}
         </div>
 
@@ -460,12 +536,13 @@ function ProfileDropdown() {
                     {photoUrl ? (
                       <img src={photoUrl} alt="Profile" className="w-full h-full object-cover" />
                     ) : (
-                      "AP"
+                      initials
                     )}
                   </div>
                   <div>
-                    <div className="text-[12px] font-semibold text-[#24292f]">Arjun Patel</div>
-                    <div className="text-[11px] text-[#8C959F]">arjun@bluq.app</div>
+                    <div className="text-[12px] font-semibold text-[#24292f]">{userName}</div>
+                    <div className="text-[11px] text-[#8C959F]">{userEmail}</div>
+                    {orgName && <div className="text-[10px] text-[#8C959F] font-mono">{orgName}</div>}
                   </div>
                 </div>
               </div>
@@ -516,7 +593,7 @@ function ProfileDropdown() {
                 {photoUrl ? (
                   <img src={photoUrl} alt="Preview" className="w-full h-full object-cover" />
                 ) : (
-                  "AP"
+                  initials
                 )}
               </div>
 
@@ -583,21 +660,23 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="h-screen flex flex-col bg-[#F6F8FA] text-[#24292f]">
-      <Suspense fallback={null}>
-        <TopNav />
-      </Suspense>
-      <div className="flex-1 flex overflow-hidden">
+    <WorkspaceProvider>
+      <div className="h-screen flex flex-col bg-[#F6F8FA] text-[#24292f]">
         <Suspense fallback={null}>
-          <Sidebar />
+          <TopNav />
         </Suspense>
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex overflow-hidden">
           <Suspense fallback={null}>
-            <ProjectAwareSubTabs />
+            <Sidebar />
           </Suspense>
-          <div className="flex-1 overflow-auto">{children}</div>
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <Suspense fallback={null}>
+              <ProjectAwareSubTabs />
+            </Suspense>
+            <div className="flex-1 overflow-auto">{children}</div>
+          </div>
         </div>
       </div>
-    </div>
+    </WorkspaceProvider>
   );
 }

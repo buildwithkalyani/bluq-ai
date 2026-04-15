@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   getProjects,
@@ -100,11 +100,11 @@ const ProjectDropdown = ({ options, selected, onChange }: { options: Project[]; 
 };
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────
-export default function DailyUpdates() {
+function DailyUpdatesInner() {
   const searchParams = useSearchParams();
   // Real project UUID + workspaceId from URL — when present, use real API
   // When absent, fall back to mock data so demo/client previews keep working
-  const projectUuid  = searchParams.get("projectUuid");
+  const projectUuid  = searchParams.get("projectId") ?? searchParams.get("projectUuid");
   const workspaceId  = searchParams.get("workspaceId");
   const isRealData   = !!(projectUuid && workspaceId);
 
@@ -272,5 +272,13 @@ export default function DailyUpdates() {
         )}
       </Card>
     </div>
+  );
+}
+
+export default function DailyUpdates() {
+  return (
+    <Suspense fallback={<div className="p-5 text-sm text-[#8C959F]">Loading…</div>}>
+      <DailyUpdatesInner />
+    </Suspense>
   );
 }

@@ -12,9 +12,22 @@ const STEPS = [
   { key: "whatsapp", label: "Connect WhatsApp" },
 ];
 
+function getAuthToken(): string {
+  if (typeof document === "undefined") return "";
+  const match = document.cookie
+    .split("; ")
+    .find((row) => row.startsWith("better-auth.session_token="));
+  return match ? decodeURIComponent(match.split("=")[1]) : "";
+}
+
 export default function OnboardingPage() {
   const router = useRouter();
   const [step, setStep] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [apiError, setApiError] = useState("");
+
+  // Created IDs — passed to subsequent steps
+  const [createdWorkspaceId, setCreatedWorkspaceId] = useState<string | null>(null);
 
   // Form states
   const [orgName, setOrgName] = useState("");
@@ -32,12 +45,80 @@ export default function OnboardingPage() {
   const [contractorPhone, setContractorPhone] = useState("");
   const [eodTime, setEodTime] = useState("18:00");
 
-  const next = () => {
-    if (step < STEPS.length - 1) setStep(step + 1);
-    else router.push("/dashboard/overview");
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
+
+  const apiPost = async (path: string, body: unknown) => {
+    const token = getAuthToken();
+    const res = await fetch(`${backendUrl}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error ?? `Request failed: ${res.status}`);
+    }
+    return res.json();
   };
-  const back = () => step > 0 && setStep(step - 1);
-  const skip = () => next();
+
+  const handleContinue = async () => {
+    setApiError("");
+
+    // Step 0: Create org
+    if (step === 0) {
+      if (!orgName.trim()) return;
+      setSaving(true);
+      try {
+        const org = await apiPost("/orgs", { name: orgName.trim() });
+        setCreatedWorkspaceId(org.id);
+        setStep(1);
+      } catch (err: any) {
+        setApiError(err.message);
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
+    // Step 1: Create first project (optional — user can skip)
+    if (step === 1) {
+      if (projectName.trim() && createdWorkspaceId) {
+        setSaving(true);
+        try {
+          await apiPost("/projects", {
+            workspaceId: createdWorkspaceId,
+            projectName: projectName.trim(),
+            projectCode: projectCode.trim() || undefined,
+            address: projectAddress.trim() || undefined,
+            stage: projectStage,
+            category: projectType,
+            startDate: startDate || undefined,
+            endDate: endDate || undefined,
+            status: "active",
+          });
+        } catch (err: any) {
+          setApiError(err.message);
+          setSaving(false);
+          return;
+        } finally {
+          setSaving(false);
+        }
+      }
+    }
+
+    // For remaining steps just advance (they're informational/optional)
+    if (step < STEPS.length - 1) {
+      setStep(step + 1);
+    } else {
+      router.push("/dashboard/overview");
+    }
+  };
+
+  const back = () => { setApiError(""); step > 0 && setStep(step - 1); };
+  const skip = () => { setApiError(""); setStep(s => Math.min(s + 1, STEPS.length - 1)); if (step === STEPS.length - 1) router.push("/dashboard/overview"); };
 
   const addInvite = () => {
     if (inviteEmail && !invites.includes(inviteEmail)) {
@@ -68,6 +149,13 @@ export default function OnboardingPage() {
           </span>
         </div>
 
+        {/* API error */}
+        {apiError && (
+          <div className="my-3 text-[12px] text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+            {apiError}
+          </div>
+        )}
+
         {/* ─── STEP 1: ORG ─────────────────────────────── */}
         {step === 0 && (
           <>
@@ -80,10 +168,12 @@ export default function OnboardingPage() {
             </p>
             <FormField label="Company Name *">
               <input
+                autoFocus
                 type="text"
                 placeholder="Bluq Engineering Consultants"
                 value={orgName}
                 onChange={(e) => setOrgName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleContinue()}
                 className="form-input"
               />
             </FormField>
@@ -117,30 +207,30 @@ export default function OnboardingPage() {
             <FormField label="Project Name *">
               <input type="text" placeholder="Al Nakheel Tower" value={projectName} onChange={(e) => setProjectName(e.target.value)} className="form-input" />
             </FormField>
-            <FormField label="Project Address *">
+            <FormField label="Project Address">
               <input type="text" placeholder="Dubai Marina, Dubai, UAE" value={projectAddress} onChange={(e) => setProjectAddress(e.target.value)} className="form-input" />
             </FormField>
             <div className="flex gap-3">
-              <FormField label="Stage *" className="flex-1">
+              <FormField label="Stage" className="flex-1">
                 <select value={projectStage} onChange={(e) => setProjectStage(e.target.value)} className="form-input">
                   {["Foundation", "Structure", "Finishing", "Pre-Construction"].map((o) => <option key={o}>{o}</option>)}
                 </select>
               </FormField>
-              <FormField label="Type *" className="flex-1">
+              <FormField label="Type" className="flex-1">
                 <select value={projectType} onChange={(e) => setProjectType(e.target.value)} className="form-input">
                   {["Residential", "Commercial", "Mixed-Use", "Infrastructure"].map((o) => <option key={o}>{o}</option>)}
                 </select>
               </FormField>
             </div>
             <div className="flex gap-3">
-              <FormField label="Start Date *" className="flex-1">
+              <FormField label="Start Date" className="flex-1">
                 <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="form-input" />
               </FormField>
-              <FormField label="End Date *" className="flex-1">
+              <FormField label="End Date" className="flex-1">
                 <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="form-input" />
               </FormField>
             </div>
-            <FormField label="Project Code *">
+            <FormField label="Project Code">
               <input type="text" placeholder="ANT-2026-001" value={projectCode} onChange={(e) => setProjectCode(e.target.value)} className="form-input" />
             </FormField>
           </>
@@ -309,8 +399,16 @@ export default function OnboardingPage() {
         <div className="flex gap-2.5 justify-end mt-6">
           {step > 0 && <Btn onClick={back}>Back</Btn>}
           {step >= 2 && <Btn onClick={skip}>Skip for now</Btn>}
-          <Btn primary onClick={next}>
-            {step === STEPS.length - 1 ? "Save & Go Live 🚀" : "Continue →"}
+          <Btn
+            primary
+            onClick={handleContinue}
+            disabled={saving || (step === 0 && !orgName.trim())}
+          >
+            {saving
+              ? "Saving..."
+              : step === STEPS.length - 1
+              ? "Save & Go Live 🚀"
+              : "Continue →"}
           </Btn>
         </div>
       </div>

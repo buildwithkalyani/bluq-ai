@@ -37,6 +37,7 @@ import { documentsRoute } from "./routes/documents.js";
 import { scheduleRoute } from "./routes/schedule.js";
 import { whatsappRoute } from "./routes/whatsapp.js";
 import { reportsRoute } from "./routes/reports.js";
+import { orgsRoute } from "./routes/orgs.js";
 
 // Workers
 import { startSchedulerWorker } from "./workers/ai-scheduler.worker.js";
@@ -98,6 +99,7 @@ async function start() {
   await app.register(scheduleRoute);       // NEW
   await app.register(whatsappRoute);       // NEW
   await app.register(reportsRoute);        // NEW
+  await app.register(orgsRoute);           // NEW
 
   // =========================================================================
   // START WORKER

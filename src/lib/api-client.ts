@@ -88,6 +88,44 @@ function mapStatus(raw: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// PROJECTS
+// ---------------------------------------------------------------------------
+
+export interface BackendProject {
+  id: string;           // UUID
+  workspaceId: string;
+  projectName: string;
+  projectCode: string | null;
+  address: string | null;
+  stage: string | null;
+  category: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  status: string | null;
+  clientName: string | null;
+  percentComplete: number | null;
+}
+
+/** GET /projects?workspaceId= → BackendProject[] */
+export async function fetchProjects(workspaceId: string): Promise<BackendProject[]> {
+  return apiFetch<BackendProject[]>(`/projects?workspaceId=${workspaceId}`);
+}
+
+/** POST /projects → BackendProject */
+export async function createProject(data: {
+  workspaceId: string;
+  projectName: string;
+  projectCode?: string;
+  address?: string;
+  stage?: string;
+  category?: string;
+  startDate?: string;
+  endDate?: string;
+}): Promise<BackendProject> {
+  return apiPost<BackendProject>("/projects", data);
+}
+
+// ---------------------------------------------------------------------------
 // DAILY UPDATES
 // ---------------------------------------------------------------------------
 
