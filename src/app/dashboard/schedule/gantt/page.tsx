@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useMemo, Suspense } from 'react';
 import { useSearchParams } from "next/navigation";
 import { getScheduleTasks, getScheduleDeps, type ScheduleTask, type TaskDependency } from "@/lib/mock-data";
+import { useTaskSocket } from "@/hooks/useTaskSocket";
 
 // ─────────────────────────────────────────────────────────────
 // Data & Types
@@ -630,13 +631,20 @@ function getActivePreset(zoom: number): string | null {
 function GanttChartContent() {
   const searchParams = useSearchParams();
   const projectId = Number(searchParams.get("projectId") ?? "0");
-  
+  // projectUuid is the real UUID from the backend — used for Socket.IO subscription.
+  // Mock data uses numeric projectId; once real API is wired this will be the same param.
+  const projectUuid = searchParams.get("projectUuid") ?? null;
+
   const [tasks, setTasks] = useState<ScheduleTask[]>([]);
   const [deps, setDeps] = useState<TaskDependency[]>([]);
   useEffect(() => {
     getScheduleTasks(projectId).then(setTasks);
     getScheduleDeps(projectId).then(setDeps);
   }, [projectId]);
+
+  // Real-time task updates via Socket.IO — patches tasks state when WhatsApp
+  // updates arrive from site workers. No-op if projectUuid is not provided.
+  useTaskSocket({ projectId: projectUuid, setTasks });
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
 

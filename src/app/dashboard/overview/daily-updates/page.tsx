@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   getProjects,
   getDoneYesterday,
@@ -14,6 +15,12 @@ import {
   type AIBriefing,
   STATUS_CONFIG,
 } from "@/lib/mock-data";
+import {
+  fetchDoneYesterday,
+  fetchTodoToday,
+  fetchMilestones,
+  fetchAIBriefing,
+} from "@/lib/api-client";
 
 // ─── SHARED UI ────────────────────────────────────────────────
 const Badge = ({ status }: { status: string }) => {
@@ -93,32 +100,51 @@ const ProjectDropdown = ({ options, selected, onChange }: { options: Project[]; 
 };
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────
-export default function DailyUpdates() {
+function DailyUpdatesInner() {
+  const searchParams = useSearchParams();
+  // Real project UUID + workspaceId from URL — when present, use real API
+  // When absent, fall back to mock data so demo/client previews keep working
+  const projectUuid  = searchParams.get("projectId") ?? searchParams.get("projectUuid");
+  const workspaceId  = searchParams.get("workspaceId");
+  const isRealData   = !!(projectUuid && workspaceId);
+
   const [milestoneRange, setMilestoneRange] = useState(0);
   const [selectedProject, setSelectedProject] = useState<number>(-1); // -1 = All Projects
   const ranges = [7, 15, 30];
 
-  const [projects, setProjects]         = useState<Project[]>([]);
+  const [projects, setProjects]           = useState<Project[]>([]);
   const [doneYesterday, setDoneYesterday] = useState<DailyTask[]>([]);
-  const [todoToday, setTodoToday]       = useState<DailyTodo[]>([]);
-  const [milestones, setMilestones]     = useState<Milestone[]>([]);
-  const [briefing, setBriefing]         = useState<AIBriefing | null>(null);
+  const [todoToday, setTodoToday]         = useState<DailyTodo[]>([]);
+  const [milestones, setMilestones]       = useState<Milestone[]>([]);
+  const [briefing, setBriefing]           = useState<AIBriefing | null>(null);
 
   // Load projects once
   useEffect(() => {
     getProjects().then(setProjects);
   }, []);
 
-  // Reload data whenever selected project changes
+  // Reload data whenever selected project or milestone range changes
   useEffect(() => {
-    const pid = selectedProject === -1 ? undefined : selectedProject;
-    getDoneYesterday(pid).then(setDoneYesterday);
-    getTodoToday(pid).then(setTodoToday);
-    getMilestones(pid).then(setMilestones);
-    getAIBriefing(selectedProject === -1 ? null : selectedProject).then(setBriefing);
-  }, [selectedProject]);
+    const days = ranges[milestoneRange];
+    if (isRealData) {
+      // Real backend data
+      fetchDoneYesterday(projectUuid!, workspaceId!).then(setDoneYesterday).catch(console.error);
+      fetchTodoToday(projectUuid!, workspaceId!).then(setTodoToday).catch(console.error);
+      fetchMilestones(projectUuid!, workspaceId!, days).then(setMilestones).catch(console.error);
+      fetchAIBriefing(projectUuid!, workspaceId!).then(setBriefing).catch(console.error);
+    } else {
+      // Mock fallback — demo / client preview mode
+      const pid = selectedProject === -1 ? undefined : selectedProject;
+      getDoneYesterday(pid).then(setDoneYesterday);
+      getTodoToday(pid).then(setTodoToday);
+      getMilestones(pid).then(setMilestones);
+      getAIBriefing(selectedProject === -1 ? null : selectedProject).then(setBriefing);
+    }
+  }, [selectedProject, milestoneRange, projectUuid, workspaceId]);
 
-  const filteredMilestones = milestones.filter(m => m.daysLeft <= ranges[milestoneRange]);
+  const filteredMilestones = isRealData
+    ? milestones   // backend already filtered by days
+    : milestones.filter(m => m.daysLeft <= ranges[milestoneRange]);
   const isFiltered = selectedProject !== -1;
 
   return (
@@ -246,5 +272,13 @@ export default function DailyUpdates() {
         )}
       </Card>
     </div>
+  );
+}
+
+export default function DailyUpdates() {
+  return (
+    <Suspense fallback={<div className="p-5 text-sm text-[#8C959F]">Loading…</div>}>
+      <DailyUpdatesInner />
+    </Suspense>
   );
 }
