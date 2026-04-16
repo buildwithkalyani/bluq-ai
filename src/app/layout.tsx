@@ -6,18 +6,27 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "BluQ",
-  description: "Construction schedule intelligence",
+  description: "BluQ turns your existing WhatsApp and site chats into a real-time audit trail with no process change for your team. Construction schedule intelligence, simplified.",
   openGraph: {
     title: "BluQ",
-    description: "Construction schedule intelligence",
+    description: "BluQ turns your existing WhatsApp and site chats into a real-time audit trail with no process change for your team. Construction schedule intelligence, simplified.",
     url: "https://bluq.ai",
     siteName: "BluQ",
     type: "website",
+    images: [
+      {
+        url: "https://bluq.ai/bluq-logo.png",
+        width: 800,
+        height: 600,
+        alt: "BluQ Logo",
+      },
+    ],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: "BluQ",
-    description: "Construction schedule intelligence",
+    description: "BluQ turns your existing WhatsApp and site chats into a real-time audit trail with no process change for your team. Construction schedule intelligence, simplified.",
+    images: ["https://bluq.ai/bluq-logo.png"],
   },
 };
 
