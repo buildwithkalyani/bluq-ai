@@ -34,7 +34,7 @@ export default function WhatsAppFeedPage() {
       // Design account — use mock convos (no real backend for WA history)
       import("@/lib/mock-data-extended").then(m => {
         m.getProjects().then(p => {
-          setProjects(p.map(x => ({ id: String(x.id), workspaceId: "", projectName: x.name, projectCode: null,address: x.address, stage: x.stage, category: null, startDate: x.startDate, endDate: x.endDate, status: "active", clientName: null, percentComplete: null })));
+          setProjects(p.map(x => ({ id: String(x.id), workspaceId: "", projectName: x.name, projectCode: null, address: null, stage: null, category: null, startDate: null, endDate: null, status: "active", clientName: null, percentComplete: null })));
           setLoading(false);
         });
       });
