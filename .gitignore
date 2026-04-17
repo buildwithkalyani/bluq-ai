@@ -1,5 +1,8 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
+# SSL certificates
+/certs/
+
 # dependencies
 /node_modules
 /.pnp
@@ -42,3 +45,8 @@ drizzle/meta/
 # Editor
 .cursor/
 .vscode/
+
+# Open .gitignore in your project root and add:
+graphify-out/
+
+.claude/

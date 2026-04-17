@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { Card, SectionTitle, Btn } from "@/components/ui/bluq-ui";
 import type { Project } from "@/lib/mock-data";
+import { useWorkspace } from "@/context/workspace";
+import { createProject } from "@/lib/api-client";
 
 interface Props {
   onClose: () => void;
@@ -10,6 +12,7 @@ interface Props {
 }
 
 export default function CreateProjectModal({ onClose, onCreate }: Props) {
+  const { workspaceId } = useWorkspace();
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [stage, setStage] = useState("Foundation");
@@ -18,8 +21,9 @@ export default function CreateProjectModal({ onClose, onCreate }: Props) {
   const [endDate, setEndDate] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!name.trim() || !address.trim() || !startDate || !endDate || !code.trim()) {
       setError("Please fill in all required fields.");
       return;
@@ -29,11 +33,52 @@ export default function CreateProjectModal({ onClose, onCreate }: Props) {
       return;
     }
 
+    setSaving(true);
+    setError("");
+
     const fmt = (d: string) => {
       const dt = new Date(d);
       return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
     };
 
+    if (workspaceId) {
+      // Real backend
+      try {
+        const p = await createProject({
+          workspaceId,
+          projectName: name.trim(),
+          projectCode: code.trim(),
+          address: address.trim(),
+          stage,
+          category: type,
+          startDate,
+          endDate,
+        });
+        onCreate({
+          id: p.id as any,
+          name: p.projectName,
+          code: p.projectCode ?? code.trim(),
+          pct: 0,
+          status: "notStarted",
+          tasks: 0,
+          tasksDone: 0,
+          workers: 0,
+          issues: 0,
+          stage,
+          startDate: fmt(startDate),
+          endDate: fmt(endDate),
+          address: address.trim(),
+        });
+        onClose();
+        return;
+      } catch (err: any) {
+        setError(err.message);
+        setSaving(false);
+        return;
+      }
+    }
+
+    // Mock fallback — demo mode
     onCreate({
       id: Date.now(),
       name: name.trim(),
@@ -49,7 +94,6 @@ export default function CreateProjectModal({ onClose, onCreate }: Props) {
       endDate: fmt(endDate),
       address: address.trim(),
     });
-
     onClose();
   };
 
@@ -125,7 +169,9 @@ export default function CreateProjectModal({ onClose, onCreate }: Props) {
 
         <div className="flex justify-end gap-3 mt-8">
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn primary className="px-6" onClick={handleCreate}>Create Project →</Btn>
+          <Btn primary className="px-6" onClick={handleCreate} disabled={saving}>
+            {saving ? "Creating..." : "Create Project →"}
+          </Btn>
         </div>
       </Card>
     </div>

@@ -8,7 +8,8 @@ import {
   DelayRow,
   DelayDeepDive,
 } from "@/lib/mock-data-extended";
-import { getProjects } from "@/lib/mock-data";
+import { useWorkspace } from "@/context/workspace";
+import { fetchProjects, fetchTasks, isRealProject } from "@/lib/api-client";
 
 const Card = ({
   children,
@@ -157,34 +158,61 @@ function DelayAnalyticsPageContent() {
   const [projectEndDate, setProjectEndDate] = useState<string>("—");
 
   const searchParams = useSearchParams();
-  const projectId = Number(searchParams.get("projectId") ?? "0");
-  const prevProjectId = useRef(projectId);
+  const { workspaceId: ctxWorkspaceId, isDesignMode } = useWorkspace();
+  const projectIdParam = searchParams.get("projectId") ?? "0";
+  const workspaceId = searchParams.get("workspaceId");
+  const wsId = workspaceId ?? ctxWorkspaceId;
+  const real = !isDesignMode && isRealProject(projectIdParam) && !!wsId;
+  const prevProjectIdParam = useRef(projectIdParam);
 
   // Load project end date
   useEffect(() => {
-    getProjects().then(projects => {
-      const p = projects.find(p => p.id === projectId);
-      if (p) setProjectEndDate(p.endDate);
-    });
-  }, [projectId]);
+    if (real && wsId) {
+      fetchProjects(wsId).then(projects => {
+        const p = projects.find(p => p.id === projectIdParam);
+        if (p?.endDate) setProjectEndDate(p.endDate);
+      });
+    } else {
+      // no project end date available in mock without import
+    }
+  }, [projectIdParam, wsId]);
 
   // Fetch rows when projectId or groupBy changes
   useEffect(() => {
-    const projectChanged = prevProjectId.current !== projectId;
-    prevProjectId.current = projectId;
+    prevProjectIdParam.current = projectIdParam;
 
-    const fetcher = groupBy === 0 ? getDelayRows : getDelayRowsByArea;
-    fetcher(projectId).then((data) => {
-      setRows(data);
-      setSelected(data.length > 0 ? data[0].id : null);
-    });
-  }, [projectId, groupBy]);
+    if (real) {
+      // Derive delay rows from real tasks
+      fetchTasks(projectIdParam, workspaceId!).then(tasks => {
+        const delayed = tasks.filter(t => t.status === "delayed" || t.status === "runningLate");
+        const realRows: DelayRow[] = delayed.map((t, i) => ({
+          id: i + 1,
+          name: t.contractor || t.name,
+          count: "1",
+          avg: t.status === "delayed" ? "3d" : "1d",
+          critical: t.status === "delayed" ? "1" : "0",
+          impact: t.status === "delayed" ? "+3d" : "+1d",
+          projectId: 0,
+        }));
+        setRows(realRows);
+        setSelected(realRows.length > 0 ? realRows[0].id : null);
+      });
+    } else {
+      const fetcher = groupBy === 0 ? getDelayRows : getDelayRowsByArea;
+      fetcher(Number(projectIdParam)).then((data) => {
+        setRows(data);
+        setSelected(data.length > 0 ? data[0].id : null);
+      });
+    }
+  }, [projectIdParam, workspaceId, groupBy]);
 
   // Fetch deep dive when selection changes
   useEffect(() => {
     if (selected === null) { setDeepDive(null); return; }
-    getDelayDeepDive(selected).then(d => setDeepDive(d ?? null));
-  }, [selected]);
+    if (!real) {
+      getDelayDeepDive(selected).then(d => setDeepDive(d ?? null));
+    }
+  }, [selected, real]);
 
   // Compute total slippage from all delay rows
   const totalSlipDays = rows.reduce((sum, r) => {

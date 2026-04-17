@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
-import { demoRequests } from "../db/schema.js";
+import { demoRequests, users } from "../db/schema.js";
 import { eq, desc } from "drizzle-orm";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -75,6 +75,7 @@ async function sendConfirmationEmail(to: string, companyName: string): Promise<b
 }
 
 async function sendInternalNotification(req: {
+  id?: string;
   companyName: string;
   email: string;
   name?: string | null;
@@ -82,6 +83,7 @@ async function sendInternalNotification(req: {
   companySize?: string | null;
   role?: string | null;
   message?: string | null;
+  source?: string | null;
 }): Promise<void> {
   const notifyEmail = process.env.DEMO_NOTIFY_EMAIL;
   if (!notifyEmail) return;
@@ -96,10 +98,17 @@ async function sendInternalNotification(req: {
       body: JSON.stringify({
         from: process.env.RESEND_FROM_EMAIL || "BluQ <no-reply@bluq.ai>",
         to: [notifyEmail],
-        subject: `New demo request from ${req.companyName}`,
-        html: `
+        subject: req.source === "signup"
+          ? `New signup request — ${req.companyName}`
+          : `New demo request from ${req.companyName}`,
+        html: (() => {
+          const isSignup = req.source === "signup";
+          const approveUrl = isSignup && req.id
+            ? `${process.env.BETTER_AUTH_URL?.replace("https://bluq.ai", process.env.API_URL || "https://bluq-api.railway.app") || "https://bluq-api.railway.app"}/demo-requests/${req.id}/approve?secret=${encodeURIComponent(process.env.ADMIN_SECRET || "")}`
+            : null;
+          return `
           <div style="font-family: sans-serif; max-width: 560px; color: #1a1a1a;">
-            <h2 style="color: #2563eb;">New Demo Request</h2>
+            <h2 style="color: #3A4EA2;">${isSignup ? "New Signup Request" : "New Demo Request"}</h2>
             <table style="width: 100%; border-collapse: collapse;">
               <tr><td style="padding: 8px 0; font-weight: 600;">Firm</td><td style="padding: 8px 0;">${escapeHtml(req.companyName)}</td></tr>
               <tr><td style="padding: 8px 0; font-weight: 600;">Email</td><td style="padding: 8px 0;">${escapeHtml(req.email)}</td></tr>
@@ -108,8 +117,16 @@ async function sendInternalNotification(req: {
               ${req.companySize ? `<tr><td style="padding: 8px 0; font-weight: 600;">Size</td><td style="padding: 8px 0;">${escapeHtml(req.companySize)}</td></tr>` : ""}
               ${req.message ? `<tr><td style="padding: 8px 0; font-weight: 600;">Message</td><td style="padding: 8px 0;">${escapeHtml(req.message)}</td></tr>` : ""}
             </table>
+            ${approveUrl ? `
+            <div style="margin-top: 24px;">
+              <a href="${approveUrl}" style="display:inline-block;background:#1A7F37;color:#fff;text-decoration:none;padding:12px 28px;border-radius:8px;font-size:15px;font-weight:600;">
+                ✓ Approve &amp; Activate Account
+              </a>
+              <p style="font-size:12px;color:#8C959F;margin-top:8px;">Clicking this will create their account and email them login instructions.</p>
+            </div>
+            ` : ""}
           </div>
-        `,
+        `})(),
       }),
     });
     if (!res.ok) {
@@ -118,6 +135,51 @@ async function sendInternalNotification(req: {
     }
   } catch (err: any) {
     console.error("Internal notification failed:", err.message);
+  }
+}
+
+async function sendApprovalEmail(to: string, firmName: string, appUrl: string): Promise<void> {
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: process.env.RESEND_FROM_EMAIL || "BluQ <no-reply@bluq.ai>",
+        to: [to],
+        subject: "Your BluQ account is ready",
+        html: `
+          <div style="font-family:'Inter','Segoe UI',sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a;">
+            <div style="padding:28px 0 20px;border-bottom:2px solid #3A4EA2;">
+              <span style="font-size:22px;font-weight:800;color:#3A4EA2;">BluQ</span>
+            </div>
+            <div style="padding:28px 0;">
+              <p style="font-size:16px;line-height:1.6;margin:0 0 12px;">Hi,</p>
+              <p style="font-size:16px;line-height:1.6;margin:0 0 12px;">
+                Your account for <strong>${escapeHtml(firmName)}</strong> has been verified and is ready to use.
+              </p>
+              <p style="font-size:15px;line-height:1.6;margin:0 0 24px;color:#57606a;">
+                Use your email and the <strong>Login with OTP</strong> option to sign in — no password needed.
+              </p>
+              <a href="${appUrl}/login" style="display:inline-block;background:#3A4EA2;color:#fff;text-decoration:none;padding:12px 28px;border-radius:8px;font-size:15px;font-weight:600;">
+                Log in to BluQ →
+              </a>
+              <p style="font-size:13px;color:#8C959F;margin-top:28px;">
+                If you have any questions, reply to this email and we'll help you out.
+              </p>
+            </div>
+          </div>
+        `,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      console.error("Approval email failed:", res.status, body);
+    }
+  } catch (err: any) {
+    console.error("Approval email error:", err.message);
   }
 }
 
@@ -166,6 +228,11 @@ export async function demoRequestsRoute(app: FastifyInstance) {
           .where(eq(demoRequests.id, demoRequest.id));
       }
 
+      // Log approve URL for local dev testing
+      if (process.env.NODE_ENV !== "production") {
+        const apiUrl = process.env.API_URL || `http://localhost:${process.env.PORT || 3001}`;
+        console.log(`[APPROVE URL] ${apiUrl}/demo-requests/${demoRequest.id}/approve?secret=${process.env.ADMIN_SECRET}`);
+      }
       sendInternalNotification(demoRequest).catch(() => {});
 
       return reply.status(201).send({
@@ -189,6 +256,64 @@ export async function demoRequestsRoute(app: FastifyInstance) {
     } catch (err: any) {
       console.error("GET /demo-requests error:", err.message, err.cause);
       return reply.status(500).send({ error: "Failed to fetch demo requests" });
+    }
+  });
+
+  // GET /demo-requests/:id/approve?secret=... — one-click approval from admin email
+  app.get("/demo-requests/:id/approve", async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const { secret } = request.query as { secret?: string };
+
+      const adminSecret = process.env.ADMIN_SECRET;
+      if (!adminSecret || secret !== adminSecret) {
+        return reply.status(401).send("Unauthorized");
+      }
+      if (!UUID_REGEX.test(id)) {
+        return reply.status(400).send("Invalid ID");
+      }
+
+      const [demoReq] = await db.select().from(demoRequests).where(eq(demoRequests.id, id));
+      if (!demoReq) return reply.status(404).send("Request not found");
+      if (demoReq.status === "approved") {
+        return reply.type("text/html").send(`
+          <html><head><meta charset="utf-8"></head><body style="font-family:sans-serif;padding:40px;text-align:center">
+            <h2 style="color:#1A7F37">Already approved</h2>
+            <p>${escapeHtml(demoReq.email)} was already activated.</p>
+          </body></html>
+        `);
+      }
+
+      // Create user in Better Auth's users table if not already there
+      const existing = await db.select().from(users).where(eq(users.email, demoReq.email));
+      if (existing.length === 0) {
+        await db.insert(users).values({
+          id: crypto.randomUUID(),
+          email: demoReq.email,
+          name: demoReq.name?.trim() || demoReq.companyName,
+          emailVerified: true,
+        });
+      }
+
+      // Mark as approved
+      await db.update(demoRequests)
+        .set({ status: "approved", updatedAt: new Date().toISOString() })
+        .where(eq(demoRequests.id, id));
+
+      // Send user their welcome / login email
+      const appUrl = process.env.APP_URL || "https://bluq.ai";
+      await sendApprovalEmail(demoReq.email, demoReq.companyName, appUrl);
+
+      return reply.type("text/html").send(`
+        <html><head><meta charset="utf-8"></head><body style="font-family:sans-serif;padding:40px;text-align:center">
+          <h2 style="color:#1A7F37">Account activated</h2>
+          <p><strong>${escapeHtml(demoReq.email)}</strong> has been approved.</p>
+          <p style="color:#57606a">They've been sent an email with login instructions.</p>
+        </body></html>
+      `);
+    } catch (err: any) {
+      console.error("Approve error:", err.message, err.cause, err.code, JSON.stringify(err));
+      return reply.status(500).send("Failed to approve");
     }
   });
 

@@ -4,6 +4,8 @@ import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { getScheduleTasks } from "@/lib/mock-data";
 import { getAnalytics } from "@/lib/mock-data";
+import { fetchTasks, isRealProject } from "@/lib/api-client";
+import { useWorkspace } from "@/context/workspace";
 
 const Card = ({ children, className = "", style }: { children: React.ReactNode; className?: string; style?: React.CSSProperties }) => (
   <div className={`bg-white border border-[#D0D7DE] rounded-lg p-4 ${className}`} style={style}>{children}</div>
@@ -11,7 +13,10 @@ const Card = ({ children, className = "", style }: { children: React.ReactNode; 
 
 function SCurveContent() {
   const searchParams = useSearchParams();
-  const projectId = Number(searchParams.get("projectId") ?? "0");
+  const { isDesignMode, workspaceId: ctxWorkspaceId } = useWorkspace();
+  const projectIdParam = searchParams.get("projectId") ?? "0";
+  const workspaceId = searchParams.get("workspaceId") ?? ctxWorkspaceId;
+  const real = !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
 
   const [startDate, setStartDate] = useState("2026-03-01");
   const [endDate, setEndDate] = useState("2026-04-15");
@@ -20,7 +25,12 @@ function SCurveContent() {
 
   // Load project schedule to derive date range and actual progress
   useEffect(() => {
-    getScheduleTasks(projectId).then(tasks => {
+    const loader = real
+      ? fetchTasks(projectIdParam, workspaceId!)
+      : isDesignMode
+        ? getScheduleTasks(Number(projectIdParam))
+        : Promise.resolve([]);
+    loader.then(tasks => {
       const parents = tasks.filter(t => !t.parentTaskId);
       if (parents.length === 0) return;
 
@@ -34,7 +44,7 @@ function SCurveContent() {
       const avg = Math.round(parents.reduce((s, t) => s + t.pct, 0) / parents.length);
       setActualProgress(avg);
     });
-  }, [projectId]);
+  }, [projectIdParam, workspaceId, isDesignMode]);
 
   const generateDateLabels = (start: string, end: string) => {
     const s = new Date(start).getTime();

@@ -22,10 +22,12 @@
 //   ai-scheduler → processes schedule generation jobs from Redis queue
 // =============================================================================
 
+import dotenv from "dotenv";
+dotenv.config();
+
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
-import dotenv from "dotenv";
 
 // Routes
 import { healthRoute } from "./routes/health.js";
@@ -35,13 +37,37 @@ import { dprsRoute } from "./routes/dprs.js";
 import { demoRequestsRoute } from "./routes/demo-requests.js";
 import { documentsRoute } from "./routes/documents.js";
 import { scheduleRoute } from "./routes/schedule.js";
+import { whatsappRoute } from "./routes/whatsapp.js";
+import { reportsRoute } from "./routes/reports.js";
+import { orgsRoute } from "./routes/orgs.js";
 
-// Worker
+// Workers
 import { startSchedulerWorker } from "./workers/ai-scheduler.worker.js";
-
-dotenv.config();
+import { startWhatsappWorker } from "./workers/whatsapp.worker.js";
+import { startCronWorker } from "./workers/cron.worker.js";
+import { startPdfWorker } from "./workers/pdf.worker.js";
+import { initSocketServer } from "./lib/socket.js";
 
 const app = Fastify({ logger: true });
+
+// ---------------------------------------------------------------------------
+// RAW BODY CAPTURE
+// Replaces default JSON parser to store the raw Buffer on request.
+// Required for Meta webhook signature verification (X-Hub-Signature-256).
+// ---------------------------------------------------------------------------
+app.addContentTypeParser(
+  "application/json",
+  { parseAs: "buffer" },
+  (req, body, done) => {
+    (req as any).rawBody = body as Buffer;
+    try {
+      done(null, JSON.parse((body as Buffer).toString()));
+    } catch (err: any) {
+      err.statusCode = 400;
+      done(err, undefined);
+    }
+  }
+);
 
 async function start() {
   // =========================================================================
@@ -71,6 +97,9 @@ async function start() {
   await app.register(demoRequestsRoute);
   await app.register(documentsRoute);      // NEW
   await app.register(scheduleRoute);       // NEW
+  await app.register(whatsappRoute);       // NEW
+  await app.register(reportsRoute);        // NEW
+  await app.register(orgsRoute);           // NEW
 
   // =========================================================================
   // START WORKER
@@ -79,6 +108,9 @@ async function start() {
   // It listens to the "ai-scheduler" BullMQ queue (defined in queues.ts)
   // and processes schedule generation jobs in the background.
   startSchedulerWorker();
+  startWhatsappWorker();
+  startPdfWorker();
+  await startCronWorker();
 
   // =========================================================================
   // START SERVER
@@ -88,6 +120,8 @@ async function start() {
       port: Number(process.env.PORT) || 3001,
       host: "0.0.0.0",
     });
+    // Socket.IO must be attached AFTER listen() — app.server is only available then
+    initSocketServer(app.server);
     console.log("🚀 Bluq API running!");
   } catch (err) {
     app.log.error(err);

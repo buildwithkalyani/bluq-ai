@@ -5,10 +5,11 @@ dotenv.config({ path: ".env.local" });
 export default defineConfig({
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.SUPABASE_DATABASE_URL!,
+    url: process.env.DIRECT_DATABASE_URL ?? process.env.SUPABASE_DATABASE_URL!,
+    ssl: { rejectUnauthorized: false },
   },
   out: "./drizzle",
-  schema: "./src/db/schema.ts",
+  schema: "./bluq-api/src/db/schema.ts",
   // REMOVE schemaFilter entirely for this test
   verbose: true,
   strict: true,

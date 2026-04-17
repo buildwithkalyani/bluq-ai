@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { getProjects, type Project } from "@/lib/mock-data-extended";
+import { useSearchParams } from "next/navigation";
+import { useWorkspace } from "@/context/workspace";
+import { fetchProjects, fetchDocuments, isRealProject, type BackendProject } from "@/lib/api-client";
 
 // --- TYPESCRIPT INTERFACES ---
 type ApprovalStatus = "pending" | "approved" | "rejected";
@@ -93,9 +95,17 @@ const ApprovalBadge = ({ status }: { status: ApprovalStatus }) => {
 };
 
 export default function DocumentsPage() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [activeProject, setActiveProject] = useState<Project | null>(null);
-  const [files, setFiles] = useState<FileRecord[]>(INITIAL_FILES);
+  const searchParams = useSearchParams();
+  const { workspaceId: ctxWorkspaceId } = useWorkspace();
+  const projectIdParam = searchParams.get("projectId") ?? "0";
+  const urlWorkspaceId = searchParams.get("workspaceId");
+  const workspaceId = urlWorkspaceId ?? ctxWorkspaceId;
+  const { isDesignMode } = useWorkspace();
+  const real = !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
+
+  const [backendProjects, setBackendProjects] = useState<BackendProject[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>((!isDesignMode && isRealProject(projectIdParam)) ? projectIdParam : null);
+  const [files, setFiles] = useState<FileRecord[]>(isDesignMode ? INITIAL_FILES : real ? [] : []);
   const [activeFolderId, setActiveFolderId] = useState<string>("drawings");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: null, direction: "asc" });
@@ -111,12 +121,36 @@ export default function DocumentsPage() {
   const [uploadFileVersion, setUploadFileVersion] = useState<string>("v1");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Load real projects
   useEffect(() => {
-    getProjects().then((p) => {
-      setProjects(p);
-      if (p.length > 0) setActiveProject(p[0]);
-    });
-  }, []);
+    if (workspaceId && !isDesignMode) {
+      fetchProjects(workspaceId).then(rows => {
+        setBackendProjects(rows);
+        if (!activeProjectId && rows.length > 0) setActiveProjectId(rows[0].id);
+      }).catch(console.error);
+    }
+  }, [workspaceId]);
+
+  // Load real documents when project changes
+  useEffect(() => {
+    if (real && activeProjectId && workspaceId) {
+      fetchDocuments(activeProjectId, workspaceId).then(docs => {
+        setFiles(docs.map((d, i) => ({
+          id: i + 1,
+          folderId: d.folder ?? "drawings",
+          name: d.fileName,
+          date: new Date(d.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
+          docType: d.fileType ?? "Other",
+          format: d.fileName.split(".").pop()?.toUpperCase() ?? "—",
+          uploadedBy: d.uploadedBy ?? "Unknown",
+          approvedBy: null,
+          approvalStatus: "pending" as ApprovalStatus,
+          ver: "v1",
+          thumb: "📄",
+        })));
+      }).catch(console.error);
+    }
+  }, [activeProjectId, workspaceId, real]);
 
   const activeFolder = FOLDERS.find(f => f.id === activeFolderId) || FOLDERS[0];
   const currentFolderTypes = FOLDER_DOC_TYPES[activeFolderId] || ["Other"];
@@ -208,11 +242,11 @@ export default function DocumentsPage() {
         <div className="text-lg font-bold text-[#24292f]">Documents</div>
         <div className="relative">
           <select
-            value={activeProject?.id ?? ""}
-            onChange={(e) => { const p = projects.find(p => p.id === Number(e.target.value)); if (p) setActiveProject(p); }}
+            value={activeProjectId ?? ""}
+            onChange={(e) => setActiveProjectId(e.target.value)}
             className="appearance-none bg-white border border-[#D0D7DE] rounded-md py-1.5 pl-3 pr-8 text-[13px] font-semibold text-[#24292f] cursor-pointer outline-none focus:border-[#3A4EA2] focus:ring-1 focus:ring-[#3A4EA2] shadow-sm"
           >
-            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {backendProjects.map(p => <option key={p.id} value={p.id}>{p.projectName}</option>)}
           </select>
           <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-[#57606a]">
             <svg className="h-4 w-4 fill-current" viewBox="0 0 20 20">

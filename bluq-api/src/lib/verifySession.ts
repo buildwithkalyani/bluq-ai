@@ -35,7 +35,7 @@ export async function verifySession(request: FastifyRequest, reply: FastifyReply
 
     request.userId = session.user_id;
   } catch (err: any) {
-    console.error("verifySession error:", err.message);
+    console.error("verifySession error:", err.message, err.cause ?? err);
     return reply.status(500).send({ error: "Auth check failed" });
   }
 }

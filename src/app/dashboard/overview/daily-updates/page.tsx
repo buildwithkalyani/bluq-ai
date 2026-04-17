@@ -1,19 +1,28 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import {
-  getProjects,
   getDoneYesterday,
   getTodoToday,
   getMilestones,
   getAIBriefing,
-  type Project,
   type DailyTask,
   type DailyTodo,
   type Milestone,
   type AIBriefing,
   STATUS_CONFIG,
 } from "@/lib/mock-data";
+import {
+  fetchProjects,
+  fetchDoneYesterday,
+  fetchTodoToday,
+  fetchMilestones,
+  fetchAIBriefing,
+  isRealProject,
+  type BackendProject,
+} from "@/lib/api-client";
+import { useWorkspace } from "@/context/workspace";
 
 // ─── SHARED UI ────────────────────────────────────────────────
 const Badge = ({ status }: { status: string }) => {
@@ -41,7 +50,7 @@ const GroupToggle = ({ options, active, onChange }: { options: string[]; active:
   </div>
 );
 
-const ProjectDropdown = ({ options, selected, onChange }: { options: Project[]; selected: number; onChange: (i: number) => void }) => {
+const ProjectDropdown = ({ options, selected, onChange }: { options: BackendProject[]; selected: string | null; onChange: (id: string | null) => void }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -53,7 +62,7 @@ const ProjectDropdown = ({ options, selected, onChange }: { options: Project[]; 
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const label = selected === -1 ? "All Projects" : options.find(p => p.id === selected)?.name ?? "All Projects";
+  const label = selected === null ? "All Projects" : options.find(p => p.id === selected)?.projectName ?? "All Projects";
 
   return (
     <div ref={ref} className="relative">
@@ -70,9 +79,9 @@ const ProjectDropdown = ({ options, selected, onChange }: { options: Project[]; 
       {open && (
         <div className="absolute left-0 top-full mt-1 bg-white border border-[#D0D7DE] rounded-lg shadow-lg z-50 overflow-hidden" style={{ minWidth: 160 }}>
           <div
-            onClick={() => { onChange(-1); setOpen(false); }}
+            onClick={() => { onChange(null); setOpen(false); }}
             className="px-3 py-2 text-xs font-semibold cursor-pointer hover:bg-[#f6f8fa] transition-colors"
-            style={{ color: selected === -1 ? "#3A4EA2" : "#24292f", background: selected === -1 ? "#ddf4ff" : undefined }}
+            style={{ color: selected === null ? "#3A4EA2" : "#24292f", background: selected === null ? "#ddf4ff" : undefined }}
           >
             All Projects
           </div>
@@ -83,7 +92,7 @@ const ProjectDropdown = ({ options, selected, onChange }: { options: Project[]; 
               className="px-3 py-2 text-xs font-semibold cursor-pointer hover:bg-[#f6f8fa] transition-colors"
               style={{ color: selected === p.id ? "#3A4EA2" : "#24292f", background: selected === p.id ? "#ddf4ff" : undefined }}
             >
-              {p.name}
+              {p.projectName}
             </div>
           ))}
         </div>
@@ -93,33 +102,69 @@ const ProjectDropdown = ({ options, selected, onChange }: { options: Project[]; 
 };
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────
-export default function DailyUpdates() {
+function DailyUpdatesInner() {
+  const searchParams = useSearchParams();
+  const { workspaceId, loading: wsLoading, isDesignMode } = useWorkspace();
+
+  // URL params override (e.g. share links) — fall back to workspace context
+  const urlProjectId   = searchParams.get("projectId") ?? searchParams.get("projectUuid");
+  const urlWorkspaceId = searchParams.get("workspaceId");
+
   const [milestoneRange, setMilestoneRange] = useState(0);
-  const [selectedProject, setSelectedProject] = useState<number>(-1); // -1 = All Projects
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(urlProjectId ?? null);
   const ranges = [7, 15, 30];
 
-  const [projects, setProjects]         = useState<Project[]>([]);
+  const [projects, setProjects]           = useState<BackendProject[]>([]);
   const [doneYesterday, setDoneYesterday] = useState<DailyTask[]>([]);
-  const [todoToday, setTodoToday]       = useState<DailyTodo[]>([]);
-  const [milestones, setMilestones]     = useState<Milestone[]>([]);
-  const [briefing, setBriefing]         = useState<AIBriefing | null>(null);
+  const [todoToday, setTodoToday]         = useState<DailyTodo[]>([]);
+  const [milestones, setMilestones]       = useState<Milestone[]>([]);
+  const [briefing, setBriefing]           = useState<AIBriefing | null>(null);
 
-  // Load projects once
+  const activeWorkspaceId = urlWorkspaceId ?? workspaceId;
+
+  // Load real projects when workspace is ready (skip for design account)
   useEffect(() => {
-    getProjects().then(setProjects);
-  }, []);
+    if (wsLoading || isDesignMode) return;
+    if (activeWorkspaceId) {
+      fetchProjects(activeWorkspaceId).then(setProjects).catch(console.error);
+    }
+  }, [activeWorkspaceId, wsLoading, isDesignMode]);
 
-  // Reload data whenever selected project changes
+  // Reload data whenever selected project or milestone range changes
   useEffect(() => {
-    const pid = selectedProject === -1 ? undefined : selectedProject;
-    getDoneYesterday(pid).then(setDoneYesterday);
-    getTodoToday(pid).then(setTodoToday);
-    getMilestones(pid).then(setMilestones);
-    getAIBriefing(selectedProject === -1 ? null : selectedProject).then(setBriefing);
-  }, [selectedProject]);
+    if (wsLoading) return;
+    const days = ranges[milestoneRange];
 
-  const filteredMilestones = milestones.filter(m => m.daysLeft <= ranges[milestoneRange]);
-  const isFiltered = selectedProject !== -1;
+    if (isDesignMode) {
+      // Design account — always mock
+      getDoneYesterday(undefined).then(setDoneYesterday);
+      getTodoToday(undefined).then(setTodoToday);
+      getMilestones(undefined).then(setMilestones);
+      getAIBriefing(null).then(setBriefing);
+    } else if (activeWorkspaceId && selectedProjectId && isRealProject(selectedProjectId)) {
+      // Real backend — specific project selected
+      fetchDoneYesterday(selectedProjectId, activeWorkspaceId).then(setDoneYesterday).catch(console.error);
+      fetchTodoToday(selectedProjectId, activeWorkspaceId).then(setTodoToday).catch(console.error);
+      fetchMilestones(selectedProjectId, activeWorkspaceId, days).then(setMilestones).catch(console.error);
+      fetchAIBriefing(selectedProjectId, activeWorkspaceId).then(setBriefing).catch(console.error);
+    } else if (activeWorkspaceId && projects.length > 0) {
+      // All projects — fetch for each and merge
+      Promise.all(projects.map(p => fetchDoneYesterday(p.id, activeWorkspaceId).catch(() => [] as DailyTask[])))
+        .then(results => setDoneYesterday(results.flat()));
+      Promise.all(projects.map(p => fetchTodoToday(p.id, activeWorkspaceId).catch(() => [] as DailyTodo[])))
+        .then(results => setTodoToday(results.flat()));
+      Promise.all(projects.map(p => fetchMilestones(p.id, activeWorkspaceId, days).catch(() => [] as Milestone[])))
+        .then(results => setMilestones(results.flat()));
+      setBriefing(null);
+    }
+  }, [selectedProjectId, milestoneRange, activeWorkspaceId, wsLoading, projects.length, isDesignMode]);
+
+  const filteredMilestones = activeWorkspaceId
+    ? milestones
+    : milestones.filter(m => m.daysLeft <= ranges[milestoneRange]);
+
+  const isFiltered = selectedProjectId !== null;
+  const selectedProjectName = projects.find(p => p.id === selectedProjectId)?.projectName;
 
   return (
     <div className="p-5 overflow-y-auto h-full">
@@ -127,7 +172,7 @@ export default function DailyUpdates() {
       <div className="flex justify-between items-center mb-4">
         <div className="text-[15px] font-bold text-[#24292f]">Daily Updates</div>
         <div className="flex gap-2 items-center">
-          <ProjectDropdown options={projects} selected={selectedProject} onChange={setSelectedProject} />
+          <ProjectDropdown options={projects} selected={selectedProjectId} onChange={setSelectedProjectId} />
           <button className="bg-[#3A4EA2] text-white border-none rounded-md px-4 py-1.5 text-sm font-semibold cursor-pointer">📄 Generate DPR</button>
         </div>
       </div>
@@ -139,12 +184,20 @@ export default function DailyUpdates() {
           <span className="text-xs font-bold text-[#3FB950] font-mono tracking-wide">AI BRIEFING</span>
           <span className="text-[10px] text-[#484f58] font-mono">Updated 5 min ago</span>
         </div>
-        {briefing && (
+        {briefing ? (
           <div className="text-sm leading-relaxed">
-            {isFiltered && <strong className="text-[#f0f6fc]">{projects.find(p => p.id === selectedProject)?.name} — </strong>}
+            {isFiltered && <strong className="text-[#f0f6fc]">{selectedProjectName} — </strong>}
             {!isFiltered && <strong className="text-[#f0f6fc]">{briefing.text.split(".")[0]}.</strong>}{" "}
             {isFiltered ? briefing.text : briefing.text.split(".").slice(1).join(".").trim()}{" "}
             <span className="text-[#3FB950] font-semibold">{briefing.highlight}</span>
+          </div>
+        ) : (
+          <div className="text-sm text-[#484f58]">
+            {activeWorkspaceId && !selectedProjectId
+              ? "Select a project to see AI briefing."
+              : activeWorkspaceId
+              ? "Loading briefing…"
+              : "No briefing available."}
           </div>
         )}
       </Card>
@@ -159,7 +212,7 @@ export default function DailyUpdates() {
           </div>
           <Card>
             {doneYesterday.length === 0 ? (
-              <div className="py-4 text-center text-xs text-[#8C959F]">No tasks completed yesterday for this project</div>
+              <div className="py-4 text-center text-xs text-[#8C959F]">No tasks completed yesterday</div>
             ) : (
               doneYesterday.map((t, i) => (
                 <div key={i} className="py-2" style={{ borderBottom: i < doneYesterday.length - 1 ? "1px solid #f0f1f3" : "none" }}>
@@ -184,7 +237,7 @@ export default function DailyUpdates() {
           </div>
           <Card>
             {todoToday.length === 0 ? (
-              <div className="py-4 text-center text-xs text-[#8C959F]">No tasks scheduled today for this project</div>
+              <div className="py-4 text-center text-xs text-[#8C959F]">No tasks scheduled today</div>
             ) : (
               todoToday.map((t, i) => (
                 <div key={i} className="py-2" style={{ borderBottom: i < todoToday.length - 1 ? "1px solid #f0f1f3" : "none" }}>
@@ -218,7 +271,7 @@ export default function DailyUpdates() {
       <Card>
         {filteredMilestones.length === 0 ? (
           <div className="py-4 text-center text-xs text-[#8C959F]">
-            No milestones in the next {ranges[milestoneRange]} days{isFiltered ? ` for ${projects.find(p => p.id === selectedProject)?.name}` : ""}
+            No milestones in the next {ranges[milestoneRange]} days{isFiltered ? ` for ${selectedProjectName}` : ""}
           </div>
         ) : (
           <div className={`grid ${filteredMilestones.length > 3 ? "grid-cols-2" : "grid-cols-1"}`}>
@@ -246,5 +299,13 @@ export default function DailyUpdates() {
         )}
       </Card>
     </div>
+  );
+}
+
+export default function DailyUpdates() {
+  return (
+    <Suspense fallback={<div className="p-5 text-sm text-[#8C959F]">Loading…</div>}>
+      <DailyUpdatesInner />
+    </Suspense>
   );
 }

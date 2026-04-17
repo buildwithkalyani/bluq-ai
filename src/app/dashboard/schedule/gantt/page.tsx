@@ -3,6 +3,9 @@
 import { useEffect, useState, useRef, useMemo, Suspense } from 'react';
 import { useSearchParams } from "next/navigation";
 import { getScheduleTasks, getScheduleDeps, type ScheduleTask, type TaskDependency } from "@/lib/mock-data";
+import { fetchTasks, isRealProject } from "@/lib/api-client";
+import { useWorkspace } from "@/context/workspace";
+import { useTaskSocket } from "@/hooks/useTaskSocket";
 
 // ─────────────────────────────────────────────────────────────
 // Data & Types
@@ -629,14 +632,30 @@ function getActivePreset(zoom: number): string | null {
 // ─────────────────────────────────────────────────────────────
 function GanttChartContent() {
   const searchParams = useSearchParams();
-  const projectId = Number(searchParams.get("projectId") ?? "0");
-  
+  const { isDesignMode, workspaceId: ctxWorkspaceId } = useWorkspace();
+  const projectIdParam = searchParams.get("projectId") ?? "0";
+  const workspaceId = searchParams.get("workspaceId") ?? ctxWorkspaceId;
+  const real = !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
+
   const [tasks, setTasks] = useState<ScheduleTask[]>([]);
   const [deps, setDeps] = useState<TaskDependency[]>([]);
   useEffect(() => {
-    getScheduleTasks(projectId).then(setTasks);
-    getScheduleDeps(projectId).then(setDeps);
-  }, [projectId]);
+    if (real) {
+      fetchTasks(projectIdParam, workspaceId!).then(setTasks);
+      setDeps([]);
+    } else if (isDesignMode) {
+      const numId = Number(projectIdParam);
+      getScheduleTasks(numId).then(setTasks);
+      getScheduleDeps(numId).then(setDeps);
+    } else {
+      setTasks([]);
+      setDeps([]);
+    }
+  }, [projectIdParam, workspaceId, isDesignMode]);
+
+  // Real-time task updates via Socket.IO — patches tasks state when WhatsApp
+  // updates arrive from site workers. Uses UUID when real project is selected.
+  useTaskSocket({ projectId: real ? projectIdParam : null, setTasks });
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -831,7 +850,7 @@ function GanttChartContent() {
       const days = diffDays(data.startDate, data.endDate);
       setTasks(p => [...p, {
         id: targetId,
-        projectId,
+        projectId: 0,
         name: data.name,
         phase: data.phase,
         space: data.space || "General",

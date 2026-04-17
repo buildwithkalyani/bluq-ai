@@ -1,0 +1,150 @@
+// =============================================================================
+// useTaskSocket — real-time Gantt task updates via Socket.IO
+// =============================================================================
+// Connects to the Fastify backend Socket.IO server, joins the project room,
+// and patches task state whenever a "task:updated" event arrives.
+//
+// Usage:
+//   useTaskSocket({ projectId, setTasks })
+//
+// Requirements:
+//   - projectId: UUID string of the project (from real API, not mock numeric id)
+//   - setTasks:  React setState dispatch for the tasks array
+//   - Session token is read from Better Auth via authClient.useSession()
+//
+// The hook is a no-op if:
+//   - projectId is falsy / not a valid UUID
+//   - NEXT_PUBLIC_BACKEND_URL is not set
+//   - session is not yet loaded
+//
+// On unmount: socket is disconnected cleanly.
+// On token expiry: server disconnects the socket; the hook lets it fail
+//   silently (no infinite reconnect loop) — the user would need to log in again.
+// =============================================================================
+
+"use client";
+
+import { useEffect, useRef } from "react";
+import { io, Socket } from "socket.io-client";
+import { authClient } from "@/lib/auth-client";
+import type { ScheduleTask, ProjectStatus } from "@/lib/mock-data";
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// ---------------------------------------------------------------------------
+// Status mapping — backend snake_case → frontend camelCase
+// ---------------------------------------------------------------------------
+const STATUS_MAP: Record<string, ProjectStatus> = {
+  not_started:  "notStarted",
+  in_progress:  "inProgress",
+  completed:    "completed",
+  running_late: "runningLate",
+  delayed:      "delayed",
+};
+
+function mapStatus(raw: string | null): ProjectStatus | null {
+  if (!raw) return null;
+  return STATUS_MAP[raw] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Payload shape from backend emitTaskUpdate()
+// ---------------------------------------------------------------------------
+interface TaskUpdatePayload {
+  taskId: string;
+  projectId: string;
+  percentComplete: number | null;
+  status: string | null;
+  area: string | null;
+  contractor: string | null;
+  updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Hook
+// ---------------------------------------------------------------------------
+
+interface UseTaskSocketOptions {
+  /** UUID of the project to subscribe to. Pass null/undefined to disable. */
+  projectId: string | null | undefined;
+  /** React setState dispatch for the tasks array */
+  setTasks: React.Dispatch<React.SetStateAction<ScheduleTask[]>>;
+}
+
+export function useTaskSocket({ projectId, setTasks }: UseTaskSocketOptions): void {
+  const socketRef = useRef<Socket | null>(null);
+  const { data: session } = authClient.useSession();
+
+  useEffect(() => {
+    // Guard: need a valid UUID project ID and an authenticated session
+    if (!projectId || !UUID_REGEX.test(projectId)) return;
+    const token = (session as any)?.session?.token;
+    if (!token) return;
+
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
+    if (!backendUrl) {
+      console.warn("[useTaskSocket] NEXT_PUBLIC_BACKEND_URL is not set");
+      return;
+    }
+
+    // Connect with Bearer token in handshake auth
+    const socket: Socket = io(backendUrl, {
+      auth: { token: `Bearer ${token}` },
+      // Don't auto-reconnect forever if server rejects (auth failure)
+      reconnectionAttempts: 5,
+      reconnectionDelay: 2000,
+    });
+
+    socketRef.current = socket;
+
+    socket.on("connect", () => {
+      // Join the project room after connecting
+      socket.emit("join:project", projectId);
+    });
+
+    socket.on("joined", ({ projectId: joinedId }: { projectId: string }) => {
+      console.log(`[useTaskSocket] Subscribed to project:${joinedId}`);
+    });
+
+    socket.on("task:updated", (payload: TaskUpdatePayload) => {
+      const mappedStatus = mapStatus(payload.status);
+
+      setTasks((prev) =>
+        prev.map((task) => {
+          if (task.id !== payload.taskId) return task;
+          return {
+            ...task,
+            ...(payload.percentComplete !== null && {
+              pct: payload.percentComplete,
+            }),
+            ...(mappedStatus !== null && {
+              status: mappedStatus,
+            }),
+            ...(payload.area !== null && {
+              space: payload.area,
+            }),
+            ...(payload.contractor !== null && {
+              contractor: payload.contractor,
+            }),
+          };
+        })
+      );
+    });
+
+    socket.on("error", (msg: string) => {
+      // Server sends "Unauthorized" — don't log sensitive details
+      console.warn("[useTaskSocket] Socket error:", msg);
+      socket.disconnect();
+    });
+
+    socket.on("disconnect", (reason) => {
+      console.log("[useTaskSocket] Disconnected:", reason);
+    });
+
+    // Cleanup on unmount or when projectId / session changes
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [projectId, session, setTasks]);
+}
