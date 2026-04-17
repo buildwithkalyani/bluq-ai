@@ -29,7 +29,7 @@ export async function saveState(state: ConversationState): Promise<void> {
 async function getAllStates(): Promise<ConversationState[]> {
   const keys = await getRedis().keys("wa:state:*");
   if (!keys.length) return [];
-  const states = await Promise.all(keys.map((k) => redis.get<ConversationState>(k)));
+  const states = await Promise.all(keys.map((k) => getRedis().get<ConversationState>(k)));
   return states
     .filter((s): s is ConversationState => s !== null)
     .map((s) => ({ ...s, lastUpdated: new Date(s.lastUpdated) }));
