@@ -978,7 +978,11 @@ export function startWhatsappWorker() {
         throw err; // BullMQ will retry
       }
     },
-    { connection: redisConnection }
+    {
+      connection: redisConnection,
+      stalledInterval: 300_000,   // check stalled jobs every 5 min
+      lockDuration: 300_000,
+    }
   );
 
   worker.on("completed", (job) => {

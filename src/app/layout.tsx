@@ -5,19 +5,19 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "BluQ",
-  description: "Construction schedule intelligence",
+  title: "BluQ - Construction Schedule Intelligence",
+  description: "Turn your WhatsApp & site chats into a real-time audit trail. No process change for your team. Built for construction.",
   openGraph: {
-    title: "BluQ",
-    description: "Construction schedule intelligence",
+    title: "BluQ - Construction Schedule Intelligence",
+    description: "Turn your WhatsApp & site chats into a real-time audit trail. No process change for your team. Built for construction.",
     url: "https://bluq.ai",
     siteName: "BluQ",
     type: "website",
   },
   twitter: {
-    card: "summary",
-    title: "BluQ",
-    description: "Construction schedule intelligence",
+    card: "summary_large_image",
+    title: "BluQ - Construction Schedule Intelligence",
+    description: "Turn your WhatsApp & site chats into a real-time audit trail. No process change for your team. Built for construction.",
   },
 };
 

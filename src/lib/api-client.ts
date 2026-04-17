@@ -22,28 +22,20 @@ import type {
   DailyTodo,
   Milestone,
   AIBriefing,
+  ScheduleTask,
 } from "@/lib/mock-data";
 import type { DPREntry } from "@/lib/mock-data-extended";
+import { authClient } from "@/lib/auth-client";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
 
-// ---------------------------------------------------------------------------
-// Auth token helper
-// Better Auth stores the session in a cookie, but for client-side fetch calls
-// to our own backend we need the token. Better Auth exposes it on the session
-// object — we read it from the cookie that better-auth sets.
-// ---------------------------------------------------------------------------
-function getAuthToken(): string {
-  if (typeof document === "undefined") return "";
-  // better-auth sets a cookie named "better-auth.session_token"
-  const match = document.cookie
-    .split("; ")
-    .find((row) => row.startsWith("better-auth.session_token="));
-  return match ? decodeURIComponent(match.split("=")[1]) : "";
+async function getAuthToken(): Promise<string> {
+  const session = await authClient.getSession();
+  return session?.data?.session?.token ?? "";
 }
 
 async function apiFetch<T>(path: string): Promise<T> {
-  const token = getAuthToken();
+  const token = await getAuthToken();
   const res = await fetch(`${BACKEND_URL}${path}`, {
     headers: {
       "Content-Type": "application/json",
@@ -57,7 +49,7 @@ async function apiFetch<T>(path: string): Promise<T> {
 }
 
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const token = getAuthToken();
+  const token = await getAuthToken();
   const res = await fetch(`${BACKEND_URL}${path}`, {
     method: "POST",
     headers: {
@@ -207,6 +199,153 @@ export async function fetchAIBriefing(
     text: data.briefing ?? "",
     highlight: `${data.stats?.avgPercent ?? 0}% overall completion · ${data.stats?.delayed ?? 0} delayed`,
   };
+}
+
+// ---------------------------------------------------------------------------
+// TASKS (schedule pages)
+// ---------------------------------------------------------------------------
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Returns true when projectId is a real UUID (not a mock numeric string "0") */
+export function isRealProject(projectId: string | null | undefined): boolean {
+  return !!projectId && UUID_RE.test(projectId);
+}
+
+export interface BackendTask {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  title: string;
+  status: string;
+  startDate: string | null;
+  endDate: string | null;
+  durationDays: number | null;
+  percentComplete: string | null;
+  contractor: string | null;
+  area: string | null;
+  isMilestone: boolean;
+  parentTaskId: string | null;
+  sortOrder: number;
+  priority: string | null;
+}
+
+function backendTaskToScheduleTask(t: BackendTask): ScheduleTask {
+  const statusMap: Record<string, string> = {
+    not_started: "notStarted",
+    in_progress: "inProgress",
+    completed: "completed",
+    running_late: "runningLate",
+    delayed: "delayed",
+  };
+  const pct = Number(t.percentComplete ?? 0);
+  const isDelayed = t.status === "delayed" || t.status === "running_late";
+  return {
+    id: t.id,
+    name: t.title,
+    pct,
+    status: (statusMap[t.status] ?? "notStarted") as any,
+    critical: false,
+    group: "",
+    startDate: t.startDate ?? "",
+    endDate: t.endDate ?? "",
+    duration: t.durationDays ? `${t.durationDays}d` : "",
+    contractor: t.contractor ?? "—",
+    delay: isDelayed ? `${t.status === "delayed" ? "Delayed" : "Running late"}` : null,
+    space: t.area ?? "",
+    phase: t.area ?? "",       // no separate phase in schema — use area
+    photos: [],
+    milestone: t.isMilestone,
+    parentTaskId: t.parentTaskId ?? undefined,
+    left: 0,
+    width: 0,
+    projectId: 0,
+  };
+}
+
+/** GET /tasks?projectId=&workspaceId= → ScheduleTask[] */
+export async function fetchTasks(
+  projectId: string,
+  workspaceId: string
+): Promise<ScheduleTask[]> {
+  const rows = await apiFetch<BackendTask[]>(
+    `/tasks?projectId=${projectId}&workspaceId=${workspaceId}`
+  );
+  return (rows ?? []).map(backendTaskToScheduleTask);
+}
+
+/** POST /tasks */
+export async function createTask(data: {
+  workspaceId: string;
+  projectId: string;
+  title: string;
+  status?: string;
+  startDate?: string;
+  endDate?: string;
+  percentComplete?: number;
+  contractor?: string;
+  area?: string;
+  isMilestone?: boolean;
+  parentTaskId?: string;
+  priority?: string;
+}): Promise<BackendTask> {
+  return apiPost<BackendTask>("/tasks", data);
+}
+
+/** PATCH /tasks/:id */
+export async function updateTask(
+  id: string,
+  data: Partial<Omit<BackendTask, "id" | "workspaceId" | "projectId">>
+): Promise<BackendTask> {
+  const token = await getAuthToken();
+  const res = await fetch(`${BACKEND_URL}/tasks/${id}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`PATCH /tasks/${id} failed: ${res.status}`);
+  return res.json();
+}
+
+/** DELETE /tasks/:id */
+export async function deleteTask(id: string): Promise<void> {
+  const token = await getAuthToken();
+  const res = await fetch(`${BACKEND_URL}/tasks/${id}`, {
+    method: "DELETE",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`DELETE /tasks/${id} failed: ${res.status}`);
+}
+
+// ---------------------------------------------------------------------------
+// DOCUMENTS
+// ---------------------------------------------------------------------------
+
+export interface BackendDocument {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  fileName: string;
+  fileUrl: string;
+  fileType: string | null;
+  fileSize: number | null;
+  folder: string | null;
+  description: string | null;
+  uploadedBy: string | null;
+  createdAt: string;
+}
+
+/** GET /documents?projectId=&workspaceId= → BackendDocument[] */
+export async function fetchDocuments(
+  projectId: string,
+  workspaceId: string
+): Promise<BackendDocument[]> {
+  return apiFetch<BackendDocument[]>(
+    `/documents?projectId=${projectId}&workspaceId=${workspaceId}`
+  );
 }
 
 // ---------------------------------------------------------------------------

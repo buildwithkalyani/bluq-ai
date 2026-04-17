@@ -18,12 +18,17 @@ import {
   useEffect,
   ReactNode,
 } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
+
+// Accounts that always see mock/design data instead of real backend data
+const DESIGN_ACCOUNTS = ["aishna.tijaria@gmail.com"];
 
 interface WorkspaceContextType {
   workspaceId: string | null;
   orgName: string | null;
   loading: boolean;
+  isDesignMode: boolean;   // true → always show mock data
   setWorkspace: (id: string, name: string) => void;
 }
 
@@ -31,15 +36,14 @@ const WorkspaceContext = createContext<WorkspaceContextType>({
   workspaceId: null,
   orgName: null,
   loading: true,
+  isDesignMode: false,
   setWorkspace: () => {},
 });
 
-function getAuthToken(): string {
-  if (typeof document === "undefined") return "";
-  const match = document.cookie
-    .split("; ")
-    .find((row) => row.startsWith("better-auth.session_token="));
-  return match ? decodeURIComponent(match.split("=")[1]) : "";
+async function getAuthToken(): Promise<string> {
+  const { authClient } = await import("@/lib/auth-client");
+  const session = await authClient.getSession();
+  return session?.data?.session?.token ?? "";
 }
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
@@ -47,9 +51,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [orgName, setOrgName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const { data: session } = authClient.useSession();
+  const isDesignMode = DESIGN_ACCOUNTS.includes(session?.user?.email ?? "");
+  const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
-    // Don't fetch until we know if there's a session
     if (session === undefined) return;
 
     if (!session?.user) {
@@ -57,22 +63,33 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const token = getAuthToken();
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
 
-    fetch(`${backendUrl}/orgs/mine`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-      .then((r) => r.json())
-      .then((data: any[]) => {
-        const first = data?.[0];
-        if (first) {
-          setWorkspaceId(first.id);
-          setOrgName(first.name);
-        }
+    getAuthToken().then((token) => {
+      fetch(`${backendUrl}/orgs/mine`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
-      .catch(console.error)
-      .finally(() => setLoading(false));
+        .then((r) => {
+          if (!r.ok) throw new Error(`orgs/mine failed: ${r.status}`);
+          return r.json();
+        })
+        .then((data: any[]) => {
+          const first = data?.[0];
+          if (first) {
+            setWorkspaceId(first.id);
+            setOrgName(first.name);
+          } else if (pathname !== "/onboarding") {
+            router.replace("/onboarding");
+          }
+        })
+        .catch((err) => {
+          console.error("workspace fetch error:", err.message);
+          if (pathname !== "/onboarding") {
+            router.replace("/onboarding");
+          }
+        })
+        .finally(() => setLoading(false));
+    });
   }, [session?.user?.id]);
 
   const setWorkspace = (id: string, name: string) => {
@@ -82,7 +99,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   return (
     <WorkspaceContext.Provider
-      value={{ workspaceId, orgName, loading, setWorkspace }}
+      value={{ workspaceId, orgName, loading, isDesignMode, setWorkspace }}
     >
       {children}
     </WorkspaceContext.Provider>

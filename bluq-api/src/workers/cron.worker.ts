@@ -202,7 +202,11 @@ export async function startCronWorker(): Promise<void> {
       if (job.name === "morning-prompts") await runMorningCron();
       else if (job.name === "evening-prompts") await runEveningCron();
     },
-    { connection: redisConnection }
+    {
+      connection: redisConnection,
+      stalledInterval: 300_000,   // check stalled jobs every 5 min
+      lockDuration: 300_000,
+    }
   );
 
   worker.on("completed", (job) => console.log(`[cron] ✓ ${job.name}`));

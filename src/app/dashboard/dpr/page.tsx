@@ -4,16 +4,17 @@ import { useEffect, useState, useMemo, Suspense } from 'react';
 import { useSearchParams } from "next/navigation";
 import {
   getDPRHistory,
-  getProjects,
   type DPREntry,
   type Project,
 } from "@/lib/mock-data-extended";
 import { getScheduleTasks } from "@/lib/mock-data";
 import {
   fetchDPRHistory,
+  fetchProjects,
   generateReport,
   pollReportStatus,
 } from "@/lib/api-client";
+import { useWorkspace } from "@/context/workspace";
 import { Card, SectionTitle } from "@/components/ui/bluq-ui";
 
 const REPORT_SECTIONS = [
@@ -28,16 +29,18 @@ const REPORT_SECTIONS = [
 
 function DPRPageContent() {
   const searchParams = useSearchParams();
-  const urlProjectId  = Number(searchParams.get("projectId") ?? "0");
-  // Real UUIDs — when present, use real API. Absent = mock/demo mode.
-  const projectUuid   = searchParams.get("projectUuid");
-  const workspaceId   = searchParams.get("workspaceId");
-  const isRealData    = !!(projectUuid && workspaceId);
+  const urlProjectIdParam = searchParams.get("projectId") ?? "0";
+  const urlWorkspaceId    = searchParams.get("workspaceId");
+  const { workspaceId: ctxWorkspaceId, isDesignMode } = useWorkspace();
+  const workspaceId   = urlWorkspaceId ?? ctxWorkspaceId;
+  // Detect real mode: projectId is a UUID (not numeric "0") and workspaceId available
+  const isRealData = !isDesignMode && /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(urlProjectIdParam) && !!workspaceId;
+  const projectUuid = isRealData ? urlProjectIdParam : null;
 
   const [viewState, setViewState] = useState<string>("generate");
   const [history, setHistory] = useState<DPREntry[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<number>(urlProjectId);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | number>(urlProjectIdParam);
   const [loading, setLoading] = useState(true);
 
   // Live project metrics
@@ -52,15 +55,30 @@ function DPRPageContent() {
   const [filterMember, setFilterMember] = useState("all");
   const [generating, setGenerating] = useState(false);
 
-  // Load projects list
+  // Load projects list — real or mock
   useEffect(() => {
-    getProjects().then(setProjects);
-  }, []);
+    if (workspaceId && !isDesignMode) {
+      fetchProjects(workspaceId).then(rows => {
+        setProjects(rows.map(p => ({
+          id: p.id as any,
+          name: p.projectName,
+          code: p.projectCode ?? "",
+          pct: Number(p.percentComplete ?? 0),
+          status: "notStarted" as const,
+          tasks: 0, tasksDone: 0, workers: 0, issues: 0,
+          stage: p.stage ?? "",
+          startDate: p.startDate ?? "",
+          endDate: p.endDate ?? "",
+          address: p.address ?? "",
+        })));
+      }).catch(console.error);
+    }
+  }, [workspaceId]);
 
   // Sync selectedProjectId when URL changes
   useEffect(() => {
-    setSelectedProjectId(urlProjectId);
-  }, [urlProjectId]);
+    setSelectedProjectId(urlProjectIdParam);
+  }, [urlProjectIdParam]);
 
   // Load history + schedule data when project changes
   useEffect(() => {
@@ -103,7 +121,7 @@ function DPRPageContent() {
     }
   }, [selectedProjectId, projectUuid, workspaceId]);
 
-  const selectedProject = projects.find(p => p.id === selectedProjectId);
+  const selectedProject = projects.find(p => String(p.id) === String(selectedProjectId));
 
   const members = useMemo(() => Array.from(new Set(history.map(h => h.submittedBy))), [history]);
   const filteredHistory = useMemo(() =>

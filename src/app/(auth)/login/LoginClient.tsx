@@ -10,34 +10,74 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const redirect = searchParams.get("redirect") || "/dashboard/overview";
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [otpStep, setOtpStep] = useState<"email" | "verify">("email");
+  const [otpEmail, setOtpEmail] = useState("");
+  const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleGoogleLogin = async () => {
+    await authClient.signIn.social({ provider: "google", callbackURL: redirect });
+  };
+
+  const handleSendOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    setSuccess("");
+
+    const checkRes = await fetch("/api/auth/check-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: otpEmail }),
+    });
+    const { exists } = await checkRes.json();
+    if (!exists) {
+      setError("No account found with this email. Please sign up first.");
+      setLoading(false);
+      return;
+    }
+
+    const { error: sendError } = await authClient.emailOtp.sendVerificationOtp({
+      email: otpEmail,
+      type: "sign-in",
+    });
+
+    setLoading(false);
+
+    if (sendError) {
+      setError(sendError.message || "Could not send OTP. Please try again.");
+      return;
+    }
+
+    setSuccess(`OTP sent to ${otpEmail}`);
+    setOtpStep("verify");
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError("");
 
-    const { error: authError } = await authClient.signIn.email({ email, password });
+    const { error: verifyError } = await authClient.signIn.emailOtp({
+      email: otpEmail,
+      otp,
+    });
 
-    if (authError) {
-      setError(authError.message || "Invalid email or password.");
-      setLoading(false);
+    setLoading(false);
+
+    if (verifyError) {
+      setError(verifyError.message || "Invalid or expired OTP.");
       return;
     }
 
     router.push(redirect);
   };
 
-  const handleGoogleLogin = async () => {
-    setError("");
-    await authClient.signIn.social({ provider: "google", callbackURL: redirect });
-  };
-
   return (
     <>
+      {/* Google */}
       <button
         onClick={handleGoogleLogin}
         className="w-full bg-[#f6f8fa] border border-[#D0D7DE] rounded-md px-4 py-2.5 text-[13px] font-semibold text-[#24292f] flex items-center justify-center gap-2 cursor-pointer hover:bg-[#eef1f5] transition-colors mb-4"
@@ -53,45 +93,74 @@ function LoginForm() {
 
       <div className="text-center text-xs text-[#8C959F] my-3">or</div>
 
-      <form onSubmit={handleLogin}>
-        {error && (
-          <div className="mb-3 text-[12px] text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-            {error}
+      {/* OTP flow */}
+      {otpStep === "email" ? (
+        <form onSubmit={handleSendOtp}>
+          {error && (
+            <div className="mb-3 text-[12px] text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+              {error}
+            </div>
+          )}
+          <div className="mb-3.5">
+            <label className="block text-xs font-semibold text-[#57606a] mb-1">Email</label>
+            <input
+              type="email"
+              placeholder="you@company.com"
+              value={otpEmail}
+              onChange={(e) => setOtpEmail(e.target.value)}
+              required
+              className="w-full bg-white border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] text-[#24292f] placeholder:text-[#8C959F] focus:outline-none focus:ring-2 focus:ring-[#3A4EA2] focus:border-transparent"
+            />
           </div>
-        )}
-
-        <div className="mb-3.5">
-          <label className="block text-xs font-semibold text-[#57606a] mb-1">Email</label>
-          <input
-            type="email"
-            placeholder="you@company.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            className="w-full bg-white border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] text-[#24292f] placeholder:text-[#8C959F] focus:outline-none focus:ring-2 focus:ring-[#3A4EA2] focus:border-transparent"
-          />
-        </div>
-
-        <div className="mb-3.5">
-          <label className="block text-xs font-semibold text-[#57606a] mb-1">Password</label>
-          <input
-            type="password"
-            placeholder="••••••••"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            className="w-full bg-white border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] text-[#24292f] placeholder:text-[#8C959F] focus:outline-none focus:ring-2 focus:ring-[#3A4EA2] focus:border-transparent"
-          />
-        </div>
-
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full bg-[#3A4EA2] text-white rounded-md py-2.5 text-[13px] font-semibold cursor-pointer hover:bg-[#0757b5] transition-colors disabled:opacity-50 mt-1"
-        >
-          {loading ? "Signing in..." : "Log in"}
-        </button>
-      </form>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-[#3A4EA2] text-white rounded-md py-2.5 text-[13px] font-semibold cursor-pointer hover:bg-[#0757b5] transition-colors disabled:opacity-50"
+          >
+            {loading ? "Sending OTP..." : "Send OTP"}
+          </button>
+        </form>
+      ) : (
+        <form onSubmit={handleVerifyOtp}>
+          {success && (
+            <div className="mb-3 text-[12px] text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">
+              {success}
+            </div>
+          )}
+          {error && (
+            <div className="mb-3 text-[12px] text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+              {error}
+            </div>
+          )}
+          <div className="mb-1.5">
+            <label className="block text-xs font-semibold text-[#57606a] mb-1">OTP Code</label>
+            <input
+              type="text"
+              placeholder="Enter 6-digit code"
+              value={otp}
+              onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              required
+              autoFocus
+              inputMode="numeric"
+              className="w-full bg-white border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] text-[#24292f] placeholder:text-[#8C959F] focus:outline-none focus:ring-2 focus:ring-[#3A4EA2] focus:border-transparent tracking-widest font-mono"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => { setOtpStep("email"); setOtp(""); setError(""); setSuccess(""); }}
+            className="text-[11px] text-[#3A4EA2] hover:underline mb-3.5 block"
+          >
+            Resend OTP
+          </button>
+          <button
+            type="submit"
+            disabled={loading || otp.length < 6}
+            className="w-full bg-[#3A4EA2] text-white rounded-md py-2.5 text-[13px] font-semibold cursor-pointer hover:bg-[#0757b5] transition-colors disabled:opacity-50"
+          >
+            {loading ? "Verifying..." : "Verify & Log in"}
+          </button>
+        </form>
+      )}
 
       <div className="text-center text-xs text-[#57606a] mt-4">
         Don&apos;t have an account?{" "}
@@ -108,7 +177,7 @@ export default function LoginClient() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f0f6ff] to-[#f6f8fa]">
       <div className="bg-white border border-[#D0D7DE] rounded-lg w-[400px] p-8 shadow-sm">
         <div className="text-center mb-6">
-          <a href="/" className="logo" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+          <a href="/" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
             <img src="/bluq-logo.png" alt="BluQ" style={{ height: "15px", width: "auto" }} />
           </a>
           <div className="text-[13px] text-[#57606a] mt-1">Project intelligence for construction</div>

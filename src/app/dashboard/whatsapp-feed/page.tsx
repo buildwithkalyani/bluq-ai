@@ -2,10 +2,8 @@
 
 import { useEffect, useState } from "react";
 import {
-  getProjects,
   getWhatsAppConvos,
   getWhatsAppMessages,
-  type Project,
   type WhatsAppConvo,
   type WhatsAppMessage,
 } from "@/lib/mock-data-extended";
@@ -14,10 +12,13 @@ import {
   SectionTitle,
   GroupToggle,
 } from "@/components/ui/bluq-ui";
+import { useWorkspace } from "@/context/workspace";
+import { fetchProjects, type BackendProject } from "@/lib/api-client";
 
 export default function WhatsAppFeedPage() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const { workspaceId, isDesignMode } = useWorkspace();
+  const [projects, setProjects] = useState<BackendProject[]>([]);
+  const [selectedProject, setSelectedProject] = useState<BackendProject | null>(null);
 
   const [convos, setConvos] = useState<WhatsAppConvo[]>([]);
   const [messages, setMessages] = useState<WhatsAppMessage[]>([]);
@@ -27,30 +28,50 @@ export default function WhatsAppFeedPage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
-  // ── Load projects on mount ──────────────────────────
+  // ── Load projects ───────────────────────────────────
   useEffect(() => {
-    getProjects().then((p) => {
-      setProjects(p);
-      if (p.length > 0) setSelectedProject(p[0]);
-    });
-  }, []);
+    if (isDesignMode) {
+      // Design account — use mock convos (no real backend for WA history)
+      import("@/lib/mock-data-extended").then(m => {
+        m.getProjects().then(p => {
+          setProjects(p.map(x => ({ id: String(x.id), workspaceId: "", projectName: x.name, projectCode: x.code, address: x.address, stage: x.stage, category: null, startDate: x.startDate, endDate: x.endDate, status: "active", clientName: null, percentComplete: null })));
+          setLoading(false);
+        });
+      });
+      return;
+    }
+    if (workspaceId) {
+      fetchProjects(workspaceId).then((p) => {
+        setProjects(p);
+        if (p.length > 0) setSelectedProject(p[0]);
+        else setLoading(false);
+      }).catch(() => setLoading(false));
+    }
+  }, [workspaceId]);
 
   // ── Load convos when project changes ────────────────
   useEffect(() => {
     if (!selectedProject) return;
     setLoading(true);
     setSelectedConvo(null);
-    getWhatsAppConvos(selectedProject.id).then((c) => {
-      setConvos(c);
+    if (isDesignMode) {
+      import("@/lib/mock-data-extended").then(m => {
+        m.getWhatsAppConvos(Number(selectedProject.id) || 0).then(c => { setConvos(c); setLoading(false); });
+      });
+    } else {
+      // No backend WhatsApp history endpoint yet
+      setConvos([]);
       setLoading(false);
-    });
-  }, [selectedProject]);
+    }
+  }, [selectedProject, isDesignMode]);
 
   // ── Load messages when a convo is selected ──────────
   useEffect(() => {
     if (selectedConvo === null) return;
-    getWhatsAppMessages(selectedConvo).then(setMessages);
-  }, [selectedConvo]);
+    if (isDesignMode) {
+      getWhatsAppMessages(selectedConvo).then(setMessages);
+    }
+  }, [selectedConvo, isDesignMode]);
 
   // ── Simulate live sync ──────────────────────────────
   const handleSync = () => {
@@ -164,14 +185,14 @@ export default function WhatsAppFeedPage() {
             <select
               value={selectedProject?.id ?? ""}
               onChange={(e) => {
-                const proj = projects.find((p) => p.id === Number(e.target.value));
+                const proj = projects.find((p) => p.id === e.target.value);
                 if (proj) setSelectedProject(proj);
               }}
               className="appearance-none bg-white border border-[#D0D7DE] rounded-md py-1.5 pl-3 pr-8 text-[13px] font-semibold text-[#24292f] cursor-pointer outline-none focus:border-[#3A4EA2] focus:ring-1 focus:ring-[#3A4EA2]"
             >
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name}
+                  {p.projectName}
                 </option>
               ))}
             </select>

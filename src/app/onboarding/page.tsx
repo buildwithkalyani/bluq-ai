@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Btn } from "@/components/ui/bluq-ui";
+import { authClient } from "@/lib/auth-client";
 
 const STEPS = [
   { key: "org", label: "Create Org" },
@@ -12,12 +13,9 @@ const STEPS = [
   { key: "whatsapp", label: "Connect WhatsApp" },
 ];
 
-function getAuthToken(): string {
-  if (typeof document === "undefined") return "";
-  const match = document.cookie
-    .split("; ")
-    .find((row) => row.startsWith("better-auth.session_token="));
-  return match ? decodeURIComponent(match.split("=")[1]) : "";
+async function getAuthToken(): Promise<string> {
+  const session = await authClient.getSession();
+  return session?.data?.session?.token ?? "";
 }
 
 export default function OnboardingPage() {
@@ -48,7 +46,7 @@ export default function OnboardingPage() {
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
 
   const apiPost = async (path: string, body: unknown) => {
-    const token = getAuthToken();
+    const token = await getAuthToken();
     const res = await fetch(`${backendUrl}${path}`, {
       method: "POST",
       headers: {
@@ -85,11 +83,25 @@ export default function OnboardingPage() {
 
     // Step 1: Create first project (optional — user can skip)
     if (step === 1) {
-      if (projectName.trim() && createdWorkspaceId) {
+      if (projectName.trim()) {
         setSaving(true);
         try {
+          // Resolve workspaceId — use in-memory value or re-fetch from backend
+          let wsId = createdWorkspaceId;
+          if (!wsId) {
+            const token = await getAuthToken();
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
+            const res = await fetch(`${backendUrl}/orgs/mine`, {
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
+            if (!res.ok) throw new Error("Could not load your workspace. Please refresh and try again.");
+            const orgs = await res.json();
+            wsId = orgs?.[0]?.id ?? null;
+          }
+          if (!wsId) throw new Error("No workspace found. Please complete step 1 first.");
+          setCreatedWorkspaceId(wsId);
           await apiPost("/projects", {
-            workspaceId: createdWorkspaceId,
+            workspaceId: wsId,
             projectName: projectName.trim(),
             projectCode: projectCode.trim() || undefined,
             address: projectAddress.trim() || undefined,
@@ -204,7 +216,7 @@ export default function OnboardingPage() {
             <p className="text-[13px] text-[#57606a] mb-5">
               Enter basic project details. You can edit these later in settings.
             </p>
-            <FormField label="Project Name *">
+            <FormField label="Project Name">
               <input type="text" placeholder="Al Nakheel Tower" value={projectName} onChange={(e) => setProjectName(e.target.value)} className="form-input" />
             </FormField>
             <FormField label="Project Address">
@@ -398,7 +410,7 @@ export default function OnboardingPage() {
         {/* ─── NAVIGATION BUTTONS ──────────────────────── */}
         <div className="flex gap-2.5 justify-end mt-6">
           {step > 0 && <Btn onClick={back}>Back</Btn>}
-          {step >= 2 && <Btn onClick={skip}>Skip for now</Btn>}
+          {step >= 1 && <Btn onClick={skip}>Skip for now</Btn>}
           <Btn
             primary
             onClick={handleContinue}

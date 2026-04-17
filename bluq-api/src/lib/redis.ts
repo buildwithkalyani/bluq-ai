@@ -1,4 +1,7 @@
 import { Redis } from "ioredis";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 // Pulls the long rediss:// URL from your .env
 const redisUrl = process.env.UPSTASH_REDIS_URL;

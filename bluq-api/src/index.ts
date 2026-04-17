@@ -22,10 +22,12 @@
 //   ai-scheduler → processes schedule generation jobs from Redis queue
 // =============================================================================
 
+import dotenv from "dotenv";
+dotenv.config();
+
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
-import dotenv from "dotenv";
 
 // Routes
 import { healthRoute } from "./routes/health.js";
@@ -45,8 +47,6 @@ import { startWhatsappWorker } from "./workers/whatsapp.worker.js";
 import { startCronWorker } from "./workers/cron.worker.js";
 import { startPdfWorker } from "./workers/pdf.worker.js";
 import { initSocketServer } from "./lib/socket.js";
-
-dotenv.config();
 
 const app = Fastify({ logger: true });
 
