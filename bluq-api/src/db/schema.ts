@@ -11,10 +11,11 @@ export const orgs = pgTable("orgs", {
 
 export const users = pgTable("users", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
-	email: text(),
+	email: text().notNull(),
 	phone: text(),
 	name: text().notNull(),
 	avatarUrl: text("avatar_url"),
+	emailVerified: boolean("email_verified").default(false).notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 }, (table) => [
@@ -468,6 +469,55 @@ export const reports = pgTable("reports", {
 	check("reports_type_check", sql`type = ANY (ARRAY['daily'::text, 'weekly'::text])`),
 ]);
 
+export const session = pgTable("session", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: uuid("user_id").notNull(),
+	token: text().notNull(),
+	expiresAt: timestamp("expires_at", { withTimezone: true, mode: 'string' }).notNull(),
+	ipAddress: text("ip_address"),
+	userAgent: text("user_agent"),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	unique("session_token_key").on(table.token),
+	foreignKey({
+		columns: [table.userId],
+		foreignColumns: [users.id],
+		name: "session_user_id_fkey",
+	}).onDelete("cascade"),
+]);
+
+export const account = pgTable("account", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: uuid("user_id").notNull(),
+	accountId: text("account_id").notNull(),
+	providerId: text("provider_id").notNull(),
+	accessToken: text("access_token"),
+	refreshToken: text("refresh_token"),
+	idToken: text("id_token"),
+	accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true, mode: 'string' }),
+	refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true, mode: 'string' }),
+	scope: text(),
+	password: text(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	foreignKey({
+		columns: [table.userId],
+		foreignColumns: [users.id],
+		name: "account_user_id_fkey",
+	}).onDelete("cascade"),
+]);
+
+export const verification = pgTable("verification", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	identifier: text().notNull(),
+	value: text().notNull(),
+	expiresAt: timestamp("expires_at", { withTimezone: true, mode: 'string' }).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+});
+
 export const demoRequests = pgTable("demo_requests", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	name: text(),
@@ -482,4 +532,6 @@ export const demoRequests = pgTable("demo_requests", {
 	emailSent: boolean("email_sent").default(false),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow(),
-  });
+}, () => [
+	check("demo_requests_status_check", sql`status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text])`),
+]);

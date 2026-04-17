@@ -3,6 +3,8 @@
 import { useEffect, useState, useMemo, Suspense } from 'react';
 import { useSearchParams } from "next/navigation";
 import { getScheduleTasks, STATUS_CONFIG, type ScheduleTask } from "@/lib/mock-data";
+import { fetchTasks, isRealProject } from "@/lib/api-client";
+import { useWorkspace } from "@/context/workspace";
 
 const PHASE_ORDER = ["Site Preparation", "Foundation", "Structure", "MEP", "Finishing", "Handover"];
 
@@ -36,12 +38,20 @@ function BaselineActualPageContent() {
   const [loading, setLoading] = useState(true);
   const [collapsedPhases, setCollapsedPhases] = useState<Set<string>>(new Set());
   const searchParams = useSearchParams();
-  const projectId = Number(searchParams.get("projectId") ?? "0");
+  const { isDesignMode, workspaceId: ctxWorkspaceId } = useWorkspace();
+  const projectIdParam = searchParams.get("projectId") ?? "0";
+  const workspaceId = searchParams.get("workspaceId") ?? ctxWorkspaceId;
+  const real = !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
 
   useEffect(() => {
     setLoading(true);
-    getScheduleTasks(projectId).then(t => { setTasks(t); setLoading(false); });
-  }, [projectId]);
+    const load = real
+      ? fetchTasks(projectIdParam, workspaceId!)
+      : isDesignMode
+        ? getScheduleTasks(Number(projectIdParam))
+        : Promise.resolve([]);
+    load.then(t => { setTasks(t); setLoading(false); });
+  }, [projectIdParam, workspaceId, isDesignMode]);
 
   const togglePhase = (p: string) =>
     setCollapsedPhases(prev => { const s = new Set(prev); s.has(p) ? s.delete(p) : s.add(p); return s; });

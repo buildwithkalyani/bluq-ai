@@ -20,7 +20,7 @@ import { useWorkspace } from "@/context/workspace";
 import { fetchProjects } from "@/lib/api-client";
 
 export default function OverviewPage() {
-  const { workspaceId, loading: wsLoading } = useWorkspace();
+  const { workspaceId, loading: wsLoading, isDesignMode } = useWorkspace();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -32,7 +32,7 @@ export default function OverviewPage() {
   useEffect(() => {
     if (wsLoading) return; // wait for workspace to resolve
 
-    if (workspaceId) {
+    if (workspaceId && !isDesignMode) {
       // Real backend
       fetchProjects(workspaceId)
         .then((rows) => {
@@ -56,14 +56,14 @@ export default function OverviewPage() {
         })
         .catch(console.error)
         .finally(() => setLoading(false));
-    } else {
-      // Mock fallback — demo / client preview mode
+    } else if (isDesignMode) {
+      // Design account — always mock
       getProjects().then((data) => {
         setProjects(data);
         setLoading(false);
       });
     }
-  }, [workspaceId, wsLoading]);
+  }, [workspaceId, wsLoading, isDesignMode]);
 
   const filtered = projects.filter((p) =>
     p.name.toLowerCase().includes(search.toLowerCase()) ||

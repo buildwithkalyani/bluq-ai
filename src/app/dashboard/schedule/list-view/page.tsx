@@ -10,6 +10,8 @@ import {
   type TaskDependency,
 } from "@/lib/mock-data";
 import { Card, StatusBadge, SectionTitle, Btn } from "@/components/ui/bluq-ui";
+import { fetchTasks, isRealProject, createTask, updateTask, deleteTask } from "@/lib/api-client";
+import { useWorkspace } from "@/context/workspace";
 
 const PHASE_ORDER = ["Site Preparation", "Foundation", "Structure", "MEP", "Finishing", "Handover"];
 type StatusKey = keyof typeof STATUS_CONFIG;
@@ -56,19 +58,29 @@ function ListViewPageContent() {
   const [collapsedTasks,  setCollapsedTasks]  = useState<Set<string>>(new Set());
 
   const searchParams = useSearchParams();
-  const projectId = Number(searchParams.get("projectId") ?? "0");
+  const { isDesignMode, workspaceId: ctxWorkspaceId } = useWorkspace();
+  const projectIdParam = searchParams.get("projectId") ?? "0";
+  const workspaceId = searchParams.get("workspaceId") ?? ctxWorkspaceId;
+  const real = !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
   const selectedTaskData = tasks.find(t => t.id === selectedTask) ?? null;
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([getScheduleTasks(projectId), getScheduleDeps(projectId)]).then(([t, d]) => {
+    const taskLoader = real
+      ? fetchTasks(projectIdParam, workspaceId!)
+      : isDesignMode
+        ? getScheduleTasks(Number(projectIdParam))
+        : Promise.resolve([]);
+    const depLoader = real || !isDesignMode
+      ? Promise.resolve([])
+      : getScheduleDeps(Number(projectIdParam));
+    Promise.all([taskLoader, depLoader]).then(([t, d]) => {
       setTasks(t); setDeps(d); setLoading(false); setSelectedTask(null);
-      // reset to all-expanded on project change
       setCollapsedPhases(new Set());
       setCollapsedAreas(new Set());
       setCollapsedTasks(new Set());
     });
-  }, [projectId]);
+  }, [projectIdParam, workspaceId]);
 
   const togglePhase = (p: string) =>
     setCollapsedPhases(prev => { const s = new Set(prev); s.has(p) ? s.delete(p) : s.add(p); return s; });
@@ -386,7 +398,9 @@ function ListViewPageContent() {
           </div>
           <div className="p-4 border-t border-[#D0D7DE] flex gap-2">
             <button onClick={() => openEditModal(selectedTaskData)} className="flex-1 py-1.5 text-[12px] font-semibold rounded-md bg-[#ddf4ff] border border-[#3A4EA2] text-[#3A4EA2] hover:bg-[#b6e3ff] transition-colors">Edit</button>
-            <button onClick={() => { if (window.confirm(`Delete "${selectedTaskData.name}"?`)) { setTasks(p => p.filter(t => t.id !== selectedTaskData.id)); setDeps(p => p.filter(d => d.from !== selectedTaskData.id && d.to !== selectedTaskData.id)); setSelectedTask(null); }}}
+            <button onClick={() => { if (window.confirm(`Delete "${selectedTaskData.name}"?`)) {
+              if (real) deleteTask(selectedTaskData.id).catch(console.error);
+              setTasks(p => p.filter(t => t.id !== selectedTaskData.id)); setDeps(p => p.filter(d => d.from !== selectedTaskData.id && d.to !== selectedTaskData.id)); setSelectedTask(null); }}}
               className="flex-1 py-1.5 text-[12px] font-semibold rounded-md bg-[#ffebe9] border border-[#CF222E] text-[#CF222E] hover:bg-[#ffc1bd] transition-colors">Delete</button>
           </div>
         </div>
@@ -488,40 +502,61 @@ function ListViewPageContent() {
                   const days = Math.round((new Date(newTask.endDate).getTime() - new Date(newTask.startDate).getTime()) / 86400000);
 
                   if (editingTaskId) {
-                    // Edit existing task
-                    setTasks(prev => prev.map(t => t.id === editingTaskId ? {
-                      ...t,
-                      name: newTask.name.trim(),
-                      phase: newTask.phase,
-                      space: newTask.space || "General",
-                      contractor: newTask.contractor || "—",
-                      startDate: newTask.startDate,
-                      endDate: newTask.endDate,
-                      duration: `${days}d`,
-                      pct: newTask.pct,
-                      status: newTask.status,
-                    } : t));
+                    if (real) {
+                      const statusMap: Record<string, string> = { notStarted: "not_started", inProgress: "in_progress", completed: "completed", runningLate: "running_late", delayed: "delayed" };
+                      updateTask(editingTaskId, {
+                        title: newTask.name.trim(),
+                        status: statusMap[newTask.status] ?? "not_started",
+                        startDate: newTask.startDate || null,
+                        endDate: newTask.endDate || null,
+                        percentComplete: String(newTask.pct),
+                        contractor: newTask.contractor || null,
+                        area: newTask.space || null,
+                      }).then(updated => {
+                        setTasks(prev => prev.map(t => t.id === editingTaskId ? {
+                          ...t, name: newTask.name.trim(), phase: newTask.phase, space: newTask.space || "General",
+                          contractor: newTask.contractor || "—", startDate: newTask.startDate, endDate: newTask.endDate,
+                          duration: `${days}d`, pct: newTask.pct, status: newTask.status,
+                        } : t));
+                      }).catch(console.error);
+                    } else {
+                      setTasks(prev => prev.map(t => t.id === editingTaskId ? {
+                        ...t, name: newTask.name.trim(), phase: newTask.phase, space: newTask.space || "General",
+                        contractor: newTask.contractor || "—", startDate: newTask.startDate, endDate: newTask.endDate,
+                        duration: `${days}d`, pct: newTask.pct, status: newTask.status,
+                      } : t));
+                    }
                   } else {
-                    // Add new task
-                    setTasks(prev => [...prev, {
-                      id: `task_${Date.now()}`,
-                      projectId,
-                      name: newTask.name.trim(),
-                      phase: newTask.phase,
-                      space: newTask.space || "General",
-                      contractor: newTask.contractor || "—",
-                      startDate: newTask.startDate,
-                      endDate: newTask.endDate,
-                      duration: `${days}d`,
-                      pct: newTask.pct,
-                      status: newTask.status,
-                      critical: false,
-                      group: "",
-                      delay: null,
-                      left: 0,
-                      width: 0,
-                      photos: [],
-                    }]);
+                    if (real) {
+                      const statusMap: Record<string, string> = { notStarted: "not_started", inProgress: "in_progress", completed: "completed", runningLate: "running_late", delayed: "delayed" };
+                      createTask({
+                        workspaceId: workspaceId!,
+                        projectId: projectIdParam,
+                        title: newTask.name.trim(),
+                        status: statusMap[newTask.status] ?? "not_started",
+                        startDate: newTask.startDate || undefined,
+                        endDate: newTask.endDate || undefined,
+                        percentComplete: newTask.pct,
+                        contractor: newTask.contractor || undefined,
+                        area: newTask.space || undefined,
+                      }).then(created => {
+                        setTasks(prev => [...prev, {
+                          id: created.id, projectId: 0, name: newTask.name.trim(), phase: newTask.phase,
+                          space: newTask.space || "General", contractor: newTask.contractor || "—",
+                          startDate: newTask.startDate, endDate: newTask.endDate, duration: `${days}d`,
+                          pct: newTask.pct, status: newTask.status, critical: false, group: "",
+                          delay: null, left: 0, width: 0, photos: [],
+                        }]);
+                      }).catch(console.error);
+                    } else {
+                      setTasks(prev => [...prev, {
+                        id: `task_${Date.now()}`, projectId: Number(projectIdParam),
+                        name: newTask.name.trim(), phase: newTask.phase, space: newTask.space || "General",
+                        contractor: newTask.contractor || "—", startDate: newTask.startDate, endDate: newTask.endDate,
+                        duration: `${days}d`, pct: newTask.pct, status: newTask.status,
+                        critical: false, group: "", delay: null, left: 0, width: 0, photos: [],
+                      }]);
+                    }
                   }
 
                   setIsModalOpen(false);
