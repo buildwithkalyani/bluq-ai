@@ -27,32 +27,36 @@ function LoginForm() {
     setError("");
     setSuccess("");
 
-    const checkRes = await fetch("/api/auth/check-email", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: otpEmail }),
-    });
-    const { exists } = await checkRes.json();
-    if (!exists) {
-      setError("No account found with this email. Please sign up first.");
+    try {
+      const checkRes = await fetch("/api/auth/check-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: otpEmail }),
+      });
+      const { exists } = await checkRes.json();
+      if (!exists) {
+        setError("No account found with this email. Please sign up first.");
+        setLoading(false);
+        return;
+      }
+
+      const { error: sendError } = await authClient.emailOtp.sendVerificationOtp({
+        email: otpEmail,
+        type: "sign-in",
+      });
+
+      if (sendError) {
+        setError(sendError.message || "Could not send OTP. Please try again.");
+        return;
+      }
+
+      setSuccess(`OTP sent to ${otpEmail}`);
+      setOtpStep("verify");
+    } catch (err) {
+      setError("Something went wrong. Please try again.");
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const { error: sendError } = await authClient.emailOtp.sendVerificationOtp({
-      email: otpEmail,
-      type: "sign-in",
-    });
-
-    setLoading(false);
-
-    if (sendError) {
-      setError(sendError.message || "Could not send OTP. Please try again.");
-      return;
-    }
-
-    setSuccess(`OTP sent to ${otpEmail}`);
-    setOtpStep("verify");
   };
 
   const handleVerifyOtp = async (e: React.FormEvent) => {
@@ -60,19 +64,23 @@ function LoginForm() {
     setLoading(true);
     setError("");
 
-    const { error: verifyError } = await authClient.signIn.emailOtp({
-      email: otpEmail,
-      otp,
-    });
+    try {
+      const { error: verifyError } = await authClient.signIn.emailOtp({
+        email: otpEmail,
+        otp,
+      });
 
-    setLoading(false);
+      if (verifyError) {
+        setError(verifyError.message || "Invalid or expired OTP.");
+        return;
+      }
 
-    if (verifyError) {
-      setError(verifyError.message || "Invalid or expired OTP.");
-      return;
+      router.push(redirect);
+    } catch (err) {
+      setError("Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
     }
-
-    router.push(redirect);
   };
 
   return (
