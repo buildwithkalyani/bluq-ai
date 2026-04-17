@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useWorkspace } from "@/context/workspace";
 import { fetchProjects, fetchDocuments, isRealProject, type BackendProject } from "@/lib/api-client";
@@ -94,7 +94,7 @@ const ApprovalBadge = ({ status }: { status: ApprovalStatus }) => {
   );
 };
 
-export default function DocumentsPage() {
+function DocumentsPageContent() {
   const searchParams = useSearchParams();
   const { workspaceId: ctxWorkspaceId } = useWorkspace();
   const projectIdParam = searchParams.get("projectId") ?? "0";
@@ -461,5 +461,13 @@ export default function DocumentsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function DocumentsPage() {
+  return (
+    <Suspense fallback={<div className="p-5 text-sm text-[#8C959F]">Loading…</div>}>
+      <DocumentsPageContent />
+    </Suspense>
   );
 }
