@@ -101,8 +101,8 @@ function DPRPageContent() {
     } else {
       // Mock fallback
       Promise.all([
-        getDPRHistory(selectedProjectId),
-        getScheduleTasks(selectedProjectId),
+        getDPRHistory(Number(selectedProjectId)),
+        getScheduleTasks(Number(selectedProjectId)),
       ]).then(([h, tasks]) => {
         setHistory(h || []);
         const parents = tasks.filter(t => !t.parentTaskId);
