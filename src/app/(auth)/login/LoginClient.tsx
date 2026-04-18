@@ -15,10 +15,22 @@ function LoginForm() {
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [googleError, setGoogleError] = useState("");
   const [success, setSuccess] = useState("");
 
   const handleGoogleLogin = async () => {
-    await authClient.signIn.social({ provider: "google", callbackURL: redirect });
+    setLoading(true);
+    setGoogleError("");
+    try {
+      const result = await authClient.signIn.social({ provider: "google", callbackURL: redirect });
+      if (result?.error) {
+        setGoogleError(result.error.message || "Google sign-in failed. Please try again.");
+      }
+    } catch (err) {
+      setGoogleError("Google sign-in failed. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSendOtp = async (e: React.FormEvent) => {
@@ -86,9 +98,15 @@ function LoginForm() {
   return (
     <>
       {/* Google */}
+      {googleError && (
+        <div className="mb-3 text-[12px] text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+          {googleError}
+        </div>
+      )}
       <button
         onClick={handleGoogleLogin}
-        className="w-full bg-[#f6f8fa] border border-[#D0D7DE] rounded-md px-4 py-2.5 text-[13px] font-semibold text-[#24292f] flex items-center justify-center gap-2 cursor-pointer hover:bg-[#eef1f5] transition-colors mb-4"
+        disabled={loading}
+        className="w-full bg-[#f6f8fa] border border-[#D0D7DE] rounded-md px-4 py-2.5 text-[13px] font-semibold text-[#24292f] flex items-center justify-center gap-2 cursor-pointer hover:bg-[#eef1f5] transition-colors mb-4 disabled:opacity-50"
       >
         <svg width="18" height="18" viewBox="0 0 24 24">
           <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
