@@ -222,7 +222,7 @@ export default function Home() {
       <section>
         <div className="wrap">
           <div className="stag">The Problem</div>
-          <h2>Most construction delays were<br />preventable.</h2>
+          <h2>Most construction delays were <br />preventable.</h2>
           <p className="section-sub">Delays don&apos;t appear out of nowhere. They build through days of small signals that no one caught because there was no system in place to catch them.</p>
           <div className="prob-grid">
             {[
