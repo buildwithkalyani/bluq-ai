@@ -4,6 +4,9 @@ import { Pool } from "pg";
 
 const pool = new Pool({
   connectionString: process.env.SUPABASE_DATABASE_URL,
+  ssl: process.env.NODE_ENV === "production"
+    ? { rejectUnauthorized: true }
+    : { rejectUnauthorized: false },
 });
 
 export const auth = betterAuth({
@@ -64,19 +67,6 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
   },
-  ...(() => {
-    const hasGoogle = !!(process.env.GOOGLE_CLIENT_ID && !process.env.GOOGLE_CLIENT_ID.startsWith("replace_"));
-    console.log("[auth] Google provider registered:", hasGoogle, "| CLIENT_ID prefix:", process.env.GOOGLE_CLIENT_ID?.slice(0, 20));
-    return {};
-  })(),
-  ...(process.env.GOOGLE_CLIENT_ID && !process.env.GOOGLE_CLIENT_ID.startsWith("replace_") && {
-    socialProviders: {
-      google: {
-        clientId: process.env.GOOGLE_CLIENT_ID,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-      },
-    },
-  }),
   plugins: [
     emailOTP({
       sendVerificationOTP: async ({ email, otp }) => {
