@@ -1,12 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Pool } from "pg";
-
-const pool = new Pool({
-  connectionString: process.env.SUPABASE_DATABASE_URL,
-  ssl: process.env.NODE_ENV === "production"
-    ? { rejectUnauthorized: true, ca: process.env.SUPABASE_CA_CERT?.replace(/\\n/g, "\n") }
-    : { rejectUnauthorized: false },
-});
+import { pool } from "@/lib/db";
 
 export async function POST(req: NextRequest) {
   try {
