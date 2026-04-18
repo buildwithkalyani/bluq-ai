@@ -8,7 +8,6 @@ import { authClient } from "@/lib/auth-client";
 const STEPS = [
   { key: "org", label: "Create Org" },
   { key: "project", label: "Create Project" },
-  { key: "schedule", label: "Add Tasks" },
   { key: "team", label: "Invite Team" },
   { key: "whatsapp", label: "Connect WhatsApp" },
 ];
@@ -36,7 +35,6 @@ export default function OnboardingPage() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [projectCode, setProjectCode] = useState("");
-  const [scheduleMethod, setScheduleMethod] = useState<"csv" | "manual" | "ai" | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [invites, setInvites] = useState<string[]>([]);
   const [contractorName, setContractorName] = useState("");
@@ -216,81 +214,40 @@ export default function OnboardingPage() {
             <p className="text-[13px] text-[#57606a] mb-5">
               Enter basic project details. You can edit these later in settings.
             </p>
-            <FormField label="Project Name">
+            <FormField label="Project Name *">
               <input type="text" placeholder="Al Nakheel Tower" value={projectName} onChange={(e) => setProjectName(e.target.value)} className="form-input" />
             </FormField>
-            <FormField label="Project Address">
+            <FormField label="Project Address *">
               <input type="text" placeholder="Dubai Marina, Dubai, UAE" value={projectAddress} onChange={(e) => setProjectAddress(e.target.value)} className="form-input" />
             </FormField>
             <div className="flex gap-3">
-              <FormField label="Stage" className="flex-1">
+              <FormField label="Stage *" className="flex-1">
                 <select value={projectStage} onChange={(e) => setProjectStage(e.target.value)} className="form-input">
                   {["Foundation", "Structure", "Finishing", "Pre-Construction"].map((o) => <option key={o}>{o}</option>)}
                 </select>
               </FormField>
-              <FormField label="Type" className="flex-1">
+              <FormField label="Type *" className="flex-1">
                 <select value={projectType} onChange={(e) => setProjectType(e.target.value)} className="form-input">
                   {["Residential", "Commercial", "Mixed-Use", "Infrastructure"].map((o) => <option key={o}>{o}</option>)}
                 </select>
               </FormField>
             </div>
             <div className="flex gap-3">
-              <FormField label="Start Date" className="flex-1">
+              <FormField label="Start Date *" className="flex-1">
                 <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="form-input" />
               </FormField>
-              <FormField label="End Date" className="flex-1">
+              <FormField label="End Date *" className="flex-1">
                 <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="form-input" />
               </FormField>
             </div>
-            <FormField label="Project Code">
+            <FormField label="Project Code *">
               <input type="text" placeholder="ANT-2026-001" value={projectCode} onChange={(e) => setProjectCode(e.target.value)} className="form-input" />
             </FormField>
           </>
         )}
 
-        {/* ─── STEP 3: SCHEDULE ────────────────────────── */}
+        {/* ─── STEP 3: INVITE ──────────────────────────── */}
         {step === 2 && (
-          <>
-            <div className="text-[15px] font-bold text-[#24292f] mb-1">
-              Add Your Schedule
-            </div>
-            <p className="text-[13px] text-[#57606a] mb-5">
-              Choose how to populate your project schedule.
-            </p>
-            <div className="space-y-2.5">
-              {[
-                { key: "csv" as const, icon: "📥", title: "Import from Excel/CSV", desc: "Upload a .xlsx or .csv file and map columns to Bluq fields" },
-                { key: "manual" as const, icon: "✏️", title: "Add tasks manually", desc: "Create tasks one by one with full control over dependencies" },
-                { key: "ai" as const, icon: "🤖", title: "AI-generate from BOQ", desc: "Upload your BOQ and let Claude build the schedule automatically" },
-              ].map((opt) => (
-                <div
-                  key={opt.key}
-                  onClick={() => setScheduleMethod(opt.key)}
-                  className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
-                    scheduleMethod === opt.key
-                      ? "border-[#3A4EA2] bg-[#ddf4ff]"
-                      : "border-[#D0D7DE] hover:border-[#8C959F]"
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="text-2xl">{opt.icon}</span>
-                    <div>
-                      <div className="text-[13px] font-bold text-[#24292f]">
-                        {opt.title}
-                      </div>
-                      <div className="text-[11px] text-[#57606a] mt-0.5">
-                        {opt.desc}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        {/* ─── STEP 4: INVITE ──────────────────────────── */}
-        {step === 3 && (
           <>
             <div className="text-[15px] font-bold text-[#24292f] mb-1">
               Invite Your Team
@@ -347,8 +304,8 @@ export default function OnboardingPage() {
           </>
         )}
 
-        {/* ─── STEP 5: WHATSAPP ────────────────────────── */}
-        {step === 4 && (
+        {/* ─── STEP 4: WHATSAPP ────────────────────────── */}
+        {step === 3 && (
           <>
             <div className="text-[15px] font-bold text-[#24292f] mb-1">
               Link Contractors via WhatsApp
@@ -414,7 +371,18 @@ export default function OnboardingPage() {
           <Btn
             primary
             onClick={handleContinue}
-            disabled={saving || (step === 0 && !orgName.trim())}
+            disabled={
+              saving ||
+              (step === 0 && !orgName.trim()) ||
+              (step === 1 && (
+                !projectName.trim() ||
+                !projectAddress.trim() ||
+                !startDate ||
+                !endDate ||
+                !projectCode.trim()
+              )) ||
+              (step === 2 && invites.length === 0)
+            }
           >
             {saving
               ? "Saving..."
