@@ -113,7 +113,7 @@ export default function Home() {
       {/* HERO */}
       <div className="hero">
         <div className="hero-badge"><span className="badge-dot" />Now in Early Access</div>
-        <h1>Schedule Intelligence for<br /><span>Construction</span></h1>
+        <h1>Schedule Intelligence for <br /><span>Construction</span></h1>
         <p className="hero-sub">BluQ auto-schedules your projects, warns you before delays escalate, collects field updates via WhatsApp, and generates your DPR within minutes.</p>
         <div className="hero-ctas">
           <a href="#demo" className="btn-hero">Book a Free Demo</a>
@@ -243,7 +243,7 @@ export default function Home() {
       <section id="features">
         <div className="wrap">
           <div className="stag">Features</div>
-          <h2>Built for how construction<br />project management actually works.</h2>
+          <h2>Built for how construction <br />project management actually works.</h2>
           <p className="section-sub">Not a generic PM tool retrofitted for construction. Every feature in BluQ exists because a PMC firm asked for it.</p>
           <div className="feat-grid">
             {[
@@ -269,7 +269,7 @@ export default function Home() {
       <section id="how-it-works" className="how-bg">
         <div className="wrap">
           <div className="stag">How It Works</div>
-          <h2>Three steps from your existing<br />schedule to a live project.</h2>
+          <h2>Three steps from your existing <br />schedule to a live project.</h2>
           <p className="section-sub">No long implementations. No consultants. Import your existing schedule and go live the same week.</p>
           <div className="steps">
             {[
