@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Btn } from "@/components/ui/bluq-ui";
 import { authClient } from "@/lib/auth-client";
@@ -25,6 +25,9 @@ export default function OnboardingPage() {
 
   // Created IDs — passed to subsequent steps
   const [createdWorkspaceId, setCreatedWorkspaceId] = useState<string | null>(null);
+
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
 
   // Form states
   const [orgName, setOrgName] = useState("");
@@ -191,15 +194,31 @@ export default function OnboardingPage() {
               <label className="block text-xs font-semibold text-[#57606a] mb-1">
                 Company Logo (optional)
               </label>
-              <div className="border-2 border-dashed border-[#D0D7DE] rounded-lg p-6 text-center cursor-pointer hover:border-[#8C959F] transition-colors">
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/png,image/jpeg"
+                className="hidden"
+                onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
+              />
+              <div
+                onClick={() => logoInputRef.current?.click()}
+                className="border-2 border-dashed border-[#D0D7DE] rounded-lg p-6 text-center cursor-pointer hover:border-[#8C959F] transition-colors"
+              >
                 <div className="text-2xl mb-1">🖼️</div>
-                <div className="text-xs text-[#57606a]">
-                  Drag & drop or{" "}
-                  <span className="text-[#3A4EA2] font-semibold">browse</span>
-                </div>
-                <div className="text-[10px] text-[#8C959F] mt-1">
-                  PNG, JPG up to 2MB
-                </div>
+                {logoFile ? (
+                  <div className="text-xs text-[#24292f] font-semibold">{logoFile.name}</div>
+                ) : (
+                  <>
+                    <div className="text-xs text-[#57606a]">
+                      Drag & drop or{" "}
+                      <span className="text-[#3A4EA2] font-semibold">browse</span>
+                    </div>
+                    <div className="text-[10px] text-[#8C959F] mt-1">
+                      PNG, JPG up to 2MB
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </>
