@@ -1,18 +1,15 @@
 import { betterAuth } from "better-auth";
 import { emailOTP } from "better-auth/plugins";
-import { Pool } from "pg";
-
-const pool = new Pool({
-  connectionString: process.env.SUPABASE_DATABASE_URL,
-  ssl: process.env.NODE_ENV === "production"
-    ? { rejectUnauthorized: true }
-    : { rejectUnauthorized: false },
-});
+import { pool } from "@/lib/db";
 
 export const auth = betterAuth({
   database: pool,
   secret: process.env.BETTER_AUTH_SECRET,
   baseURL: process.env.BETTER_AUTH_URL,
+  trustedOrigins: [
+    "https://bluq.ai",
+    "https://www.bluq.ai",
+  ],
   advanced: {
     database: {
       generateId: () => crypto.randomUUID(),
@@ -63,14 +60,6 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
   },
-  ...(process.env.GOOGLE_CLIENT_ID && !process.env.GOOGLE_CLIENT_ID.startsWith("replace_") && {
-    socialProviders: {
-      google: {
-        clientId: process.env.GOOGLE_CLIENT_ID,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-      },
-    },
-  }),
   plugins: [
     emailOTP({
       sendVerificationOTP: async ({ email, otp }) => {

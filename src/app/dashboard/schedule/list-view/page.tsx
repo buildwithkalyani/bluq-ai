@@ -58,10 +58,11 @@ function ListViewPageContent() {
   const [collapsedTasks,  setCollapsedTasks]  = useState<Set<string>>(new Set());
 
   const searchParams = useSearchParams();
-  const { isDesignMode, workspaceId: ctxWorkspaceId } = useWorkspace();
+  const { isDesignMode, workspaceId: ctxWorkspaceId, loading: wsLoading } = useWorkspace();
   const projectIdParam = searchParams.get("projectId") ?? "0";
-  const workspaceId = searchParams.get("workspaceId") ?? ctxWorkspaceId;
-  const real = !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
+  const urlWs = searchParams.get("workspaceId");
+  const workspaceId = (urlWs && urlWs !== "null") ? urlWs : ctxWorkspaceId;
+  const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
   const selectedTaskData = tasks.find(t => t.id === selectedTask) ?? null;
 
   useEffect(() => {
@@ -469,7 +470,10 @@ function ListViewPageContent() {
               <div className="flex gap-3">
                 <div className="flex-1">
                   <label className="block text-[11px] font-bold text-[#57606a] mb-1.5 uppercase tracking-wider">Status</label>
-                  <select value={newTask.status} onChange={e => setNewTask({ ...newTask, status: e.target.value as StatusKey })}
+                  <select value={newTask.status} onChange={e => {
+                    const s = e.target.value as StatusKey;
+                    setNewTask({ ...newTask, status: s, pct: s === "completed" ? 100 : s === "notStarted" ? 0 : newTask.pct });
+                  }}
                     className="w-full bg-white border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#3A4EA2]">
                     {(Object.entries(STATUS_CONFIG) as [StatusKey, typeof STATUS_CONFIG[StatusKey]][]).map(([k, v]) =>
                       <option key={k} value={k}>{v.label}</option>)}
@@ -479,7 +483,10 @@ function ListViewPageContent() {
                   <label className="block text-[11px] font-bold text-[#57606a] mb-1.5 uppercase tracking-wider">% Complete</label>
                   <div className="flex items-center gap-2">
                     <input type="range" min={0} max={100} step={5}
-                      value={newTask.pct} onChange={e => setNewTask({ ...newTask, pct: Number(e.target.value) })}
+                      value={newTask.pct} onChange={e => {
+                        const p = Number(e.target.value);
+                        setNewTask({ ...newTask, pct: p, status: p === 100 ? "completed" : p === 0 ? "notStarted" : newTask.status });
+                      }}
                       className="flex-1 accent-[#3A4EA2]" />
                     <span className="text-[13px] font-bold font-mono text-[#3A4EA2] w-10 text-right">{newTask.pct}%</span>
                   </div>

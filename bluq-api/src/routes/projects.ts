@@ -199,8 +199,20 @@ Write a professional morning briefing. Be direct and actionable — highlight wh
       if (!UUID_REGEX.test(id)) {
         return reply.status(400).send({ error: "id must be a valid UUID" });
       }
-      const body = request.body as Record<string, any>;
-      const [updated] = await db.update(projects).set(body).where(eq(projects.id, id)).returning();
+      const b = request.body as Record<string, any>;
+      const set: Record<string, any> = {};
+      if (b.projectName  !== undefined) set.projectName  = b.projectName;
+      if (b.address      !== undefined) set.address      = b.address;
+      if (b.stage        !== undefined) set.stage        = b.stage;
+      if (b.category     !== undefined) set.category     = b.category;
+      if (b.startDate    !== undefined) set.startDate    = b.startDate;
+      if (b.endDate      !== undefined) set.endDate      = b.endDate;
+      if (b.projectCode  !== undefined) set.projectCode  = b.projectCode;
+      if (b.clientName   !== undefined) set.clientName   = b.clientName;
+      if (b.status       !== undefined) set.status       = b.status;
+      if (b.settingsJson !== undefined) set.settingsJson = b.settingsJson;
+      if (Object.keys(set).length === 0) return reply.status(400).send({ error: "No fields to update" });
+      const [updated] = await db.update(projects).set(set).where(eq(projects.id, id)).returning();
       if (!updated) return reply.status(404).send({ error: "Project not found" });
       return updated;
     } catch (err: any) {

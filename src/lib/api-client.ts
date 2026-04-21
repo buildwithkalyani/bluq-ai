@@ -29,9 +29,18 @@ import { authClient } from "@/lib/auth-client";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
 
+let _tokenCache: { token: string; exp: number } | null = null;
+
 async function getAuthToken(): Promise<string> {
+  if (_tokenCache && Date.now() < _tokenCache.exp) return _tokenCache.token;
   const session = await authClient.getSession();
-  return session?.data?.session?.token ?? "";
+  const token = session?.data?.session?.token ?? "";
+  _tokenCache = { token, exp: Date.now() + 60_000 };
+  return token;
+}
+
+export function clearAuthTokenCache(): void {
+  _tokenCache = null;
 }
 
 async function apiFetch<T>(path: string): Promise<T> {
@@ -60,6 +69,22 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
   });
   if (!res.ok) {
     throw new Error(`API POST ${path} failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+async function apiPatch<T>(path: string, body: unknown): Promise<T> {
+  const token = await getAuthToken();
+  const res = await fetch(`${BACKEND_URL}${path}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`API PATCH ${path} failed: ${res.status}`);
   }
   return res.json();
 }
@@ -103,6 +128,37 @@ export async function fetchProjects(workspaceId: string): Promise<BackendProject
   return apiFetch<BackendProject[]>(`/projects?workspaceId=${workspaceId}`);
 }
 
+// ---------------------------------------------------------------------------
+// USER + ORG (ACCOUNT SETTINGS)
+// ---------------------------------------------------------------------------
+
+export interface BackendUserProfile {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+}
+
+export async function fetchUserProfile(): Promise<BackendUserProfile> {
+  return apiFetch<BackendUserProfile>("/users/me");
+}
+
+export async function updateUserProfile(data: { name?: string; phone?: string }): Promise<BackendUserProfile> {
+  return apiPatch<BackendUserProfile>("/users/me", data);
+}
+
+export async function updateOrg(id: string, data: { name?: string; logoUrl?: string }): Promise<{ id: string; name: string; logoUrl: string | null }> {
+  return apiPatch(`/orgs/${id}`, data);
+}
+
+export async function fetchOrgLogoUploadUrl(orgId: string, fileName: string): Promise<{ signedUrl: string; publicUrl: string }> {
+  return apiFetch(`/orgs/logo-upload-url?orgId=${encodeURIComponent(orgId)}&fileName=${encodeURIComponent(fileName)}`);
+}
+
+// ---------------------------------------------------------------------------
+// PROJECTS
+// ---------------------------------------------------------------------------
+
 /** POST /projects → BackendProject */
 export async function createProject(data: {
   workspaceId: string;
@@ -115,6 +171,23 @@ export async function createProject(data: {
   endDate?: string;
 }): Promise<BackendProject> {
   return apiPost<BackendProject>("/projects", data);
+}
+
+/** PATCH /projects/:id → BackendProject */
+export async function updateProject(
+  id: string,
+  data: Partial<{
+    projectName: string;
+    address: string;
+    stage: string;
+    category: string;
+    startDate: string;
+    endDate: string;
+    projectCode: string;
+    settingsJson: Record<string, unknown>;
+  }>
+): Promise<BackendProject> {
+  return apiPatch<BackendProject>(`/projects/${id}`, data);
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +383,50 @@ export async function updateTask(
   return res.json();
 }
 
+// ---------------------------------------------------------------------------
+// TASK DEPENDENCIES
+// ---------------------------------------------------------------------------
+
+export interface BackendTaskDependency {
+  id: string;
+  predecessorId: string;
+  successorId: string;
+  dependencyType: "FS" | "FF" | "SS" | "SF";
+  lagDays: number | null;
+}
+
+/** GET /tasks/dependencies?projectId=&workspaceId= */
+export async function fetchTaskDependencies(
+  projectId: string,
+  workspaceId: string
+): Promise<BackendTaskDependency[]> {
+  return apiFetch<BackendTaskDependency[]>(
+    `/tasks/dependencies?projectId=${projectId}&workspaceId=${workspaceId}`
+  );
+}
+
+/** POST /tasks/dependencies */
+export async function createTaskDependency(data: {
+  workspaceId: string;
+  predecessorId: string;
+  successorId: string;
+  dependencyType?: string;
+}): Promise<BackendTaskDependency | null> {
+  const result = await apiPost<BackendTaskDependency | { message: string }>("/tasks/dependencies", data);
+  if ("message" in result) return null;
+  return result;
+}
+
+/** DELETE /tasks/dependencies/:id */
+export async function deleteTaskDependency(id: string): Promise<void> {
+  const token = await getAuthToken();
+  const res = await fetch(`${BACKEND_URL}/tasks/dependencies/${id}`, {
+    method: "DELETE",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`DELETE /tasks/dependencies/${id} failed: ${res.status}`);
+}
+
 /** DELETE /tasks/:id */
 export async function deleteTask(id: string): Promise<void> {
   const token = await getAuthToken();
@@ -378,6 +495,57 @@ export async function fetchDPRHistory(
 }
 
 // ---------------------------------------------------------------------------
+// WHATSAPP FEED
+// ---------------------------------------------------------------------------
+
+export interface WaConvo {
+  id: string;
+  senderPhone: string;
+  name: string;
+  type: "EOD" | "Warning";
+  time: string;
+  status: string;
+  task: string;
+  color: string;
+  messageCount: number;
+  lastMessage: string;
+  receivedAt: string | null;
+}
+
+export interface WaMessage {
+  id: string;
+  rawMessage: string;
+  parsedJson: unknown;
+  receivedAt: string | null;
+  matchedTaskId: string | null;
+  status: string;
+}
+
+export async function sendTeamInvite(email: string, name: string, role: string, workspaceId: string): Promise<void> {
+  await apiPost<{ ok: boolean }>("/team/invite", { email, name, role, workspaceId });
+}
+
+export async function acceptTeamInvite(token: string): Promise<{ ok: boolean; workspaceId: string }> {
+  return apiPost("/team/invite/accept", { token });
+}
+
+export async function verifyTeamInvite(token: string): Promise<{ email: string; name: string; role: string; workspaceId: string; orgName: string }> {
+  return apiFetch(`/team/invite/verify?token=${encodeURIComponent(token)}`);
+}
+
+export async function sendContractorWelcome(phone: string, contractorName: string, projectName: string): Promise<void> {
+  await apiPost<{ ok: boolean }>("/whatsapp/send-welcome", { phone, contractorName, projectName });
+}
+
+export async function fetchWaConvos(projectId: string): Promise<WaConvo[]> {
+  return apiFetch<WaConvo[]>(`/whatsapp/feed?projectId=${projectId}`);
+}
+
+export async function fetchWaMessages(projectId: string, senderPhone: string): Promise<{ messages: WaMessage[]; photoCount: number }> {
+  return apiFetch(`/whatsapp/feed/messages?projectId=${encodeURIComponent(projectId)}&senderPhone=${encodeURIComponent(senderPhone)}`);
+}
+
+// ---------------------------------------------------------------------------
 // REPORTS — PDF generation
 // ---------------------------------------------------------------------------
 
@@ -425,4 +593,79 @@ export async function pollReportStatus(
   jobId: string
 ): Promise<ReportStatusResult> {
   return apiFetch<ReportStatusResult>(`/reports/status/${jobId}`);
+}
+
+// ---------------------------------------------------------------------------
+// DOCUMENTS — register uploaded file reference
+// ---------------------------------------------------------------------------
+
+/** POST /documents — save Supabase Storage URL reference after upload */
+export async function deleteDocument(id: string): Promise<void> {
+  const token = await getAuthToken();
+  const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
+  const res = await fetch(`${BACKEND_URL}/documents/${id}`, {
+    method: "DELETE",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`DELETE /documents/${id} failed: ${res.status}`);
+}
+
+export async function registerDocument(data: {
+  workspaceId: string;
+  projectId: string;
+  fileName: string;
+  fileUrl: string;
+  fileType?: string;
+  fileSize?: number;
+  folder?: string;
+  uploadedBy?: string;
+}): Promise<BackendDocument> {
+  return apiPost<BackendDocument>("/documents", data);
+}
+
+// ---------------------------------------------------------------------------
+// SCHEDULE GENERATION
+// ---------------------------------------------------------------------------
+
+export interface ScheduleGenerateResult {
+  success: boolean;
+  jobId: string;
+  status: string;
+  documentsFound: number;
+}
+
+export interface ScheduleStatusResult {
+  jobId: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  message: string;
+  progress?: {
+    step: number;
+    totalSteps: number;
+    percentage: number;
+    status: string;
+  };
+  result?: {
+    scheduleVersionId: string;
+    taskCount: number;
+    durationDays: number;
+  };
+  error?: string;
+  suggestion?: string;
+}
+
+/** POST /schedule/generate → start AI schedule generation job */
+export async function generateSchedule(data: {
+  projectId: string;
+  workspaceId: string;
+  startDate?: string;
+  endDate?: string;
+  buildingType?: string;
+  city?: string;
+}): Promise<ScheduleGenerateResult> {
+  return apiPost<ScheduleGenerateResult>("/schedule/generate", data);
+}
+
+/** GET /schedule/status/:jobId → poll generation progress */
+export async function pollScheduleStatus(jobId: string): Promise<ScheduleStatusResult> {
+  return apiFetch<ScheduleStatusResult>(`/schedule/status/${jobId}`);
 }

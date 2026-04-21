@@ -980,7 +980,8 @@ export function startWhatsappWorker() {
     },
     {
       connection: redisConnection,
-      stalledInterval: 300_000,   // check stalled jobs every 5 min
+      drainDelay: 15,
+      stalledInterval: 600_000,
       lockDuration: 300_000,
     }
   );

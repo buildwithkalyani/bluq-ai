@@ -13,16 +13,18 @@ import {
   GroupToggle,
 } from "@/components/ui/bluq-ui";
 import { useWorkspace } from "@/context/workspace";
-import { fetchProjects, type BackendProject } from "@/lib/api-client";
+import { fetchProjects, fetchWaConvos, fetchWaMessages, type BackendProject, type WaConvo, type WaMessage } from "@/lib/api-client";
 
 export default function WhatsAppFeedPage() {
   const { workspaceId, isDesignMode } = useWorkspace();
   const [projects, setProjects] = useState<BackendProject[]>([]);
   const [selectedProject, setSelectedProject] = useState<BackendProject | null>(null);
 
-  const [convos, setConvos] = useState<WhatsAppConvo[]>([]);
-  const [messages, setMessages] = useState<WhatsAppMessage[]>([]);
-  const [selectedConvo, setSelectedConvo] = useState<number | null>(null);
+  const [convos, setConvos] = useState<WhatsAppConvo[] | WaConvo[]>([]);
+  const [messages, setMessages] = useState<WhatsAppMessage[] | WaMessage[]>([]);
+  const [selectedConvo, setSelectedConvo] = useState<number | string | null>(null);
+  const [selectedPhone, setSelectedPhone] = useState<string | null>(null);
+  const [photoCount, setPhotoCount] = useState(0);
 
   const [filter, setFilter] = useState(0); // 0=All, 1=EOD, 2=Warnings
   const [loading, setLoading] = useState(true);
@@ -34,7 +36,7 @@ export default function WhatsAppFeedPage() {
       // Design account — use mock convos (no real backend for WA history)
       import("@/lib/mock-data-extended").then(m => {
         m.getProjects().then(p => {
-          setProjects(p.map(x => ({ id: String(x.id), workspaceId: "", projectName: x.name, projectCode: x.code, address: x.address, stage: x.stage, category: null, startDate: x.startDate, endDate: x.endDate, status: "active", clientName: null, percentComplete: null })));
+          setProjects(p.map(x => ({ id: String(x.id), workspaceId: "", projectName: x.name, projectCode: null, address: null, stage: null, category: null, startDate: null, endDate: null, status: "active", clientName: null, percentComplete: null })));
           setLoading(false);
         });
       });
@@ -54,14 +56,15 @@ export default function WhatsAppFeedPage() {
     if (!selectedProject) return;
     setLoading(true);
     setSelectedConvo(null);
+    setSelectedPhone(null);
     if (isDesignMode) {
       import("@/lib/mock-data-extended").then(m => {
         m.getWhatsAppConvos(Number(selectedProject.id) || 0).then(c => { setConvos(c); setLoading(false); });
       });
     } else {
-      // No backend WhatsApp history endpoint yet
-      setConvos([]);
-      setLoading(false);
+      fetchWaConvos(selectedProject.id)
+        .then(c => { setConvos(c); setLoading(false); })
+        .catch(() => { setConvos([]); setLoading(false); });
     }
   }, [selectedProject, isDesignMode]);
 
@@ -69,9 +72,16 @@ export default function WhatsAppFeedPage() {
   useEffect(() => {
     if (selectedConvo === null) return;
     if (isDesignMode) {
-      getWhatsAppMessages(selectedConvo).then(setMessages);
+      getWhatsAppMessages(selectedConvo as number).then(setMessages);
+    } else if (selectedProject && selectedPhone) {
+      fetchWaMessages(selectedProject.id, selectedPhone)
+        .then(({ messages: msgs, photoCount: pc }) => {
+          setMessages(msgs);
+          setPhotoCount(pc);
+        })
+        .catch(() => setMessages([]));
     }
-  }, [selectedConvo, isDesignMode]);
+  }, [selectedConvo, isDesignMode, selectedProject, selectedPhone]);
 
   // ── Simulate live sync ──────────────────────────────
   const handleSync = () => {
@@ -81,10 +91,10 @@ export default function WhatsAppFeedPage() {
 
   const filteredConvos =
     filter === 0
-      ? convos
+      ? (convos as any[])
       : filter === 1
-      ? convos.filter((c) => c.type === "EOD")
-      : convos.filter((c) => c.type === "Warning");
+      ? (convos as any[]).filter((c) => c.type === "EOD")
+      : (convos as any[]).filter((c) => c.type === "Warning");
 
   // ─── LOADING STATE ─────────────────────────────────
   if (loading) {
@@ -102,7 +112,7 @@ export default function WhatsAppFeedPage() {
 
   // ─── CONVERSATION DETAIL ───────────────────────────
   if (selectedConvo !== null) {
-    const convo = convos.find((c) => c.id === selectedConvo);
+    const convo = (convos as any[]).find((c) => c.id === selectedConvo);
     return (
       <div className="p-5 overflow-y-auto h-full flex justify-center">
         <div className="w-full max-w-xl">
@@ -135,21 +145,33 @@ export default function WhatsAppFeedPage() {
 
           {/* Chat messages */}
           <div className="w-full space-y-3">
-            {messages.map((m, i) => (
+            {(messages as any[]).map((m, i) => (
               <div key={i}>
-                {/* Bot message */}
-                <div className="bg-[#f6f8fa] rounded-xl rounded-bl-[4px] px-3 py-2 text-xs text-[#24292f] max-w-[85%] mb-1 border border-[#e1e4e8] whitespace-pre-line">
-                  <div className="text-[10px] text-[#3A4EA2] font-bold mb-1 font-mono">
-                    BLUQ BOT
-                  </div>
-                  {m.bot}
-                </div>
-
-                {/* User reply */}
-                {m.reply && (
+                {"bot" in m ? (
+                  // Mock mode: show bot prompt + reply
+                  <>
+                    <div className="bg-[#f6f8fa] rounded-xl rounded-bl-[4px] px-3 py-2 text-xs text-[#24292f] max-w-[85%] mb-1 border border-[#e1e4e8] whitespace-pre-line">
+                      <div className="text-[10px] text-[#3A4EA2] font-bold mb-1 font-mono">BLUQ BOT</div>
+                      {m.bot}
+                    </div>
+                    {m.reply && (
+                      <div className="flex justify-end">
+                        <div className="bg-[#3A4EA2] text-white rounded-xl rounded-br-[4px] px-3 py-2 text-xs max-w-[70%] text-right">{m.reply}</div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  // Real mode: show contractor message + timestamp
                   <div className="flex justify-end">
-                    <div className="bg-[#3A4EA2] text-white rounded-xl rounded-br-[4px] px-3 py-2 text-xs max-w-[70%] text-right">
-                      {m.reply}
+                    <div className="flex flex-col items-end gap-0.5">
+                      <div className="bg-[#3A4EA2] text-white rounded-xl rounded-br-[4px] px-3 py-2 text-xs max-w-[70%] text-right whitespace-pre-line">
+                        {m.rawMessage}
+                      </div>
+                      {m.receivedAt && (
+                        <div className="text-[10px] text-[#8C959F] font-mono">
+                          {new Date(m.receivedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -164,7 +186,7 @@ export default function WhatsAppFeedPage() {
             </div>
             <div className="flex gap-4 text-xs text-[#8c959f]">
               <span>📋 Task: {convo?.task}</span>
-              <span>📸 Photos: {convo?.photos || 0} Linked</span>
+              <span>📸 Photos: {isDesignMode ? (convo?.photos || 0) : photoCount} Linked</span>
             </div>
           </Card>
         </div>
@@ -248,13 +270,19 @@ export default function WhatsAppFeedPage() {
 
       {/* Conversation cards */}
       <div className="space-y-2">
-        {filteredConvos.map((c) => (
+        {filteredConvos.map((c) => {
+          const hasMessages = (c as any).hasMessages !== false && c.messageCount > 0;
+          return (
           <Card
             key={c.id}
-            onClick={() => setSelectedConvo(c.id)}
-            className={`cursor-pointer hover:shadow-sm transition-shadow ${
-              c.type === "Warning" ? "!border-l-4 !border-l-[#CF222E]" : ""
-            }`}
+            onClick={() => {
+              if (!hasMessages) return;
+              setSelectedConvo(c.id);
+              setSelectedPhone((c as any).senderPhone ?? null);
+            }}
+            className={`transition-shadow ${
+              hasMessages ? "cursor-pointer hover:shadow-sm" : "opacity-60 cursor-default"
+            } ${c.type === "Warning" ? "!border-l-4 !border-l-[#CF222E]" : ""}`}
           >
             <div className="flex justify-between items-start">
               <div className="flex items-center gap-2.5">
@@ -262,20 +290,33 @@ export default function WhatsAppFeedPage() {
                   👷
                 </div>
                 <div>
-                  <div className="text-[13px] font-bold">{c.name}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-[13px] font-bold">{c.name}</div>
+                    {(c as any).trade && (
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-[#f0f1f3] text-[#57606a]">
+                        {(c as any).trade}
+                      </span>
+                    )}
+                  </div>
                   <div className="text-xs text-[#57606a]">{c.task}</div>
                 </div>
               </div>
               <div className="text-right">
-                <span
-                  className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono ${
-                    c.type === "Warning"
-                      ? "bg-[#ffebe9] text-[#CF222E]"
-                      : "bg-[#ddf4ff] text-[#3A4EA2]"
-                  }`}
-                >
-                  {c.type}
-                </span>
+                {hasMessages ? (
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono ${
+                      c.type === "Warning"
+                        ? "bg-[#ffebe9] text-[#CF222E]"
+                        : "bg-[#ddf4ff] text-[#3A4EA2]"
+                    }`}
+                  >
+                    {c.type}
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded font-mono bg-[#f0f1f3] text-[#8C959F]">
+                    LINKED
+                  </span>
+                )}
                 <div className="text-[11px] text-[#8C959F] mt-1 font-mono">
                   {c.time}
                 </div>
@@ -285,10 +326,15 @@ export default function WhatsAppFeedPage() {
               <span style={{ color: c.color }} className="font-bold">
                 {c.status}
               </span>
-              {c.photos > 0 && <span>📸 {c.photos} photos</span>}
+              {(c.photos ?? 0) > 0 && <span>📸 {c.photos} photos</span>}
+              {c.messageCount > 1 && <span>💬 {c.messageCount} messages</span>}
+              {!hasMessages && (c as any).senderPhone && (
+                <span className="font-mono text-[#8C959F]">📱 {(c as any).senderPhone}</span>
+              )}
             </div>
           </Card>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

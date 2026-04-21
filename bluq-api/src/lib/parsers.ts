@@ -491,13 +491,44 @@ export async function parseFiles(
  *   const buffer = await fetchFileBuffer("https://xxx.supabase.co/storage/v1/...");
  *   const result = await parseFile(buffer, "drawings.pdf");
  */
-export async function fetchFileBuffer(url: string): Promise<Buffer> {
-  const response = await fetch(url);
+export async function fetchFileBuffer(urlOrPath: string): Promise<Buffer> {
+  let url = urlOrPath;
 
-  if (!response.ok) {
-    throw new Error(
-      `Failed to fetch file: ${response.status} ${response.statusText}`
+  // Storage paths (no protocol) need a signed download URL from private bucket
+  if (!urlOrPath.startsWith("http")) {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!supabaseUrl || !serviceRoleKey) {
+      throw new Error("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set");
+    }
+    const signRes = await fetch(
+      `${supabaseUrl}/storage/v1/object/sign/documents/${urlOrPath}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${serviceRoleKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ expiresIn: 300 }),
+      }
     );
+    if (!signRes.ok) {
+      const body = await signRes.text();
+      throw new Error(`Failed to sign storage URL: ${signRes.status} — ${body}`);
+    }
+    const signJson = await signRes.json() as { signedURL?: string; error?: string };
+    console.log(`[parsers] Sign response for ${urlOrPath}:`, JSON.stringify(signJson));
+    if (!signJson.signedURL) {
+      throw new Error(`No signedURL in response: ${JSON.stringify(signJson)}`);
+    }
+    const { signedURL } = signJson;
+    url = signedURL.startsWith("http") ? signedURL : `${supabaseUrl}/storage/v1${signedURL}`;
+    console.log(`[parsers] Download URL: ${url}`);
+  }
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch file: ${response.status} ${response.statusText}`);
   }
 
   const arrayBuffer = await response.arrayBuffer();

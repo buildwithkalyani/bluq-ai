@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, Suspense } from "react";
 import { getProjects, Project } from "@/lib/mock-data";
 import { WorkspaceProvider, useWorkspace } from "@/context/workspace";
-import { fetchProjects, createProject } from "@/lib/api-client";
+import { fetchProjects, createProject, clearAuthTokenCache } from "@/lib/api-client";
 import { authClient } from "@/lib/auth-client";
 
 // ─── NAV CONFIGURATION ───────────────────────────────────────
@@ -506,6 +506,8 @@ function ProfileDropdown() {
 
   const handleLogout = async () => {
     setIsOpen(false);
+    clearAuthTokenCache();
+    localStorage.removeItem("bluq_workspace");
     await authClient.signOut();
     router.push("/login");
   };
@@ -639,11 +641,11 @@ function TopNav() {
 </a>
         </span>
         <span className="text-[#D0D7DE]">/</span>
-        <span className="text-[13px] text-[#57606a]">{nav.label}</span>
+        <Link href={nav.href} className="text-[13px] text-[#57606a] hover:text-[#24292f] hover:underline transition-colors">{nav.label}</Link>
         <span className="text-[#D0D7DE]">/</span>
-        <span className="text-[13px] text-[#24292f] font-semibold">
+        <Link href={tab.href} className="text-[13px] text-[#24292f] font-semibold hover:underline transition-colors">
           {tab.label}
-        </span>
+        </Link>
       </div>
 
       <div className="flex items-center gap-4">
