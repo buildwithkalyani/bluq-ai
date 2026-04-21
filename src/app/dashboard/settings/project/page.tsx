@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, Suspense } from "react";
+// Suspense is used to wrap useSearchParams per Next.js 14 requirements
 import { useSearchParams } from "next/navigation";
 import { useWorkspace } from "@/context/workspace";
 import { fetchProjects, updateProject, sendContractorWelcome, sendTeamInvite, BackendProject } from "@/lib/api-client";
@@ -807,7 +808,7 @@ function TeamTab({ project, isMock = false, onSettingsUpdated }: { project: Back
 
 type SidebarItem = "General" | "Contractors" | "Team";
 
-export default function ProjectSettingsPage() {
+function ProjectSettingsPageInner() {
   const { workspaceId, isDesignMode } = useWorkspace();
   const searchParams = useSearchParams();
   const urlProjectId = searchParams.get("projectId");
@@ -905,5 +906,13 @@ export default function ProjectSettingsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ProjectSettingsPage() {
+  return (
+    <Suspense>
+      <ProjectSettingsPageInner />
+    </Suspense>
   );
 }
