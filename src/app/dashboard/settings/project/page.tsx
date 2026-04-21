@@ -1,34 +1,29 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import { useWorkspace } from "@/context/workspace";
+import { fetchProjects, updateProject, sendContractorWelcome, sendTeamInvite, BackendProject } from "@/lib/api-client";
+import { getProjects } from "@/lib/mock-data";
+
+function mockToBackendProject(p: Awaited<ReturnType<typeof getProjects>>[number]): BackendProject {
+  return {
+    id: `mock-${p.id}`,
+    workspaceId: "mock",
+    projectName: p.name,
+    projectCode: p.code,
+    address: p.address,
+    stage: p.stage,
+    category: null,
+    startDate: null,
+    endDate: null,
+    status: p.status,
+    clientName: null,
+    percentComplete: p.pct,
+  };
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface Contractor {
-  name: string;
-  phone: string;
-  tasks: string[];
-}
-
-interface TeamMember {
-  email: string;
-  role: string;
-  status: "Active" | "Invited";
-}
-
-interface Project {
-  id: number;
-  name: string;
-  address: string;
-  stage: string;
-  type: string;
-  startDate: string;
-  endDate: string;
-  code: string;
-  eodTime: string;
-  contractors: Contractor[];
-  team: TeamMember[];
-}
 
 interface ProjectFormData {
   name: string;
@@ -41,69 +36,27 @@ interface ProjectFormData {
   eodTime: string;
 }
 
-// ─── Data ─────────────────────────────────────────────────────────────────────
-
-const PROJECTS: Project[] = [
-  {
-    id: 1,
-    name: "Al Nakheel Tower",
-    address: "Dubai Marina, Dubai, UAE",
-    stage: "Foundation",
-    type: "Residential",
-    startDate: "2026-03-15",
-    endDate: "2026-09-30",
-    code: "ANT-2026-001",
-    eodTime: "6:00 PM",
-    contractors: [
-      { name: "Rajesh Kumar", phone: "+971 50 123 4567", tasks: ["Foundation Works", "Rebar Installation"] },
-      { name: "Ahmad Hassan", phone: "+971 55 678 1234", tasks: ["Formwork"] },
-    ],
-    team: [
-      { email: "meera@pmcfirm.com", role: "Team Member", status: "Invited" },
-      { email: "salim@pmcfirm.com", role: "Project Owner", status: "Active" },
-    ],
-  },
-  {
-    id: 2,
-    name: "Marina Heights",
-    address: "JBR Walk, Dubai, UAE",
-    stage: "Superstructure",
-    type: "Mixed Use",
-    startDate: "2025-11-01",
-    endDate: "2027-02-28",
-    code: "MHT-2025-003",
-    eodTime: "5:30 PM",
-    contractors: [
-      { name: "Farooq Ali", phone: "+971 52 345 6789", tasks: ["Concrete Pouring", "Column Works"] },
-      { name: "Vikram Singh", phone: "+971 56 789 0123", tasks: ["MEP Rough-in", "Ducting"] },
-      { name: "Chen Wei", phone: "+971 54 111 2222", tasks: ["Steel Erection"] },
-    ],
-    team: [
-      { email: "aayush@pmcfirm.com", role: "Project Owner", status: "Active" },
-      { email: "fatima@pmcfirm.com", role: "Team Member", status: "Active" },
-      { email: "john@pmcfirm.com", role: "Team Member", status: "Invited" },
-    ],
-  },
-  {
-    id: 3,
-    name: "Palm Residences",
-    address: "Palm Jumeirah, Dubai, UAE",
-    stage: "Planning",
-    type: "Residential",
-    startDate: "2026-06-01",
-    endDate: "2028-01-15",
-    code: "PLR-2026-007",
-    eodTime: "6:00 PM",
-    contractors: [],
-    team: [
-      { email: "aayush@pmcfirm.com", role: "Project Owner", status: "Active" },
-    ],
-  },
-];
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const STAGE_OPTIONS = ["Planning", "Design", "Foundation", "Structure", "Superstructure", "MEP", "Finishing", "Handover"];
 const TYPE_OPTIONS = ["Residential", "Commercial", "Industrial", "Mixed Use", "Infrastructure"];
 const EOD_TIMES = ["4:00 PM", "5:00 PM", "5:30 PM", "6:00 PM", "7:00 PM", "8:00 PM"];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function projectToForm(p: BackendProject): ProjectFormData {
+  const settings = (p as any).settingsJson ?? {};
+  return {
+    name: p.projectName ?? "",
+    address: p.address ?? "",
+    stage: p.stage ?? "Planning",
+    type: p.category ?? "Residential",
+    startDate: p.startDate ?? "",
+    endDate: p.endDate ?? "",
+    code: p.projectCode ?? "",
+    eodTime: settings.eodTime ?? "6:00 PM",
+  };
+}
 
 // ─── Shared UI Components ─────────────────────────────────────────────────────
 
@@ -112,17 +65,9 @@ const Card = ({ children, className = "" }: { children: React.ReactNode; classNa
 );
 
 const InputField = ({
-  label,
-  value,
-  onChange,
-  type = "text",
-  disabled = false,
+  label, value, onChange, type = "text", disabled = false, min,
 }: {
-  label: string;
-  value: string;
-  onChange: (val: string) => void;
-  type?: string;
-  disabled?: boolean;
+  label: string; value: string; onChange: (val: string) => void; type?: string; disabled?: boolean; min?: string;
 }) => (
   <div>
     <label className="block text-xs font-semibold text-[#57606a] mb-1">{label}</label>
@@ -131,21 +76,16 @@ const InputField = ({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
+      min={min}
       className="w-full border border-[#D0D7DE] rounded-md px-3 py-2 text-sm text-[#24292f] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20 disabled:bg-[#f6f8fa] disabled:text-[#57606a] transition"
     />
   </div>
 );
 
 const SelectField = ({
-  label,
-  value,
-  onChange,
-  options,
+  label, value, onChange, options,
 }: {
-  label: string;
-  value: string;
-  onChange: (val: string) => void;
-  options: string[];
+  label: string; value: string; onChange: (val: string) => void; options: string[];
 }) => (
   <div>
     <label className="block text-xs font-semibold text-[#57606a] mb-1">{label}</label>
@@ -161,15 +101,28 @@ const SelectField = ({
   </div>
 );
 
-const SaveButton = ({
-  onClick,
-  loading,
-  dirty,
+const DateField = ({
+  label, value, onChange, min,
 }: {
-  onClick: () => void;
-  loading: boolean;
-  dirty: boolean;
+  label: string; value: string; onChange: (val: string) => void; min?: string;
 }) => (
+  <div>
+    <label className="block text-xs font-semibold text-[#57606a] mb-1">{label}</label>
+    <input
+      type="date"
+      value={value}
+      min={min}
+      onChange={(e) => {
+        const val = e.target.value;
+        if (min && val && val < min) return;
+        onChange(val);
+      }}
+      className="w-full border border-[#D0D7DE] rounded-md px-3 py-2 text-sm text-[#24292f] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20 transition"
+    />
+  </div>
+);
+
+const SaveButton = ({ onClick, loading, dirty }: { onClick: () => void; loading: boolean; dirty: boolean }) => (
   <button
     onClick={onClick}
     disabled={loading || !dirty}
@@ -195,17 +148,13 @@ const Toast = ({ message, show }: { message: string; show: boolean }) => (
 // ─── Project Selector ─────────────────────────────────────────────────────────
 
 function ProjectSelector({
-  projects,
-  activeId,
-  onChange,
+  projects, activeId, onChange,
 }: {
-  projects: Project[];
-  activeId: number;
-  onChange: (id: number) => void;
+  projects: BackendProject[]; activeId: string; onChange: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const active = projects.find((p) => p.id === activeId)!;
+  const active = projects.find((p) => p.id === activeId) ?? projects[0];
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -215,6 +164,8 @@ function ProjectSelector({
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  if (!active) return null;
+
   return (
     <div className="relative" ref={ref}>
       <div
@@ -222,7 +173,7 @@ function ProjectSelector({
         className="flex items-center gap-1.5 bg-white border border-[#D0D7DE] rounded-md px-2.5 py-1 text-[13px] font-medium cursor-pointer select-none"
       >
         <span className="w-2 h-2 rounded-full bg-[#3fb950] inline-block" />
-        {active.name}
+        {active.projectName}
         <span className="text-[#57606a] text-[11px] ml-0.5">▾</span>
       </div>
 
@@ -240,8 +191,8 @@ function ProjectSelector({
                 style={{ background: p.id === activeId ? "#3A4EA2" : "#D0D7DE" }}
               />
               <div>
-                <div>{p.name}</div>
-                <div className="text-[10px] text-[#8C959F] font-normal mt-0.5">{p.code}</div>
+                <div>{p.projectName}</div>
+                <div className="text-[10px] text-[#8C959F] font-normal mt-0.5">{p.projectCode}</div>
               </div>
             </div>
           ))}
@@ -251,21 +202,16 @@ function ProjectSelector({
   );
 }
 
-// ─── General Tab (Editable) ───────────────────────────────────────────────────
+// ─── General Tab ─────────────────────────────────────────────────────────────
 
-function GeneralTab({ project }: { project: Project }) {
-  const toFormData = (p: Project): ProjectFormData => ({
-    name: p.name, address: p.address, stage: p.stage, type: p.type,
-    startDate: p.startDate, endDate: p.endDate, code: p.code, eodTime: p.eodTime,
-  });
-
-  const [saved, setSaved] = useState<ProjectFormData>(toFormData(project));
-  const [form, setForm] = useState<ProjectFormData>(toFormData(project));
+function GeneralTab({ project, isMock = false, onSettingsUpdated }: { project: BackendProject; isMock?: boolean; onSettingsUpdated?: (id: string, s: Record<string, unknown>) => void }) {
+  const [saved, setSaved] = useState<ProjectFormData>(projectToForm(project));
+  const [form, setForm] = useState<ProjectFormData>(projectToForm(project));
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(false);
 
   useEffect(() => {
-    const data = toFormData(project);
+    const data = projectToForm(project);
     setSaved(data);
     setForm(data);
   }, [project.id]);
@@ -280,11 +226,30 @@ function GeneralTab({ project }: { project: Project }) {
 
   const handleSave = async () => {
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 800));
-    setSaved(form);
-    setLoading(false);
-    setToast(true);
-    setTimeout(() => setToast(false), 2500);
+    try {
+      const existingSettings = (project as any).settingsJson ?? {};
+      const newSettings = { ...existingSettings, eodTime: form.eodTime };
+      if (!isMock) {
+        await updateProject(project.id, {
+          projectName: form.name,
+          address: form.address,
+          stage: form.stage,
+          category: form.type,
+          startDate: form.startDate || undefined,
+          endDate: form.endDate || undefined,
+          projectCode: form.code,
+          settingsJson: newSettings,
+        });
+      }
+      onSettingsUpdated?.(project.id, newSettings);
+      setSaved(form);
+      setToast(true);
+      setTimeout(() => setToast(false), 2500);
+    } catch (err) {
+      console.error("Failed to save project:", err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -300,12 +265,27 @@ function GeneralTab({ project }: { project: Project }) {
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            <InputField label="Project Start Date" value={form.startDate} onChange={set("startDate")} type="date" />
-            <InputField label="Project End Date" value={form.endDate} onChange={set("endDate")} type="date" />
+            <DateField
+              label="Project Start Date"
+              value={form.startDate}
+              onChange={(val) => {
+                setForm((prev) => ({
+                  ...prev,
+                  startDate: val,
+                  endDate: prev.endDate && prev.endDate < val ? val : prev.endDate,
+                }));
+              }}
+            />
+            <DateField
+              label="Project End Date"
+              value={form.endDate}
+              onChange={set("endDate")}
+              min={form.startDate || undefined}
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            <InputField label="Project Code" value={form.code} onChange={set("code")} />
+            <InputField label="Project Code" value={form.code} onChange={set("code")} disabled />
             <SelectField label="EOD Bot Prompt Time" value={form.eodTime} onChange={set("eodTime")} options={EOD_TIMES} />
           </div>
         </div>
@@ -322,117 +302,195 @@ function GeneralTab({ project }: { project: Project }) {
 
 // ─── Contractors Tab ──────────────────────────────────────────────────────────
 
-function ContractorsTab({ project }: { project: Project }) {
-  const [contractors, setContractors] = useState<Contractor[]>(project.contractors);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const [toast, setToast] = useState("");
+interface Contractor {
+  id: string;
+  name: string;
+  phone: string;
+  trade: string;
+}
 
-  // Form state for add/edit
-  const [formName, setFormName] = useState("");
-  const [formPhone, setFormPhone] = useState("");
-  const [formTasks, setFormTasks] = useState("");
+const TRADE_OPTIONS = [
+  "Civil", "Structural", "MEP", "Electrical", "Plumbing", "HVAC",
+  "Finishing", "Facade", "Landscaping", "Safety", "Other",
+];
 
-  // Reset when project changes
+const COUNTRY_CODES = [
+  { code: "+91", flag: "🇮🇳", label: "IN" },
+  { code: "+971", flag: "🇦🇪", label: "AE" },
+  { code: "+1", flag: "🇺🇸", label: "US" },
+  { code: "+44", flag: "🇬🇧", label: "GB" },
+  { code: "+966", flag: "🇸🇦", label: "SA" },
+  { code: "+974", flag: "🇶🇦", label: "QA" },
+  { code: "+965", flag: "🇰🇼", label: "KW" },
+  { code: "+968", flag: "🇴🇲", label: "OM" },
+  { code: "+973", flag: "🇧🇭", label: "BH" },
+  { code: "+60", flag: "🇲🇾", label: "MY" },
+  { code: "+65", flag: "🇸🇬", label: "SG" },
+];
+
+function ContractorsTab({ project, isMock = false, onSettingsUpdated }: { project: BackendProject; isMock?: boolean; onSettingsUpdated?: (id: string, s: Record<string, unknown>) => void }) {
+  const settings = (project as any).settingsJson ?? {};
+  const [contractors, setContractors] = useState<Contractor[]>(settings.contractors ?? []);
+  const [saved, setSaved] = useState<Contractor[]>(settings.contractors ?? []);
+
   useEffect(() => {
-    setContractors(project.contractors);
-    setShowAddForm(false);
-    setEditingIndex(null);
+    const s = (project as any).settingsJson ?? {};
+    setContractors(s.contractors ?? []);
+    setSaved(s.contractors ?? []);
+    setAdding(false);
+    setNewName(""); setNewPhone(""); setNewTrade("Civil"); setNewCountryCode("+91");
   }, [project.id]);
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [newCountryCode, setNewCountryCode] = useState("+91");
+  const [newTrade, setNewTrade] = useState("Civil");
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(""), 2500);
-  };
-
-  const resetForm = () => {
-    setFormName("");
-    setFormPhone("");
-    setFormTasks("");
-  };
+  const dirty = JSON.stringify(contractors) !== JSON.stringify(saved);
 
   const handleAdd = () => {
-    if (!formName.trim() || !formPhone.trim()) return;
-    const tasks = formTasks.split(",").map((t) => t.trim()).filter(Boolean);
-    setContractors((prev) => [...prev, { name: formName.trim(), phone: formPhone.trim(), tasks }]);
-    resetForm();
-    setShowAddForm(false);
-    showToast("Contractor added!");
+    if (!newName.trim() || !newPhone.trim()) return;
+    const digits = newPhone.trim().replace(/\D/g, "");
+    const fullPhone = `${newCountryCode}${digits}`;
+    const entry: Contractor = {
+      id: crypto.randomUUID(),
+      name: newName.trim(),
+      phone: fullPhone,
+      trade: newTrade,
+    };
+    setContractors((prev) => [...prev, entry]);
+    setNewName("");
+    setNewPhone("");
+    setNewCountryCode("+91");
+    setNewTrade("Civil");
+    setAdding(false);
   };
 
-  const handleDelete = (index: number) => {
-    const name = contractors[index].name;
-    setContractors((prev) => prev.filter((_, i) => i !== index));
-    setEditingIndex(null);
-    showToast(`${name} removed`);
+  const handleRemove = async (id: string) => {
+    const updated = contractors.filter((c) => c.id !== id);
+    setContractors(updated);
+    setSaving(true);
+    try {
+      setSaveError("");
+      const newSettings = { ...settings, contractors: updated };
+      if (!isMock) {
+        await updateProject(project.id, { settingsJson: newSettings });
+      }
+      onSettingsUpdated?.(project.id, newSettings);
+      setSaved(updated);
+    } catch (err: any) {
+      console.error("Failed to remove contractor:", err);
+      setContractors((prev) => [...prev, contractors.find((c) => c.id === id)!]);
+      setSaveError(err?.message ?? "Remove failed. Check console.");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const startEdit = (index: number) => {
-    const c = contractors[index];
-    setEditingIndex(index);
-    setFormName(c.name);
-    setFormPhone(c.phone);
-    setFormTasks(c.tasks.join(", "));
-    setShowAddForm(false);
-  };
-
-  const handleEditSave = () => {
-    if (editingIndex === null || !formName.trim() || !formPhone.trim()) return;
-    const tasks = formTasks.split(",").map((t) => t.trim()).filter(Boolean);
-    setContractors((prev) =>
-      prev.map((c, i) => (i === editingIndex ? { name: formName.trim(), phone: formPhone.trim(), tasks } : c))
-    );
-    setEditingIndex(null);
-    resetForm();
-    showToast("Contractor updated!");
-  };
-
-  const cancelForm = () => {
-    setShowAddForm(false);
-    setEditingIndex(null);
-    resetForm();
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      setSaveError("");
+      const newSettings = { ...settings, contractors };
+      if (!isMock) {
+        await updateProject(project.id, { settingsJson: newSettings });
+        // Send welcome WhatsApp to newly added contractors
+        const savedIds = new Set(saved.map((c) => c.id));
+        const newOnes = contractors.filter((c) => !savedIds.has(c.id));
+        await Promise.allSettled(
+          newOnes.map((c) =>
+            sendContractorWelcome(c.phone, c.name, project.projectName ?? "your project")
+          )
+        );
+      }
+      onSettingsUpdated?.(project.id, newSettings);
+      setSaved(contractors);
+      setToast(true);
+      setTimeout(() => setToast(false), 2500);
+    } catch (err: any) {
+      console.error("Failed to save contractors:", err);
+      setSaveError(err?.message ?? "Save failed. Check console.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <>
       <Card>
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <div className="text-sm font-bold text-[#24292f]">Linked Contractors</div>
-            <div className="text-xs text-[#57606a] mt-0.5">
-              Manage contractors. The Bluq bot collects daily updates from them on WhatsApp.
-            </div>
-          </div>
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-sm font-bold text-[#24292f]">Linked Contractors</div>
           <button
-            onClick={() => { setShowAddForm(true); setEditingIndex(null); resetForm(); }}
-            className="bg-[#3A4EA2] text-white border-none rounded-md px-3.5 py-1.5 text-xs font-semibold cursor-pointer hover:bg-[#2d3d8a] active:scale-95 transition-all"
+            onClick={() => setAdding(true)}
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-[#3A4EA2] rounded-md hover:bg-[#2d3d8a] transition-colors"
           >
-            + Add Contractor
+            <span className="text-sm leading-none">+</span> Add Contractor
           </button>
         </div>
+        <div className="text-xs text-[#57606a] mb-4">
+          The Bluq bot collects daily updates from linked contractors on WhatsApp.
+        </div>
 
-        {/* Add / Edit Form */}
-        {(showAddForm || editingIndex !== null) && (
-          <div className="bg-[#f6f8fa] border border-[#D0D7DE] rounded-lg p-3.5 mb-4">
-            <div className="text-xs font-bold text-[#24292f] mb-3">
-              {editingIndex !== null ? "Edit Contractor" : "New Contractor"}
+        {/* Add form */}
+        {adding && (
+          <div className="mb-4 p-3 bg-[#f6f8fa] border border-[#D0D7DE] rounded-lg flex flex-col gap-3">
+            <div className="text-xs font-semibold text-[#24292f]">New Contractor</div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[10px] font-semibold text-[#57606a] mb-1">NAME *</label>
+                <input
+                  autoFocus
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="e.g. Rajesh Kumar"
+                  className="w-full border border-[#D0D7DE] rounded-md px-2.5 py-1.5 text-xs text-[#24292f] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-semibold text-[#57606a] mb-1">WHATSAPP NUMBER *</label>
+                <div className="flex border border-[#D0D7DE] rounded-md overflow-hidden focus-within:border-[#0969da] focus-within:ring-2 focus-within:ring-[#0969da]/20 bg-white">
+                  <select
+                    value={newCountryCode}
+                    onChange={(e) => setNewCountryCode(e.target.value)}
+                    className="shrink-0 border-r border-[#D0D7DE] bg-[#f6f8fa] px-1.5 py-1.5 text-xs text-[#24292f] outline-none cursor-pointer"
+                  >
+                    {COUNTRY_CODES.map((c) => (
+                      <option key={c.code} value={c.code}>{c.flag} {c.code}</option>
+                    ))}
+                  </select>
+                  <input
+                    value={newPhone}
+                    onChange={(e) => setNewPhone(e.target.value.replace(/\D/g, ""))}
+                    placeholder="98765 43210"
+                    className="flex-1 px-2.5 py-1.5 text-xs text-[#24292f] bg-white outline-none min-w-0"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-semibold text-[#57606a] mb-1">TRADE</label>
+                <select
+                  value={newTrade}
+                  onChange={(e) => setNewTrade(e.target.value)}
+                  className="w-full border border-[#D0D7DE] rounded-md px-2.5 py-1.5 text-xs text-[#24292f] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20"
+                >
+                  {TRADE_OPTIONS.map((t) => <option key={t}>{t}</option>)}
+                </select>
+              </div>
             </div>
-            <div className="flex flex-col gap-2.5">
-              <InputField label="Name" value={formName} onChange={setFormName} />
-              <InputField label="Phone" value={formPhone} onChange={setFormPhone} type="tel" />
-              <InputField label="Tasks (comma-separated)" value={formTasks} onChange={setFormTasks} />
-            </div>
-            <div className="flex items-center gap-2 mt-3">
+            <div className="flex gap-2">
               <button
-                onClick={editingIndex !== null ? handleEditSave : handleAdd}
-                disabled={!formName.trim() || !formPhone.trim()}
-                className="bg-[#3A4EA2] text-white border-none rounded-md px-3.5 py-1.5 text-xs font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[#2d3d8a] active:scale-95 transition-all"
+                onClick={handleAdd}
+                disabled={!newName.trim() || !newPhone.trim()}
+                className="px-3 py-1.5 text-xs font-semibold text-white bg-[#3A4EA2] rounded-md hover:bg-[#2d3d8a] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                {editingIndex !== null ? "Save" : "Add"}
+                Add
               </button>
               <button
-                onClick={cancelForm}
-                className="text-xs text-[#57606a] font-semibold border border-[#D0D7DE] rounded-md px-3.5 py-1.5 bg-white cursor-pointer hover:bg-[#f6f8fa] transition"
+                onClick={() => { setAdding(false); setNewName(""); setNewPhone(""); setNewCountryCode("+91"); setNewTrade("Civil"); }}
+                className="px-3 py-1.5 text-xs font-semibold text-[#24292f] bg-white border border-[#D0D7DE] rounded-md hover:bg-[#f0f1f3] transition-colors"
               >
                 Cancel
               </button>
@@ -440,223 +498,389 @@ function ContractorsTab({ project }: { project: Project }) {
           </div>
         )}
 
-        {contractors.length === 0 && !showAddForm ? (
+        {/* Contractor list */}
+        {contractors.length === 0 ? (
           <div className="bg-[#f6f8fa] border border-[#D0D7DE] border-dashed rounded-lg py-8 text-center">
-            <div className="text-sm text-[#8C959F] mb-1">No contractors linked yet</div>
-            <div className="text-xs text-[#8C959F]">Add a contractor to start collecting daily updates via WhatsApp.</div>
+            <div className="text-sm text-[#8C959F] mb-1">No contractors linked</div>
+            <div className="text-xs text-[#8C959F]">Add contractors to receive daily WhatsApp updates from them.</div>
           </div>
         ) : (
-          <div className="flex flex-col gap-3">
-            {contractors.map((c, i) => (
-              <div key={i} className="bg-[#f6f8fa] border border-[#D0D7DE] rounded-lg p-3.5">
-                <div className="flex items-start justify-between mb-2.5">
-                  <div>
-                    <div className="text-xs font-semibold text-[#24292f]">{c.name}</div>
-                    <div className="text-[11px] text-[#57606a] mt-0.5">📱 {c.phone}</div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => startEdit(i)}
-                      className="text-xs text-[#57606a] font-semibold border border-[#D0D7DE] rounded-md px-2.5 py-1 bg-white cursor-pointer hover:bg-[#f6f8fa] transition"
-                    >
-                      Edit
-                    </button>
-                    <span
-                      onClick={() => handleDelete(i)}
-                      className="text-[#CF222E] text-xs cursor-pointer font-semibold hover:opacity-70 transition"
-                    >
-                      ✕
-                    </span>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {c.tasks.map((t, j) => (
-                    <span key={j} className="px-2.5 py-0.5 rounded text-[11px] font-semibold bg-[#ddf4ff] text-[#3A4EA2] border border-[#3A4EA2]/25">
-                      {t}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
+          <div className="border border-[#D0D7DE] rounded-lg overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-[#f6f8fa] border-b border-[#D0D7DE]">
+                  <th className="text-left px-3 py-2 font-semibold text-[#57606a]">Name</th>
+                  <th className="text-left px-3 py-2 font-semibold text-[#57606a]">WhatsApp</th>
+                  <th className="text-left px-3 py-2 font-semibold text-[#57606a]">Trade</th>
+                  <th className="px-3 py-2 w-8" />
+                </tr>
+              </thead>
+              <tbody>
+                {contractors.map((c, i) => (
+                  <tr key={c.id} className={`border-b border-[#D0D7DE] last:border-0 ${i % 2 === 1 ? "bg-[#f6f8fa]" : "bg-white"}`}>
+                    <td className="px-3 py-2.5 font-medium text-[#24292f]">{c.name}</td>
+                    <td className="px-3 py-2.5 text-[#57606a] font-mono">{c.phone}</td>
+                    <td className="px-3 py-2.5">
+                      <span className="inline-block bg-[#ddf4ff] text-[#0969da] px-2 py-0.5 rounded-full text-[10px] font-semibold">
+                        {c.trade}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <button
+                        onClick={() => handleRemove(c.id)}
+                        className="text-[#8C959F] hover:text-red-600 transition-colors text-base leading-none"
+                        title="Remove"
+                      >
+                        ×
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
 
-        <div className="border-t border-[#e1e4e8] mt-5 pt-3.5">
-          <div className="flex items-center gap-3">
-            <label className="text-xs font-semibold text-[#57606a]">EOD Prompt Time</label>
-            <div className="bg-white border border-[#D0D7DE] rounded-md px-3 py-1.5 text-sm font-semibold flex items-center gap-1.5">
-              🕕 {project.eodTime}
-              <span className="text-[#8C959F] ml-1">▾</span>
-            </div>
-            <span className="text-[11px] text-[#8C959F]">Bot sends daily prompts at this time</span>
+        {saveError && (
+          <div className="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">{saveError}</div>
+        )}
+        {dirty && (
+          <div className="mt-4">
+            <SaveButton onClick={handleSave} loading={saving} dirty={dirty} />
           </div>
-        </div>
+        )}
       </Card>
 
-      <Toast message={toast} show={!!toast} />
+      <Toast message="Contractors saved!" show={toast} />
     </>
   );
 }
 
 // ─── Team Tab ─────────────────────────────────────────────────────────────────
 
-function TeamTab({ project }: { project: Project }) {
-  const [members, setMembers] = useState<TeamMember[]>(project.team);
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState("Team Member");
-  const [toast, setToast] = useState("");
-  const [copied, setCopied] = useState(false);
+interface TeamMember {
+  id: string;
+  name: string;
+  email: string;
+  role: "Admin" | "Editor" | "Viewer";
+}
 
-  // Reset when project changes
+const ROLE_OPTIONS: TeamMember["role"][] = ["Admin", "Editor", "Viewer"];
+
+const ROLE_STYLE: Record<TeamMember["role"], { bg: string; text: string }> = {
+  Admin:  { bg: "#ffebe9", text: "#CF222E" },
+  Editor: { bg: "#ddf4ff", text: "#0969da" },
+  Viewer: { bg: "#f0f1f3", text: "#57606a" },
+};
+
+function TeamTab({ project, isMock = false, onSettingsUpdated }: { project: BackendProject; isMock?: boolean; onSettingsUpdated?: (id: string, s: Record<string, unknown>) => void }) {
+  const settings = (project as any).settingsJson ?? {};
+  const [members, setMembers] = useState<TeamMember[]>(settings.team ?? []);
+  const [saved, setSaved] = useState<TeamMember[]>(settings.team ?? []);
+
   useEffect(() => {
-    setMembers(project.team);
-    setEmail("");
-    setRole("Team Member");
+    const s = (project as any).settingsJson ?? {};
+    setMembers(s.team ?? []);
+    setSaved(s.team ?? []);
+    setAdding(false);
+    setNewName(""); setNewEmail(""); setNewRole("Editor");
   }, [project.id]);
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newRole, setNewRole] = useState<TeamMember["role"]>("Editor");
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(""), 2500);
+  const dirty = JSON.stringify(members) !== JSON.stringify(saved);
+
+  const handleAdd = () => {
+    if (!newName.trim() || !newEmail.trim()) return;
+    const entry: TeamMember = {
+      id: crypto.randomUUID(),
+      name: newName.trim(),
+      email: newEmail.trim().toLowerCase(),
+      role: newRole,
+    };
+    setMembers((prev) => [...prev, entry]);
+    setNewName("");
+    setNewEmail("");
+    setNewRole("Editor");
+    setAdding(false);
   };
 
-  const handleInvite = () => {
-    if (!email.trim() || !email.includes("@")) return;
-    const exists = members.some((m) => m.email.toLowerCase() === email.trim().toLowerCase());
-    if (exists) {
-      showToast("This member is already added");
-      return;
-    }
-    setMembers((prev) => [...prev, { email: email.trim(), role, status: "Invited" }]);
-    setEmail("");
-    setRole("Team Member");
-    showToast("Invitation sent!");
-  };
-
-  const handleRemove = (index: number) => {
-    const removed = members[index].email;
-    setMembers((prev) => prev.filter((_, i) => i !== index));
-    showToast(`${removed} removed`);
-  };
-
-  const handleCopy = async () => {
-    const link = `https://app.bluq.io/invite/${project.code.toLowerCase()}`;
+  const handleRemove = async (id: string) => {
+    const updated = members.filter((m) => m.id !== id);
+    setMembers(updated);
+    setSaving(true);
     try {
-      await navigator.clipboard.writeText(link);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Fallback for environments where clipboard API isn't available
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setSaveError("");
+      const newSettings = { ...settings, team: updated };
+      if (!isMock) {
+        await updateProject(project.id, { settingsJson: newSettings });
+      }
+      onSettingsUpdated?.(project.id, newSettings);
+      setSaved(updated);
+    } catch (err: any) {
+      console.error("Failed to remove member:", err);
+      setMembers((prev) => [...prev, members.find((m) => m.id === id)!]);
+      setSaveError(err?.message ?? "Remove failed. Check console.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRoleChange = (id: string, role: TeamMember["role"]) => {
+    setMembers((prev) => prev.map((m) => m.id === id ? { ...m, role } : m));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      setSaveError("");
+      const newSettings = { ...settings, team: members };
+      if (!isMock) {
+        await updateProject(project.id, { settingsJson: newSettings });
+        // Send invite emails to newly added members
+        const savedIds = new Set(saved.map((m) => m.id));
+        const newOnes = members.filter((m) => !savedIds.has(m.id));
+        await Promise.allSettled(
+          newOnes.map((m) =>
+            sendTeamInvite(m.email, m.name, m.role, project.workspaceId)
+          )
+        );
+      }
+      onSettingsUpdated?.(project.id, newSettings);
+      setSaved(members);
+      setToast(true);
+      setTimeout(() => setToast(false), 2500);
+    } catch (err: any) {
+      console.error("Failed to save team:", err);
+      setSaveError(err?.message ?? "Save failed. Check console.");
+    } finally {
+      setSaving(false);
     }
   };
 
   return (
     <>
       <Card>
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <div className="text-sm font-bold text-[#24292f]">Team Members</div>
-            <div className="text-xs text-[#57606a] mt-0.5">Manage who has access to this project.</div>
-          </div>
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-sm font-bold text-[#24292f]">Team Members</div>
           <button
-            onClick={handleInvite}
-            disabled={!email.trim() || !email.includes("@")}
-            className="bg-[#3A4EA2] text-white border-none rounded-md px-3.5 py-1.5 text-xs font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[#2d3d8a] active:scale-95 transition-all"
+            onClick={() => setAdding(true)}
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-[#3A4EA2] rounded-md hover:bg-[#2d3d8a] transition-colors"
           >
-            + Invite Member
+            <span className="text-sm leading-none">+</span> Add Member
           </button>
         </div>
-
-        <div className="flex gap-3 mb-4">
-          <div className="flex-1">
-            <label className="block text-xs font-semibold text-[#57606a] mb-1">Email Address</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") handleInvite(); }}
-              placeholder="colleague@pmcfirm.com"
-              className="w-full border border-[#D0D7DE] rounded-md px-3 py-2 text-sm text-[#24292f] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20 transition"
-            />
-          </div>
-          <div className="w-[160px]">
-            <SelectField label="Role" value={role} onChange={setRole} options={["Team Member", "Project Owner", "Viewer"]} />
-          </div>
+        <div className="text-xs text-[#57606a] mb-4">
+          Manage who has access to this project.
         </div>
 
-        <div className="flex flex-col gap-2">
-          {members.map((m, i) => (
-            <div key={i} className="bg-[#f6f8fa] border border-[#D0D7DE] rounded-lg px-3.5 py-2.5 flex items-center justify-between">
+        {/* Add form */}
+        {adding && (
+          <div className="mb-4 p-3 bg-[#f6f8fa] border border-[#D0D7DE] rounded-lg flex flex-col gap-3">
+            <div className="text-xs font-semibold text-[#24292f]">New Team Member</div>
+            <div className="grid grid-cols-3 gap-3">
               <div>
-                <div className="text-xs font-semibold text-[#24292f]">{m.email}</div>
-                <div className="text-[11px] text-[#57606a] mt-0.5">
-                  {m.role} •{" "}
-                  <span className={m.status === "Active" ? "text-[#1a7f37]" : "text-[#9a6700]"}>
-                    {m.status}
-                  </span>
-                </div>
+                <label className="block text-[10px] font-semibold text-[#57606a] mb-1">NAME *</label>
+                <input
+                  autoFocus
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="e.g. Ahmed Hassan"
+                  className="w-full border border-[#D0D7DE] rounded-md px-2.5 py-1.5 text-xs text-[#24292f] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20"
+                />
               </div>
-              <span
-                onClick={() => handleRemove(i)}
-                className="text-[#CF222E] text-xs cursor-pointer font-semibold hover:opacity-70 transition"
-              >
-                ✕
-              </span>
+              <div>
+                <label className="block text-[10px] font-semibold text-[#57606a] mb-1">EMAIL *</label>
+                <input
+                  type="email"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  placeholder="ahmed@example.com"
+                  className="w-full border border-[#D0D7DE] rounded-md px-2.5 py-1.5 text-xs text-[#24292f] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-semibold text-[#57606a] mb-1">ROLE</label>
+                <select
+                  value={newRole}
+                  onChange={(e) => setNewRole(e.target.value as TeamMember["role"])}
+                  className="w-full border border-[#D0D7DE] rounded-md px-2.5 py-1.5 text-xs text-[#24292f] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20"
+                >
+                  {ROLE_OPTIONS.map((r) => <option key={r}>{r}</option>)}
+                </select>
+              </div>
             </div>
-          ))}
-        </div>
-
-        {members.length === 0 && (
-          <div className="bg-[#f6f8fa] border border-[#D0D7DE] border-dashed rounded-lg py-6 text-center mt-2">
-            <div className="text-sm text-[#8C959F]">No team members yet</div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleAdd}
+                disabled={!newName.trim() || !newEmail.trim()}
+                className="px-3 py-1.5 text-xs font-semibold text-white bg-[#3A4EA2] rounded-md hover:bg-[#2d3d8a] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Add
+              </button>
+              <button
+                onClick={() => { setAdding(false); setNewName(""); setNewEmail(""); setNewRole("Editor"); }}
+                className="px-3 py-1.5 text-xs font-semibold text-[#24292f] bg-white border border-[#D0D7DE] rounded-md hover:bg-[#f0f1f3] transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         )}
 
-        <div className="border-t border-[#e1e4e8] mt-5 pt-3.5">
-          <label className="block text-xs font-semibold text-[#57606a] mb-1.5">Share invitation link</label>
-          <div className="flex gap-2">
-            <div className="flex-1 bg-[#f6f8fa] border border-[#D0D7DE] rounded-md px-3 py-2 text-xs text-[#8C959F] overflow-hidden whitespace-nowrap text-ellipsis">
-              https://app.bluq.io/invite/{project.code.toLowerCase()}...
-            </div>
-            <button
-              onClick={handleCopy}
-              className="px-3 py-1.5 text-xs font-semibold border border-[#D0D7DE] rounded-md bg-white cursor-pointer hover:bg-[#f6f8fa] transition"
-            >
-              {copied ? "✓ Copied!" : "📋 Copy"}
-            </button>
+        {/* Member list */}
+        {members.length === 0 ? (
+          <div className="bg-[#f6f8fa] border border-[#D0D7DE] border-dashed rounded-lg py-8 text-center">
+            <div className="text-sm text-[#8C959F] mb-1">No team members added</div>
+            <div className="text-xs text-[#8C959F]">Add team members to control who has access to this project.</div>
           </div>
-        </div>
+        ) : (
+          <div className="border border-[#D0D7DE] rounded-lg overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-[#f6f8fa] border-b border-[#D0D7DE]">
+                  <th className="text-left px-3 py-2 font-semibold text-[#57606a]">Name</th>
+                  <th className="text-left px-3 py-2 font-semibold text-[#57606a]">Email</th>
+                  <th className="text-left px-3 py-2 font-semibold text-[#57606a]">Role</th>
+                  <th className="px-3 py-2 w-8" />
+                </tr>
+              </thead>
+              <tbody>
+                {members.map((m, i) => (
+                  <tr key={m.id} className={`border-b border-[#D0D7DE] last:border-0 ${i % 2 === 1 ? "bg-[#f6f8fa]" : "bg-white"}`}>
+                    <td className="px-3 py-2.5 font-medium text-[#24292f]">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-[#3A4EA2] flex items-center justify-center text-white text-[10px] font-bold shrink-0">
+                          {m.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}
+                        </div>
+                        {m.name}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5 text-[#57606a]">{m.email}</td>
+                    <td className="px-3 py-2.5">
+                      <select
+                        value={m.role}
+                        onChange={(e) => handleRoleChange(m.id, e.target.value as TeamMember["role"])}
+                        className="border border-[#D0D7DE] rounded px-1.5 py-0.5 text-[10px] font-semibold outline-none"
+                        style={{ background: ROLE_STYLE[m.role].bg, color: ROLE_STYLE[m.role].text }}
+                      >
+                        {ROLE_OPTIONS.map((r) => <option key={r}>{r}</option>)}
+                      </select>
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <button
+                        onClick={() => handleRemove(m.id)}
+                        className="text-[#8C959F] hover:text-red-600 transition-colors text-base leading-none"
+                        title="Remove"
+                      >
+                        ×
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {saveError && (
+          <div className="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">{saveError}</div>
+        )}
+        {dirty && (
+          <div className="mt-4">
+            <SaveButton onClick={handleSave} loading={saving} dirty={dirty} />
+          </div>
+        )}
       </Card>
 
-      <Toast message={toast} show={!!toast} />
+      <Toast message="Team saved!" show={toast} />
     </>
   );
 }
 
-// ─── Main Page (default export) ───────────────────────────────────────────────
+// ─── Main Page ────────────────────────────────────────────────────────────────
 
 type SidebarItem = "General" | "Contractors" | "Team";
 
 export default function ProjectSettingsPage() {
-  const [sidebar, setSidebar] = useState<SidebarItem>("General");
-  const [activeProjectId, setActiveProjectId] = useState(1);
+  const { workspaceId, isDesignMode } = useWorkspace();
+  const searchParams = useSearchParams();
+  const urlProjectId = searchParams.get("projectId");
 
-  const project = PROJECTS.find((p) => p.id === activeProjectId)!;
+  const [projects, setProjects] = useState<BackendProject[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string>("");
+  const [loadingProjects, setLoadingProjects] = useState(true);
+  const [sidebar, setSidebar] = useState<SidebarItem>("General");
+
+  const handleSettingsUpdated = useCallback((projectId: string, newSettingsJson: Record<string, unknown>) => {
+    setProjects((prev) =>
+      prev.map((p) =>
+        p.id === projectId ? { ...p, settingsJson: newSettingsJson } as any : p
+      )
+    );
+  }, []);
+
+  useEffect(() => {
+    if (isDesignMode) {
+      setLoadingProjects(true);
+      getProjects().then((mockProjects) => {
+        const data = mockProjects.map(mockToBackendProject);
+        setProjects(data);
+        if (data.length > 0) {
+          const preselect = urlProjectId && data.find((p) => p.id === urlProjectId);
+          setActiveProjectId(preselect ? preselect.id : data[0].id);
+        }
+      }).finally(() => setLoadingProjects(false));
+      return;
+    }
+    if (!workspaceId) return;
+    setLoadingProjects(true);
+    fetchProjects(workspaceId)
+      .then((data) => {
+        setProjects(data);
+        if (data.length > 0) {
+          const preselect = urlProjectId && data.find((p) => p.id === urlProjectId);
+          setActiveProjectId(preselect ? preselect.id : data[0].id);
+        }
+      })
+      .catch(console.error)
+      .finally(() => setLoadingProjects(false));
+  }, [workspaceId, urlProjectId, isDesignMode]);
+
+  const project = projects.find((p) => p.id === activeProjectId);
+
+  if (loadingProjects) {
+    return (
+      <div className="p-5 flex items-center justify-center h-full">
+        <div className="text-sm text-[#57606a]">Loading projects…</div>
+      </div>
+    );
+  }
+
+  if (!project) {
+    return (
+      <div className="p-5 flex items-center justify-center h-full">
+        <div className="text-sm text-[#57606a]">No projects found.</div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-5 overflow-y-auto h-full">
-      {/* Header */}
       <div className="flex items-center gap-2.5 mb-5">
         <div className="text-[15px] font-bold text-[#24292f]">Project Settings</div>
         <ProjectSelector
-          projects={PROJECTS}
+          projects={projects}
           activeId={activeProjectId}
           onChange={setActiveProjectId}
         />
       </div>
 
-      {/* Sidebar + Content */}
       <div className="flex gap-4">
         <div className="w-36 shrink-0 pt-1">
           {(["General", "Contractors", "Team"] as SidebarItem[]).map((item) => (
@@ -675,9 +899,9 @@ export default function ProjectSettingsPage() {
         </div>
 
         <div className="flex-1">
-          {sidebar === "General" && <GeneralTab project={project} />}
-          {sidebar === "Contractors" && <ContractorsTab project={project} />}
-          {sidebar === "Team" && <TeamTab project={project} />}
+          {sidebar === "General" && <GeneralTab project={project} isMock={isDesignMode} onSettingsUpdated={handleSettingsUpdated} />}
+          {sidebar === "Contractors" && <ContractorsTab project={project} isMock={isDesignMode} onSettingsUpdated={handleSettingsUpdated} />}
+          {sidebar === "Team" && <TeamTab project={project} isMock={isDesignMode} onSettingsUpdated={handleSettingsUpdated} />}
         </div>
       </div>
     </div>
