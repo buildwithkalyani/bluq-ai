@@ -78,13 +78,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           if (first) {
             setWorkspaceId(first.id);
             setOrgName(first.name);
-          } else if (pathname !== "/onboarding") {
+          } else if (pathname !== "/onboarding" && !pathname.startsWith("/invite")) {
             router.replace("/onboarding");
           }
         })
         .catch((err) => {
           console.error("workspace fetch error:", err.message);
-          if (pathname !== "/onboarding") {
+          if (pathname !== "/onboarding" && !pathname.startsWith("/invite")) {
             router.replace("/onboarding");
           }
         })

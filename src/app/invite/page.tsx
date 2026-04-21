@@ -45,7 +45,8 @@ function InvitePage() {
     setAccepting(true);
     acceptTeamInvite(token)
       .then(({ workspaceId }) => {
-        router.replace(`/dashboard/overview?workspaceId=${workspaceId}`);
+        // Hard reload so workspace context re-fetches /orgs/mine with the new membership
+        window.location.href = `/dashboard/overview?workspaceId=${workspaceId}`;
       })
       .catch((err) => {
         setError(err.message ?? "Failed to accept invite.");
