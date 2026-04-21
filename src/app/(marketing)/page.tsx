@@ -606,18 +606,18 @@ export default function Home() {
             <div className="m-foot-col">
               <h4>product</h4>
               <ul>
-                <li><a href="#features">auto_scheduling</a></li>
-                <li><a href="#features">schedule_import</a></li>
-                <li><a href="#features">field_updates</a></li>
-                <li><a href="#features">delay_flagging</a></li>
-                <li><a href="#features">auto_dpr</a></li>
+                <li><a href="#features">auto scheduling</a></li>
+                <li><a href="#features">schedule import</a></li>
+                <li><a href="#features">field updates</a></li>
+                <li><a href="#features">delay flagging</a></li>
+                <li><a href="#features">auto dpr</a></li>
               </ul>
             </div>
             <div className="m-foot-col">
               <h4>built for</h4>
               <ul>
-                <li><a href="#audience">pmc_firms</a></li>
-                <li><a href="#audience">epc_turnkey</a></li>
+                <li><a href="#audience">pmc firms</a></li>
+                <li><a href="#audience">epc · turnkey contractors</a></li>
                 <li><a href="#audience">developers</a></li>
               </ul>
             </div>
@@ -626,7 +626,7 @@ export default function Home() {
               <ul>
                 <li><a href="/about">about</a></li>
                 <li><a href="/contact">contact</a></li>
-                <li><a href="#">early_access</a></li>
+                <li><a href="#">early access</a></li>
                 <li><a href="#">privacy</a></li>
                 <li><a href="#">terms</a></li>
               </ul>

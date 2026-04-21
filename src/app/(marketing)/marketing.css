@@ -1119,6 +1119,40 @@
 .m-acc-list,
 .m-mob-tabs { display: none; }
 
+/* Story: desktop version hidden on mobile, mobile version shown */
+.m-story-mob { display: none; }
+.m-story-mob-row { border-bottom: 1px solid var(--line); }
+.m-story-mob-row:first-child { border-top: 1px solid var(--line); }
+.m-story-mob-trigger {
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 18px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  text-align: left;
+}
+.m-story-mob-label {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--cobalt);
+  font-weight: 500;
+}
+.m-story-mob-arrow { font-family: var(--mono); font-size: 18px; color: var(--ink-3); }
+.m-story-mob-body {
+  font-family: var(--serif);
+  font-size: 16px;
+  font-weight: 300;
+  line-height: 1.55;
+  color: var(--ink);
+  padding-bottom: 18px;
+  animation: acc-in 0.18s ease;
+}
+.m-story-mob-body p + p { margin-top: 12px; }
+
 @keyframes acc-in {
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -1432,6 +1466,10 @@
   .m-faq-item:last-child { border-bottom: none; }
   .m-footer { padding: 36px 0 24px; }
   .m-foot-grid { gap: 20px !important; }
+
+  /* --- Story section --- */
+  .m-story-mob { display: block; }
+  .m-story-desktop { display: none; }
 
   /* --- Show mobile variants, hide desktop grids --- */
   .m-acc-problems { display: flex; }
