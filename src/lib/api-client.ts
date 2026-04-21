@@ -29,9 +29,18 @@ import { authClient } from "@/lib/auth-client";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
 
+let _tokenCache: { token: string; exp: number } | null = null;
+
 async function getAuthToken(): Promise<string> {
+  if (_tokenCache && Date.now() < _tokenCache.exp) return _tokenCache.token;
   const session = await authClient.getSession();
-  return session?.data?.session?.token ?? "";
+  const token = session?.data?.session?.token ?? "";
+  _tokenCache = { token, exp: Date.now() + 60_000 };
+  return token;
+}
+
+export function clearAuthTokenCache(): void {
+  _tokenCache = null;
 }
 
 async function apiFetch<T>(path: string): Promise<T> {

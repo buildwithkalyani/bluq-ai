@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, Suspense } from "react";
 import { getProjects, Project } from "@/lib/mock-data";
 import { WorkspaceProvider, useWorkspace } from "@/context/workspace";
-import { fetchProjects, createProject } from "@/lib/api-client";
+import { fetchProjects, createProject, clearAuthTokenCache } from "@/lib/api-client";
 import { authClient } from "@/lib/auth-client";
 
 // ─── NAV CONFIGURATION ───────────────────────────────────────
@@ -506,6 +506,8 @@ function ProfileDropdown() {
 
   const handleLogout = async () => {
     setIsOpen(false);
+    clearAuthTokenCache();
+    localStorage.removeItem("bluq_workspace");
     await authClient.signOut();
     router.push("/login");
   };
