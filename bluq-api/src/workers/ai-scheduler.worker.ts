@@ -164,27 +164,49 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
   // =========================================================================
   await updateProgress(job, 2, totalSteps, `Parsing ${projectDocuments.length} document(s)...`);
 
-  const fileBuffers = await Promise.all(
+  // Check required env vars before attempting downloads
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  console.log(`[worker] ENV CHECK — SUPABASE_URL: ${supabaseUrl ? "✅ set" : "❌ MISSING"}, SERVICE_ROLE_KEY: ${serviceRoleKey ? "✅ set" : "❌ MISSING"}`);
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error(
+      "Storage not configured: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing on the server."
+    );
+  }
+
+  console.log(`[worker] Documents to download (${projectDocuments.length}):`);
+  projectDocuments.forEach((doc, i) => {
+    console.log(`  [${i+1}] ${doc.fileName} → fileUrl: "${doc.fileUrl}"`);
+  });
+
+  const downloadResults = await Promise.all(
     projectDocuments.map(async (doc) => {
       try {
         const buffer = await fetchFileBuffer(doc.fileUrl);
-        return { buffer, fileName: doc.fileName };
+        console.log(`[worker] ✅ Downloaded ${doc.fileName} (${buffer.length} bytes)`);
+        return { buffer, fileName: doc.fileName, error: null };
       } catch (err: any) {
-        console.warn(`[worker] Failed to fetch ${doc.fileName}: ${err.message}`);
-        return null;
+        console.error(`[worker] ❌ Failed to fetch ${doc.fileName}: ${err.message}`);
+        return { buffer: null, fileName: doc.fileName, error: err.message as string };
       }
     })
   );
 
-  // Filter out failed downloads
-  const validFiles = fileBuffers.filter(
-    (f): f is { buffer: Buffer; fileName: string } => f !== null
+  const validFiles = downloadResults.filter(
+    (f): f is { buffer: Buffer; fileName: string; error: null } => f.buffer !== null
   );
 
   if (validFiles.length === 0) {
+    const reasons = downloadResults.map(f => `${f.fileName}: ${f.error}`).join("; ");
     throw new Error(
-      "Could not download any project documents. Please check that files are properly uploaded."
+      `Could not download any project documents. Errors: ${reasons}`
     );
+  }
+
+  const failedDownloads = downloadResults.filter(f => f.buffer === null);
+  if (failedDownloads.length > 0) {
+    console.warn(`[worker] ${failedDownloads.length} file(s) failed to download, continuing with ${validFiles.length} valid file(s)`);
   }
 
   const { parsed, errors, summary: parseSummary } = await parseFiles(validFiles);

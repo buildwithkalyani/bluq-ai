@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
-import { tasks } from "../db/schema.js";
+import { tasks, taskDependencies } from "../db/schema.js";
 import { eq, and, ne, lte, gte } from "drizzle-orm";
 import { verifySession } from "../lib/verifySession.js";
 
@@ -284,6 +284,87 @@ export async function tasksRoute(app: FastifyInstance) {
     } catch (err: any) {
       console.error("DELETE /tasks error:", err.message, err.cause);
       return reply.status(500).send({ error: "Failed to delete task", details: err.message });
+    }
+  });
+
+  // =========================================================================
+  // GET /tasks/dependencies?projectId=&workspaceId=
+  // Returns all dependency rows for tasks belonging to the project.
+  // =========================================================================
+  app.get("/tasks/dependencies", { preHandler: verifySession }, async (request, reply) => {
+    try {
+      const { projectId, workspaceId } = request.query as { projectId: string; workspaceId: string };
+      if (!projectId || !workspaceId) return reply.status(400).send({ error: "projectId and workspaceId required" });
+      if (!UUID_REGEX.test(workspaceId) || !UUID_REGEX.test(projectId)) {
+        return reply.status(400).send({ error: "projectId and workspaceId must be valid UUIDs" });
+      }
+      const data = await db
+        .select({
+          id: taskDependencies.id,
+          predecessorId: taskDependencies.predecessorId,
+          successorId: taskDependencies.successorId,
+          dependencyType: taskDependencies.dependencyType,
+          lagDays: taskDependencies.lagDays,
+        })
+        .from(taskDependencies)
+        .innerJoin(tasks, eq(taskDependencies.successorId, tasks.id))
+        .where(and(eq(tasks.projectId, projectId), eq(taskDependencies.workspaceId, workspaceId)));
+      return data;
+    } catch (err: any) {
+      console.error("GET /tasks/dependencies error:", err.message, err.cause);
+      return reply.status(500).send({ error: "Failed to fetch dependencies", details: err.message });
+    }
+  });
+
+  // =========================================================================
+  // POST /tasks/dependencies
+  // Body: { workspaceId, predecessorId, successorId, dependencyType?, lagDays? }
+  // =========================================================================
+  app.post("/tasks/dependencies", { preHandler: verifySession }, async (request, reply) => {
+    try {
+      const body = request.body as {
+        workspaceId: string;
+        predecessorId: string;
+        successorId: string;
+        dependencyType?: string;
+        lagDays?: number;
+      };
+      if (!body.workspaceId || !body.predecessorId || !body.successorId) {
+        return reply.status(400).send({ error: "workspaceId, predecessorId, successorId required" });
+      }
+      if (!UUID_REGEX.test(body.workspaceId) || !UUID_REGEX.test(body.predecessorId) || !UUID_REGEX.test(body.successorId)) {
+        return reply.status(400).send({ error: "IDs must be valid UUIDs" });
+      }
+      const [dep] = await db
+        .insert(taskDependencies)
+        .values({
+          workspaceId: body.workspaceId,
+          predecessorId: body.predecessorId,
+          successorId: body.successorId,
+          dependencyType: body.dependencyType ?? "FS",
+          lagDays: body.lagDays ?? 0,
+        })
+        .onConflictDoNothing()
+        .returning();
+      return reply.status(201).send(dep ?? { message: "dependency already exists" });
+    } catch (err: any) {
+      console.error("POST /tasks/dependencies error:", err.message, err.cause);
+      return reply.status(500).send({ error: "Failed to create dependency", details: err.message });
+    }
+  });
+
+  // =========================================================================
+  // DELETE /tasks/dependencies/:id
+  // =========================================================================
+  app.delete("/tasks/dependencies/:id", { preHandler: verifySession }, async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      if (!UUID_REGEX.test(id)) return reply.status(400).send({ error: "id must be a valid UUID" });
+      await db.delete(taskDependencies).where(eq(taskDependencies.id, id));
+      return { success: true };
+    } catch (err: any) {
+      console.error("DELETE /tasks/dependencies error:", err.message, err.cause);
+      return reply.status(500).send({ error: "Failed to delete dependency", details: err.message });
     }
   });
 }

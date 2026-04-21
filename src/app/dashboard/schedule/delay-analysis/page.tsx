@@ -183,7 +183,7 @@ function DelayAnalyticsPageContent() {
 
     if (real) {
       // Derive delay rows from real tasks
-      fetchTasks(projectIdParam, workspaceId!).then(tasks => {
+      fetchTasks(projectIdParam, wsId!).then(tasks => {
         const delayed = tasks.filter(t => t.status === "delayed" || t.status === "runningLate");
         const realRows: DelayRow[] = delayed.map((t, i) => ({
           id: i + 1,

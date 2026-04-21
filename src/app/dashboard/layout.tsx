@@ -639,11 +639,11 @@ function TopNav() {
 </a>
         </span>
         <span className="text-[#D0D7DE]">/</span>
-        <span className="text-[13px] text-[#57606a]">{nav.label}</span>
+        <Link href={nav.href} className="text-[13px] text-[#57606a] hover:text-[#24292f] hover:underline transition-colors">{nav.label}</Link>
         <span className="text-[#D0D7DE]">/</span>
-        <span className="text-[13px] text-[#24292f] font-semibold">
+        <Link href={tab.href} className="text-[13px] text-[#24292f] font-semibold hover:underline transition-colors">
           {tab.label}
-        </span>
+        </Link>
       </div>
 
       <div className="flex items-center gap-4">

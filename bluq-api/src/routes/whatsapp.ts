@@ -18,6 +18,11 @@
 import { FastifyInstance } from "fastify";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { whatsappQueue } from "../lib/queues.js";
+import { db } from "../db/client.js";
+import { whatsappUpdates, tasks, dprPhotos, projects } from "../db/schema.js";
+import { sendText } from "../lib/whatsapp-send.js";
+import { eq, and, desc } from "drizzle-orm";
+import { verifySession } from "../lib/verifySession.js";
 
 // ---------------------------------------------------------------------------
 // WEBHOOK SIGNATURE VERIFICATION (X-Hub-Signature-256)
@@ -71,6 +76,177 @@ export async function whatsappRoute(app: FastifyInstance) {
       return reply.status(200).send(q["hub.challenge"]);
     }
     return reply.status(403).send("Forbidden");
+  });
+
+  // ─── FEED: CONVERSATIONS LIST ─────────────────────────────────────────────
+  // GET /whatsapp/feed?projectId=xxx
+  // Returns one "conversation" per unique senderPhone, using latest message.
+  app.get("/whatsapp/feed", { preHandler: verifySession }, async (request, reply) => {
+    const { projectId } = request.query as { projectId?: string };
+    if (!projectId) return reply.status(400).send({ error: "projectId required" });
+
+    const rows = await db
+      .select({
+        id: whatsappUpdates.id,
+        senderPhone: whatsappUpdates.senderPhone,
+        senderName: whatsappUpdates.senderName,
+        rawMessage: whatsappUpdates.rawMessage,
+        parsedJson: whatsappUpdates.parsedJson,
+        matchedTaskId: whatsappUpdates.matchedTaskId,
+        receivedAt: whatsappUpdates.receivedAt,
+        status: whatsappUpdates.status,
+      })
+      .from(whatsappUpdates)
+      .where(eq(whatsappUpdates.projectId, projectId))
+      .orderBy(desc(whatsappUpdates.receivedAt));
+
+    // Group by senderPhone — keep latest message per phone
+    const byPhone = new Map<string, typeof rows[number]>();
+    const countByPhone = new Map<string, number>();
+    for (const row of rows) {
+      countByPhone.set(row.senderPhone, (countByPhone.get(row.senderPhone) ?? 0) + 1);
+      if (!byPhone.has(row.senderPhone)) byPhone.set(row.senderPhone, row);
+    }
+
+    // Fetch task titles for matched tasks
+    const taskIds = [...new Set([...byPhone.values()].map(r => r.matchedTaskId).filter(Boolean))] as string[];
+    const allTaskRows = taskIds.length > 0
+      ? await Promise.all(taskIds.map(tid =>
+          db.select({ id: tasks.id, title: tasks.title }).from(tasks).where(eq(tasks.id, tid)).limit(1)
+            .then(r => r[0])
+        ))
+      : [];
+    const taskMap = new Map(allTaskRows.filter(Boolean).map(t => [t!.id, t!.title]));
+
+    const convos = [...byPhone.values()].map(row => {
+      const parsed = row.parsedJson as any;
+      const hasIssue = !!(parsed?.delayReason || parsed?.issueDesc);
+      const pct = parsed?.percentComplete;
+      const taskTitle = row.matchedTaskId ? (taskMap.get(row.matchedTaskId) ?? "Unknown Task") : row.rawMessage.slice(0, 40);
+
+      let status = "In Progress";
+      let color = "#9A6700";
+      if (hasIssue) { status = "⚠️ Issue Reported"; color = "#CF222E"; }
+      else if (pct === 100) { status = "✅ Complete"; color = "#1A7F37"; }
+      else if (pct != null) { status = `${pct}% complete`; color = "#3A4EA2"; }
+
+      const receivedAt = row.receivedAt ? new Date(row.receivedAt) : new Date();
+      const timeStr = receivedAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+
+      return {
+        id: row.id,
+        senderPhone: row.senderPhone,
+        name: row.senderName ?? row.senderPhone,
+        trade: null as string | null,
+        type: hasIssue ? "Warning" : "EOD",
+        time: timeStr,
+        status,
+        task: taskTitle,
+        color,
+        messageCount: countByPhone.get(row.senderPhone) ?? 1,
+        lastMessage: row.rawMessage,
+        receivedAt: row.receivedAt,
+        hasMessages: true,
+      };
+    });
+
+    // Merge in linked contractors who haven't sent any messages yet
+    const projectRow = await db
+      .select({ settingsJson: projects.settingsJson })
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .limit(1)
+      .then(r => r[0]);
+
+    const linkedContractors: { id: string; name: string; phone: string; trade: string }[] =
+      (projectRow?.settingsJson as any)?.contractors ?? [];
+
+    const phonesWithMessages = new Set(convos.map(c => c.senderPhone));
+
+    for (const contractor of linkedContractors) {
+      // Normalize: strip leading + or country code variations for comparison
+      const normalizedPhone = contractor.phone.replace(/\D/g, "");
+      const alreadyPresent = [...phonesWithMessages].some(p => p.replace(/\D/g, "").endsWith(normalizedPhone) || normalizedPhone.endsWith(p.replace(/\D/g, "")));
+      if (alreadyPresent) continue;
+
+      convos.push({
+        id: `contractor-${contractor.id}`,
+        senderPhone: contractor.phone,
+        name: contractor.name,
+        trade: contractor.trade,
+        type: "EOD",
+        time: "—",
+        status: "Awaiting first update",
+        task: "No messages yet",
+        color: "#8C959F",
+        messageCount: 0,
+        lastMessage: "",
+        receivedAt: null,
+        hasMessages: false,
+      });
+    }
+
+    return convos;
+  });
+
+  // ─── FEED: MESSAGES FOR A CONVERSATION ───────────────────────────────────
+  // GET /whatsapp/feed/messages?projectId=xxx&senderPhone=xxx
+  app.get("/whatsapp/feed/messages", { preHandler: verifySession }, async (request, reply) => {
+    const { projectId, senderPhone } = request.query as { projectId?: string; senderPhone?: string };
+    if (!projectId || !senderPhone) return reply.status(400).send({ error: "projectId and senderPhone required" });
+
+    const rows = await db
+      .select({
+        id: whatsappUpdates.id,
+        rawMessage: whatsappUpdates.rawMessage,
+        parsedJson: whatsappUpdates.parsedJson,
+        receivedAt: whatsappUpdates.receivedAt,
+        matchedTaskId: whatsappUpdates.matchedTaskId,
+        status: whatsappUpdates.status,
+      })
+      .from(whatsappUpdates)
+      .where(and(
+        eq(whatsappUpdates.projectId, projectId),
+        eq(whatsappUpdates.senderPhone, senderPhone),
+      ))
+      .orderBy(desc(whatsappUpdates.receivedAt));
+
+    // Fetch photo count for this project+phone combo
+    const photoRows = await db
+      .select({ id: dprPhotos.id })
+      .from(dprPhotos)
+      .where(eq(dprPhotos.projectId, projectId));
+
+    return { messages: rows, photoCount: photoRows.length };
+  });
+
+  // ─── WELCOME MESSAGE ─────────────────────────────────────────────────────
+  // POST /whatsapp/send-welcome
+  // Called when a contractor is added to a project. Sends a personalised
+  // onboarding message so they know the Bluq bot will reach out daily.
+  app.post("/whatsapp/send-welcome", { preHandler: verifySession }, async (request, reply) => {
+    const { phone, contractorName, projectName } = request.body as {
+      phone?: string;
+      contractorName?: string;
+      projectName?: string;
+    };
+    if (!phone || !contractorName || !projectName) {
+      return reply.status(400).send({ error: "phone, contractorName, projectName required" });
+    }
+
+    const message =
+      `Hi ${contractorName}! 👋\n\n` +
+      `You've been added as a contractor on *${projectName}* via Bluq — your construction management assistant.\n\n` +
+      `Every evening I'll send you a quick check-in to log your daily progress, materials, and any issues on site. It takes less than 2 minutes.\n\n` +
+      `Reply *HELP* anytime if you need assistance. See you on site! 🏗️`;
+
+    try {
+      await sendText(phone, message);
+      return { ok: true };
+    } catch (err: any) {
+      console.error("[whatsapp] Failed to send welcome to", phone, err.message);
+      return reply.status(500).send({ error: err.message });
+    }
   });
 
   // ─── INCOMING MESSAGES ────────────────────────────────────────────────────

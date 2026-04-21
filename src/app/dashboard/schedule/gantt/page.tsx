@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useMemo, Suspense } from 'react';
 import { useSearchParams } from "next/navigation";
 import { getScheduleTasks, getScheduleDeps, type ScheduleTask, type TaskDependency } from "@/lib/mock-data";
-import { fetchTasks, isRealProject } from "@/lib/api-client";
+import { fetchTasks, fetchTaskDependencies, createTaskDependency, deleteTaskDependency, isRealProject } from "@/lib/api-client";
 import { useWorkspace } from "@/context/workspace";
 import { useTaskSocket } from "@/hooks/useTaskSocket";
 
@@ -476,7 +476,14 @@ function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete 
   const inputCls = "w-full bg-white border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#3A4EA2]";
 
   const f = formData;
-  const set = (k: string, v: any) => setFormData(p => ({ ...p, [k]: v }));
+  const set = (k: string, v: any) => setFormData(p => {
+    const next: typeof p = { ...p, [k]: v };
+    if (k === "status" && v === "completed") next.pct = 100;
+    if (k === "status" && v === "notStarted") next.pct = 0;
+    if (k === "pct" && v === 100) next.status = "completed";
+    if (k === "pct" && v === 0) next.status = "notStarted";
+    return next;
+  });
 
   const handleSave = () => {
     if (!f.name.trim())    return setError("Task name is required.");
@@ -632,17 +639,25 @@ function getActivePreset(zoom: number): string | null {
 // ─────────────────────────────────────────────────────────────
 function GanttChartContent() {
   const searchParams = useSearchParams();
-  const { isDesignMode, workspaceId: ctxWorkspaceId } = useWorkspace();
+  const { isDesignMode, workspaceId: ctxWorkspaceId, loading: wsLoading } = useWorkspace();
   const projectIdParam = searchParams.get("projectId") ?? "0";
-  const workspaceId = searchParams.get("workspaceId") ?? ctxWorkspaceId;
-  const real = !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
+  const urlWs = searchParams.get("workspaceId");
+  const workspaceId = (urlWs && urlWs !== "null") ? urlWs : ctxWorkspaceId;
+  const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
 
   const [tasks, setTasks] = useState<ScheduleTask[]>([]);
   const [deps, setDeps] = useState<TaskDependency[]>([]);
+  const [depIds, setDepIds] = useState<Record<string, string>>({});
+  const depIdKey = (from: string, to: string) => `${from}__${to}`;
   useEffect(() => {
     if (real) {
       fetchTasks(projectIdParam, workspaceId!).then(setTasks);
-      setDeps([]);
+      fetchTaskDependencies(projectIdParam, workspaceId!).then(rows => {
+        setDeps(rows.map(r => ({ from: r.predecessorId, to: r.successorId, type: r.dependencyType, label: r.dependencyType })));
+        const ids: Record<string, string> = {};
+        rows.forEach(r => { ids[depIdKey(r.predecessorId, r.successorId)] = r.id; });
+        setDepIds(ids);
+      }).catch(() => setDeps([]));
     } else if (isDesignMode) {
       const numId = Number(projectIdParam);
       getScheduleTasks(numId).then(setTasks);
@@ -721,7 +736,10 @@ function GanttChartContent() {
 
   // 2. Dynamic Timeline Boundaries
   const { chartStart, totalDays } = useMemo(() => {
-    if (filteredTasks.length === 0) return { chartStart: "2025-01-01", totalDays: 31 };
+    if (filteredTasks.length === 0) {
+      const year = new Date().getFullYear();
+      return { chartStart: `${year}-01-01`, totalDays: 365 };
+    }
     let minD = parseDate(filteredTasks[0].startDate);
     let maxD = parseDate(filteredTasks[0].endDate);
     filteredTasks.forEach(t => {
@@ -877,6 +895,19 @@ function GanttChartContent() {
       const filtered = p.filter(d => d.to !== targetId);
       return [...filtered, ...newPreds.map((pr: any) => ({ from: pr.id, to: targetId, type: pr.type, label: pr.type }))];
     });
+    if (real && workspaceId && targetId) {
+      // delete old deps for this task, then create new ones
+      const oldDeps = deps.filter(d => d.to === targetId);
+      oldDeps.forEach(d => {
+        const bid = depIds[depIdKey(d.from, d.to)];
+        if (bid) deleteTaskDependency(bid).catch(console.error);
+      });
+      newPreds.forEach((pr: any) => {
+        createTaskDependency({ workspaceId: workspaceId!, predecessorId: pr.id, successorId: targetId!, dependencyType: pr.type })
+          .then(r => { if (r) setDepIds(p => ({ ...p, [depIdKey(pr.id, targetId!)]: r.id })); })
+          .catch(console.error);
+      });
+    }
   };
 
   const handleExport = async () => {
@@ -923,30 +954,65 @@ function GanttChartContent() {
   };
 
   const renderHeaders = () => {
-    const months: any[] = []; const lowerTier: any[] = [];
-    let currentMonth = ""; let daysInMonth = 0; let monthOffset = 0;
+    const showYearLevel = pixelsPerDay < 5; // year & quarter zoom → upper=year, lower=month
+    const upperTier: { label: string; days: number; startDayOffset: number }[] = [];
+    const lowerTier: { label: string; days: number; offset: number }[] = [];
+
+    let curUpperKey = ""; let daysInUpper = 0; let upperOffset = 0;
+    let curMonthKey = ""; let daysInMonth = 0; let monthOffset = 0;
 
     for (let i = 0; i < totalDays; i++) {
       const d = addDays(chartStart, i);
-      const mName = getMonthName(d);
-      
-      if (mName !== currentMonth) {
-        if (currentMonth !== "") months.push({ label: currentMonth, days: daysInMonth, startDayOffset: monthOffset });
-        currentMonth = mName; daysInMonth = 1; monthOffset = i;
-      } else daysInMonth++;
+      const date = new Date(d);
 
-      if (pixelsPerDay >= 15) lowerTier.push({ label: new Date(d).getDate().toString(), days: 1, offset: i });
-      else if (pixelsPerDay >= 3 && new Date(d).getDay() === 1) lowerTier.push({ label: formatDateStr(d), days: 7, offset: i });
+      const upperKey = showYearLevel
+        ? date.getFullYear().toString()
+        : date.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+
+      if (upperKey !== curUpperKey) {
+        if (curUpperKey !== "") upperTier.push({ label: curUpperKey, days: daysInUpper, startDayOffset: upperOffset });
+        curUpperKey = upperKey; daysInUpper = 1; upperOffset = i;
+      } else daysInUpper++;
+
+      if (pixelsPerDay >= 15) {
+        lowerTier.push({ label: date.getDate().toString(), days: 1, offset: i });
+      } else if (pixelsPerDay >= 5) {
+        if (date.getDay() === 1) lowerTier.push({ label: formatDateStr(d), days: 7, offset: i });
+      } else {
+        // month markers for year/quarter zoom
+        const monthKey = `${date.getFullYear()}-${date.getMonth()}`;
+        if (monthKey !== curMonthKey) {
+          if (curMonthKey !== "") {
+            lowerTier.push({
+              label: new Date(addDays(chartStart, monthOffset)).toLocaleDateString("en-US", { month: "short" }),
+              days: daysInMonth,
+              offset: monthOffset,
+            });
+          }
+          curMonthKey = monthKey; daysInMonth = 1; monthOffset = i;
+        } else daysInMonth++;
+      }
     }
-    months.push({ label: currentMonth, days: daysInMonth, startDayOffset: monthOffset });
+
+    upperTier.push({ label: curUpperKey, days: daysInUpper, startDayOffset: upperOffset });
+    if (curMonthKey && pixelsPerDay < 5) {
+      lowerTier.push({
+        label: new Date(addDays(chartStart, monthOffset)).toLocaleDateString("en-US", { month: "short" }),
+        days: daysInMonth,
+        offset: monthOffset,
+      });
+    }
 
     const showToday = todayOffsetDays >= 0 && todayOffsetDays <= totalDays;
 
     return (
       <div className="flex flex-col border-b border-gray-200 bg-gray-50 sticky top-0 z-20 overflow-visible" style={{ height: HEADER_H, width: timelineWidthPx }}>
         <div className="flex-1 flex border-b border-gray-200 relative">
-          {months.map((m, i) => (<div key={i} className="flex items-center justify-center text-[11px] font-semibold text-gray-700 border-r border-gray-200" style={{ width: m.days * pixelsPerDay }}>{m.label}</div>))}
-          {/* TODAY label chip in the month row */}
+          {upperTier.map((m, i) => (
+            <div key={i} className="flex items-center justify-center text-[11px] font-semibold text-gray-700 border-r border-gray-200" style={{ width: m.days * pixelsPerDay }}>
+              {m.label}
+            </div>
+          ))}
           {showToday && (
             <div className="absolute -translate-x-1/2 flex flex-col items-center pointer-events-none" style={{ left: todayX, top: 3 }}>
               <div className="px-1.5 py-0.5 rounded text-[9px] font-bold text-white bg-red-500 whitespace-nowrap leading-tight">TODAY</div>
@@ -954,8 +1020,11 @@ function GanttChartContent() {
           )}
         </div>
         <div className="flex-1 flex relative">
-          {lowerTier.map((item, i) => (<div key={i} className="absolute flex items-center justify-center text-[10px] text-gray-400 font-medium border-l border-gray-200 h-full" style={{ left: item.offset * pixelsPerDay, width: item.days * pixelsPerDay }}>{item.label}</div>))}
-          {/* Today tick in lower tier */}
+          {lowerTier.map((item, i) => (
+            <div key={i} className="absolute flex items-center justify-center text-[10px] text-gray-400 font-medium border-l border-gray-200 h-full" style={{ left: item.offset * pixelsPerDay, width: item.days * pixelsPerDay }}>
+              {item.label}
+            </div>
+          ))}
           {showToday && (
             <div className="absolute top-0 bottom-0 w-0.5 bg-red-500 pointer-events-none" style={{ left: todayX }} />
           )}
@@ -1333,8 +1402,14 @@ function GanttChartContent() {
                               onDropConnection={(toId: string) => {
                                 if (!drawingDep || drawingDep.fromId === toId) { setDrawingDep(null); return; }
                                 const type = drawingDep.fromSide === "start" ? "SS" : "FS";
-                                setDeps(p => [...p.filter(d => !(d.from === drawingDep.fromId && d.to === toId)), { from: drawingDep.fromId, to: toId, type, label: type }]);
+                                const fromId = drawingDep.fromId;
+                                setDeps(p => [...p.filter(d => !(d.from === fromId && d.to === toId)), { from: fromId, to: toId, type, label: type }]);
                                 setDrawingDep(null);
+                                if (real && workspaceId) {
+                                  createTaskDependency({ workspaceId, predecessorId: fromId, successorId: toId, dependencyType: type })
+                                    .then(r => { if (r) setDepIds(p => ({ ...p, [depIdKey(fromId, toId)]: r.id })); })
+                                    .catch(console.error);
+                                }
                               }}
                             />
                           ];
@@ -1357,8 +1432,14 @@ function GanttChartContent() {
                                 onDropConnection={(toId: string) => {
                                   if (!drawingDep || drawingDep.fromId === toId) { setDrawingDep(null); return; }
                                   const type = drawingDep.fromSide === "start" ? "SS" : "FS";
-                                  setDeps(p => [...p.filter(d => !(d.from === drawingDep.fromId && d.to === toId)), { from: drawingDep.fromId, to: toId, type, label: type }]);
+                                  const fromId = drawingDep.fromId;
+                                  setDeps(p => [...p.filter(d => !(d.from === fromId && d.to === toId)), { from: fromId, to: toId, type, label: type }]);
                                   setDrawingDep(null);
+                                  if (real && workspaceId) {
+                                    createTaskDependency({ workspaceId, predecessorId: fromId, successorId: toId, dependencyType: type })
+                                      .then(r => { if (r) setDepIds(p => ({ ...p, [depIdKey(fromId, toId)]: r.id })); })
+                                      .catch(console.error);
+                                  }
                                 }}
                               />
                             ));
@@ -1382,7 +1463,15 @@ function GanttChartContent() {
                 criticalPathTasks={criticalPathTasks}
                 drawingDep={drawingDep}
                 mousePos={mousePos}
-                onDeleteDep={(i: number) => setDeps(p => p.filter((_, idx) => idx !== i))}
+                onDeleteDep={(i: number) => {
+                  const dep = deps[i];
+                  setDeps(p => p.filter((_, idx) => idx !== i));
+                  if (real && dep) {
+                    const bid = depIds[depIdKey(dep.from, dep.to)];
+                    if (bid) deleteTaskDependency(bid).catch(console.error);
+                    setDepIds(p => { const n = { ...p }; delete n[depIdKey(dep.from, dep.to)]; return n; });
+                  }
+                }}
                 onChangeDep={handleChangeDep}
               />
             </div>
