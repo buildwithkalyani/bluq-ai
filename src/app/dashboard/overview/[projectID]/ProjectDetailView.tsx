@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   STATUS_CONFIG,
   type Project,
@@ -57,6 +58,7 @@ export function ProjectDetailView({
   wrapperClassName = "",
 }: ProjectDetailViewProps) {
   const [showInfo, setShowInfo] = useState(false);
+  const router = useRouter();
 
   const linkedContractorsCount = new Set(CONTRACTORS.map(c => c.name)).size;
 
@@ -96,7 +98,7 @@ export function ProjectDetailView({
           </button>
         </div>
         <div className="flex gap-2">
-          <Btn small>📄 Generate DPR</Btn>
+          <Btn small onClick={() => router.push(`/dashboard/dpr?projectId=${proj.id}`)}>📄 Generate DPR</Btn>
           <Btn small>⚙️ Settings</Btn>
         </div>
       </div>

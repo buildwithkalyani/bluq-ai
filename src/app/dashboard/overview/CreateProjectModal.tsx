@@ -28,10 +28,6 @@ export default function CreateProjectModal({ onClose, onCreate }: Props) {
       setError("Please fill in all required fields.");
       return;
     }
-    if (endDate <= startDate) {
-      setError("End date must be after start date.");
-      return;
-    }
 
     setSaving(true);
     setError("");
@@ -153,7 +149,7 @@ export default function CreateProjectModal({ onClose, onCreate }: Props) {
             </div>
             <div>
               <label className={labelClass}>End Date *</label>
-              <input type="date" className={inputClass} value={endDate} onChange={e => setEndDate(e.target.value)} />
+              <input type="date" className={inputClass} value={endDate} min={startDate || undefined} onChange={e => setEndDate(startDate && e.target.value < startDate ? startDate : e.target.value)} />
             </div>
           </div>
 

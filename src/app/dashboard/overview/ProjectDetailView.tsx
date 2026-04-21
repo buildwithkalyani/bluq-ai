@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
   STATUS_CONFIG,
   getScheduleTasks,
@@ -35,6 +36,7 @@ export default function ProjectDetailView({
 }: ProjectDetailViewProps) {
   const [showInfo, setShowInfo] = useState(false);
   const [tasks, setTasks] = useState<ScheduleTask[]>([]);
+  const router = useRouter();
   const [issues, setIssues] = useState<ProjectIssue[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -105,7 +107,7 @@ export default function ProjectDetailView({
           </button>
         </div>
         <div className="flex gap-2">
-          <Btn small>📄 Generate DPR</Btn>
+          <Btn small onClick={() => router.push(`/dashboard/dpr?projectId=${proj.id}`)}>📄 Generate DPR</Btn>
           <Btn small>⚙️ Settings</Btn>
         </div>
       </div>

@@ -13,10 +13,11 @@ const Card = ({ children, className = "", style }: { children: React.ReactNode; 
 
 function SCurveContent() {
   const searchParams = useSearchParams();
-  const { isDesignMode, workspaceId: ctxWorkspaceId } = useWorkspace();
+  const { isDesignMode, workspaceId: ctxWorkspaceId, loading: wsLoading } = useWorkspace();
   const projectIdParam = searchParams.get("projectId") ?? "0";
-  const workspaceId = searchParams.get("workspaceId") ?? ctxWorkspaceId;
-  const real = !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
+  const urlWs = searchParams.get("workspaceId");
+  const workspaceId = (urlWs && urlWs !== "null") ? urlWs : ctxWorkspaceId;
+  const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
 
   const [startDate, setStartDate] = useState("2026-03-01");
   const [endDate, setEndDate] = useState("2026-04-15");

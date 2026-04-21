@@ -66,13 +66,40 @@ export default function OnboardingPage() {
   const handleContinue = async () => {
     setApiError("");
 
-    // Step 0: Create org
+    // Step 0: Create org + upload logo if provided
     if (step === 0) {
       if (!orgName.trim()) return;
       setSaving(true);
       try {
         const org = await apiPost("/orgs", { name: orgName.trim() });
         setCreatedWorkspaceId(org.id);
+
+        if (logoFile) {
+          const token = await getAuthToken();
+          const urlRes = await fetch(
+            `${backendUrl}/orgs/logo-upload-url?orgId=${encodeURIComponent(org.id)}&fileName=${encodeURIComponent(logoFile.name)}`,
+            { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+          );
+          if (urlRes.ok) {
+            const { signedUrl, publicUrl } = await urlRes.json();
+            const uploadRes = await fetch(signedUrl, {
+              method: "PUT",
+              headers: { "Content-Type": logoFile.type || "image/png" },
+              body: logoFile,
+            });
+            if (uploadRes.ok) {
+              await fetch(`${backendUrl}/orgs/${org.id}`, {
+                method: "PATCH",
+                headers: {
+                  "Content-Type": "application/json",
+                  ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
+                body: JSON.stringify({ logoUrl: publicUrl }),
+              });
+            }
+          }
+        }
+
         setStep(1);
       } catch (err: any) {
         setApiError(err.message);

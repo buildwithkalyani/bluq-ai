@@ -4,13 +4,15 @@
 // Manages file references for project documents.
 //
 // Flow:
-//   1. Aishna's frontend uploads file to Supabase Storage → gets a URL
-//   2. Frontend calls POST /documents with that URL + metadata
-//   3. This route saves the reference to the documents table
-//   4. When PM clicks "Generate Schedule", the worker queries this table
-//      to know which files to download and parse
+//   1. Frontend calls GET /documents/upload-url → gets signed upload URL
+//   2. Frontend PUTs file directly to Supabase Storage using signed URL
+//   3. Frontend calls POST /documents with storage path + metadata
+//   4. This route saves the reference to the documents table
+//   5. When PM clicks "Generate Schedule", worker queries this table,
+//      generates signed download URLs, and fetches files
 //
 // Endpoints:
+//   GET    /documents/upload-url                     → get signed upload URL
 //   GET    /documents?projectId=xxx&workspaceId=yyy  → list project docs
 //   POST   /documents                                → save new doc reference
 //   DELETE /documents/:id                            → remove a doc reference
@@ -43,7 +45,56 @@ function getFileExtension(fileName: string): string {
   return fileName.slice(lastDot).toLowerCase();
 }
 
+const DOCUMENTS_BUCKET = "documents";
+
 export async function documentsRoute(app: FastifyInstance) {
+
+  // =========================================================================
+  // GET /documents/upload-url — generate a signed upload URL for private bucket
+  // =========================================================================
+  app.get("/documents/upload-url", async (request, reply) => {
+    const { fileName, workspaceId, projectId } = request.query as {
+      fileName: string;
+      workspaceId: string;
+      projectId: string;
+    };
+
+    if (!fileName || !workspaceId || !projectId) {
+      return reply.status(400).send({ error: "fileName, workspaceId, projectId required" });
+    }
+    if (!UUID_REGEX.test(workspaceId) || !UUID_REGEX.test(projectId)) {
+      return reply.status(400).send({ error: "workspaceId and projectId must be valid UUIDs" });
+    }
+
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!supabaseUrl || !serviceRoleKey) {
+      return reply.status(500).send({ error: "Storage not configured" });
+    }
+
+    const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const storagePath = `${workspaceId}/${projectId}/${Date.now()}-${safeName}`;
+
+    const res = await fetch(
+      `${supabaseUrl}/storage/v1/object/upload/sign/${DOCUMENTS_BUCKET}/${storagePath}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${serviceRoleKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ expiresIn: 300 }), // 5 min to complete upload
+      }
+    );
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({})) as { message?: string };
+      return reply.status(500).send({ error: body.message ?? "Failed to generate upload URL" });
+    }
+
+    const { url } = await res.json() as { url: string };
+    return { signedUrl: `${supabaseUrl}/storage/v1${url}`, storagePath };
+  });
 
   // =========================================================================
   // GET /documents — list all documents for a project

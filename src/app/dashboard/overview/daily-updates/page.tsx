@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import {
   getDoneYesterday,
   getTodoToday,
@@ -104,6 +104,7 @@ const ProjectDropdown = ({ options, selected, onChange }: { options: BackendProj
 // ─── MAIN COMPONENT ───────────────────────────────────────────
 function DailyUpdatesInner() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { workspaceId, loading: wsLoading, isDesignMode } = useWorkspace();
 
   // URL params override (e.g. share links) — fall back to workspace context
@@ -173,7 +174,7 @@ function DailyUpdatesInner() {
         <div className="text-[15px] font-bold text-[#24292f]">Daily Updates</div>
         <div className="flex gap-2 items-center">
           <ProjectDropdown options={projects} selected={selectedProjectId} onChange={setSelectedProjectId} />
-          <button className="bg-[#3A4EA2] text-white border-none rounded-md px-4 py-1.5 text-sm font-semibold cursor-pointer">📄 Generate DPR</button>
+          <button onClick={() => router.push(`/dashboard/dpr?projectId=${selectedProjectId}`)} className="bg-[#3A4EA2] text-white border-none rounded-md px-4 py-1.5 text-sm font-semibold cursor-pointer">📄 Generate DPR</button>
         </div>
       </div>
 
