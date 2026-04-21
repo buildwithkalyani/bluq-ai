@@ -76,6 +76,9 @@ function InvitePage() {
   if (!invite) return null;
 
   const isWrongAccount = session && session.user?.email?.toLowerCase() !== invite.email.toLowerCase();
+  const inviteRedirect = encodeURIComponent(`/invite?token=${token}`);
+  const loginUrl = `/login?redirect=${inviteRedirect}`;
+  const signupUrl = `/signup?email=${encodeURIComponent(invite.email)}&redirect=${inviteRedirect}`;
 
   return (
     <div className="min-h-screen bg-[#f6f8fa] flex items-center justify-center p-4">
@@ -102,13 +105,13 @@ function InvitePage() {
         {!session ? (
           <div className="flex flex-col gap-3">
             <button
-              onClick={() => router.push(`/login?redirect=${encodeURIComponent(`/invite?token=${token}`)}`)}
+              onClick={() => router.push(loginUrl)}
               className="w-full bg-[#3A4EA2] text-white font-semibold py-2.5 rounded-lg text-sm hover:bg-[#2d3d8a] transition-colors"
             >
               Log in to accept invite
             </button>
             <button
-              onClick={() => router.push(`/signup?email=${encodeURIComponent(invite.email)}&redirect=${encodeURIComponent(`/invite?token=${token}`)}`)}
+              onClick={() => router.push(signupUrl)}
               className="w-full bg-white border border-[#D0D7DE] text-[#24292f] font-semibold py-2.5 rounded-lg text-sm hover:bg-[#f6f8fa] transition-colors"
             >
               Create a new account
@@ -116,7 +119,7 @@ function InvitePage() {
           </div>
         ) : isWrongAccount ? (
           <button
-            onClick={() => authClient.signOut().then(() => router.push(`/login?redirect=${encodeURIComponent(`/invite?token=${token}}`)`))}
+            onClick={() => authClient.signOut().then(() => router.push(loginUrl))}
             className="w-full bg-white border border-[#D0D7DE] text-[#24292f] font-semibold py-2.5 rounded-lg text-sm hover:bg-[#f6f8fa] transition-colors"
           >
             Log out and switch account
