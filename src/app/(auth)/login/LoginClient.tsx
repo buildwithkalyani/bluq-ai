@@ -18,7 +18,10 @@ function LoginForm() {
   const [success, setSuccess] = useState("");
 
   const handleGoogleLogin = async () => {
-    await authClient.signIn.social({ provider: "google", callbackURL: redirect });
+    const result = await authClient.signIn.social({ provider: "google", callbackURL: redirect });
+    if (result?.error) {
+      setError(result.error.message || "Google sign-in failed.");
+    }
   };
 
   const handleSendOtp = async (e: React.FormEvent) => {
