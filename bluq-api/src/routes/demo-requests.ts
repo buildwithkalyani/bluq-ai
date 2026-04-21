@@ -100,13 +100,27 @@ async function sendInternalNotification(req: {
         to: [notifyEmail],
         subject: req.source === "signup"
           ? `New signup request — ${req.companyName}`
+          : req.source === "contact"
+          ? `New contact message from ${req.name || req.companyName}`
           : `New demo request from ${req.companyName}`,
         html: (() => {
+          const isContact = req.source === "contact";
           const isSignup = req.source === "signup";
           const approveUrl = isSignup && req.id
             ? `${process.env.BETTER_AUTH_URL?.replace("https://bluq.ai", process.env.API_URL || "https://bluq-api.railway.app") || "https://bluq-api.railway.app"}/demo-requests/${req.id}/approve?secret=${encodeURIComponent(process.env.ADMIN_SECRET || "")}`
             : null;
-          return `
+          return isContact ? `
+          <div style="font-family: sans-serif; max-width: 560px; color: #1a1a1a;">
+            <h2 style="color: #3A4EA2;">Contact Form Message</h2>
+            <table style="width: 100%; border-collapse: collapse;">
+              ${req.name ? `<tr><td style="padding: 8px 0; font-weight: 600;">Name</td><td style="padding: 8px 0;">${escapeHtml(req.name)}</td></tr>` : ""}
+              ${req.role ? `<tr><td style="padding: 8px 0; font-weight: 600;">Role</td><td style="padding: 8px 0;">${escapeHtml(req.role)}</td></tr>` : ""}
+              <tr><td style="padding: 8px 0; font-weight: 600;">Email</td><td style="padding: 8px 0;">${escapeHtml(req.email)}</td></tr>
+              ${req.companyName && req.companyName !== "unknown" ? `<tr><td style="padding: 8px 0; font-weight: 600;">Company</td><td style="padding: 8px 0;">${escapeHtml(req.companyName)}</td></tr>` : ""}
+              ${req.message ? `<tr><td style="padding: 8px 0; font-weight: 600; vertical-align: top;">Message</td><td style="padding: 8px 0; line-height: 1.6;">${escapeHtml(req.message)}</td></tr>` : ""}
+            </table>
+          </div>
+          ` : `
           <div style="font-family: sans-serif; max-width: 560px; color: #1a1a1a;">
             <h2 style="color: #3A4EA2;">${isSignup ? "New Signup Request" : "New Demo Request"}</h2>
             <table style="width: 100%; border-collapse: collapse;">
@@ -219,13 +233,15 @@ export async function demoRequestsRoute(app: FastifyInstance) {
         })
         .returning();
 
-      const emailSent = await sendConfirmationEmail(demoRequest.email, demoRequest.companyName);
-
-      if (emailSent) {
-        await db
-          .update(demoRequests)
-          .set({ emailSent: true })
-          .where(eq(demoRequests.id, demoRequest.id));
+      let emailSent = false;
+      if (body.source !== "contact" && body.source !== "signup") {
+        emailSent = await sendConfirmationEmail(demoRequest.email, demoRequest.companyName);
+        if (emailSent) {
+          await db
+            .update(demoRequests)
+            .set({ emailSent: true })
+            .where(eq(demoRequests.id, demoRequest.id));
+        }
       }
 
       // Log approve URL for local dev testing
