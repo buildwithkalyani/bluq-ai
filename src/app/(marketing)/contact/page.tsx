@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import MobileNav from "../components/MobileNav";
 
 export default function Contact() {
   const [success, setSuccess] = useState(false);
@@ -50,6 +51,15 @@ export default function Contact() {
             <a href="/contact" className="active">contact</a>
             <a href="/#demo" className="m-btn demo-nav">book demo <span className="m-btn-arrow">→</span></a>
           </div>
+          <MobileNav links={[
+            { href: "/", label: "home" },
+            { href: "/#problem", label: "problems" },
+            { href: "/#product", label: "product" },
+            { href: "/#features", label: "features" },
+            { href: "/about", label: "about" },
+            { href: "/contact", label: "contact", active: true },
+            { href: "/#demo", label: "book demo →" },
+          ]} />
         </div>
       </nav>
 
