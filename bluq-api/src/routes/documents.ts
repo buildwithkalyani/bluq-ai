@@ -22,10 +22,10 @@ import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
 import { documents } from "../db/schema.js";
 import { eq, and, desc } from "drizzle-orm";
+import { verifySession } from "../lib/verifySession.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Allowed file extensions for schedule generation
 const ALLOWED_EXTENSIONS = new Set([
   ".pdf", ".docx", ".xlsx", ".xls", ".csv",
   ".jpg", ".jpeg", ".png", ".webp",
@@ -39,10 +39,28 @@ const REJECTED_EXTENSIONS: Record<string, string> = {
   ".rvt": "Revit files cannot be processed. Please export as PDF: File → Export → PDF.",
 };
 
+// 50 MB max upload size
+const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+
 function getFileExtension(fileName: string): string {
   const lastDot = fileName.lastIndexOf(".");
   if (lastDot === -1) return "";
   return fileName.slice(lastDot).toLowerCase();
+}
+
+function isValidStoragePath(fileUrl: string, workspaceId: string, projectId: string): boolean {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  if (!supabaseUrl) return false;
+  // Must start with our Supabase URL and contain the correct workspace/project path
+  const prefix = `${supabaseUrl}/storage/v1/object/`;
+  if (!fileUrl.startsWith(prefix)) return false;
+  // Must contain the expected path segment to prevent path traversal
+  const encodedWorkspace = encodeURIComponent(workspaceId);
+  const encodedProject = encodeURIComponent(projectId);
+  return (
+    fileUrl.includes(`/${workspaceId}/${projectId}/`) ||
+    fileUrl.includes(`/${encodedWorkspace}/${encodedProject}/`)
+  );
 }
 
 const DOCUMENTS_BUCKET = "documents";
@@ -52,11 +70,12 @@ export async function documentsRoute(app: FastifyInstance) {
   // =========================================================================
   // GET /documents/upload-url — generate a signed upload URL for private bucket
   // =========================================================================
-  app.get("/documents/upload-url", async (request, reply) => {
-    const { fileName, workspaceId, projectId } = request.query as {
+  app.get("/documents/upload-url", { preHandler: verifySession }, async (request, reply) => {
+    const { fileName, workspaceId, projectId, fileSize } = request.query as {
       fileName: string;
       workspaceId: string;
       projectId: string;
+      fileSize?: string;
     };
 
     if (!fileName || !workspaceId || !projectId) {
@@ -64,6 +83,20 @@ export async function documentsRoute(app: FastifyInstance) {
     }
     if (!UUID_REGEX.test(workspaceId) || !UUID_REGEX.test(projectId)) {
       return reply.status(400).send({ error: "workspaceId and projectId must be valid UUIDs" });
+    }
+
+    // Block rejected/unsupported extensions before upload
+    const ext = getFileExtension(fileName);
+    if (REJECTED_EXTENSIONS[ext]) {
+      return reply.status(400).send({ error: "Unsupported file format", suggestion: REJECTED_EXTENSIONS[ext] });
+    }
+    if (ext && !ALLOWED_EXTENSIONS.has(ext)) {
+      return reply.status(400).send({ error: `File type ${ext} is not allowed.` });
+    }
+
+    // Enforce size limit (client-reported, enforced again on POST /documents)
+    if (fileSize && parseInt(fileSize) > MAX_FILE_SIZE_BYTES) {
+      return reply.status(400).send({ error: "File exceeds 50 MB limit." });
     }
 
     const supabaseUrl = process.env.SUPABASE_URL;
@@ -99,7 +132,7 @@ export async function documentsRoute(app: FastifyInstance) {
   // =========================================================================
   // GET /documents — list all documents for a project
   // =========================================================================
-  app.get("/documents", async (request, reply) => {
+  app.get("/documents", { preHandler: verifySession }, async (request, reply) => {
     try {
       const { projectId, workspaceId } = request.query as {
         projectId: string;
@@ -134,7 +167,7 @@ export async function documentsRoute(app: FastifyInstance) {
   // =========================================================================
   // POST /documents — save a new document reference
   // =========================================================================
-  app.post("/documents", async (request, reply) => {
+  app.post("/documents", { preHandler: verifySession }, async (request, reply) => {
     try {
       const body = request.body as {
         workspaceId: string;
@@ -148,35 +181,32 @@ export async function documentsRoute(app: FastifyInstance) {
         uploadedBy?: string;
       };
 
-      // Validate required fields
       if (!body.workspaceId || !body.projectId || !body.fileName || !body.fileUrl) {
-        return reply.status(400).send({
-          error: "workspaceId, projectId, fileName, and fileUrl are required",
-        });
+        return reply.status(400).send({ error: "workspaceId, projectId, fileName, and fileUrl are required" });
       }
       if (!UUID_REGEX.test(body.workspaceId) || !UUID_REGEX.test(body.projectId)) {
-        return reply.status(400).send({
-          error: "workspaceId and projectId must be valid UUIDs",
-        });
+        return reply.status(400).send({ error: "workspaceId and projectId must be valid UUIDs" });
       }
 
-      // Check file extension
+      // Validate fileUrl points to our Supabase storage (prevent arbitrary URL injection)
+      if (!isValidStoragePath(body.fileUrl, body.workspaceId, body.projectId)) {
+        return reply.status(400).send({ error: "Invalid file URL." });
+      }
+
+      // Re-validate extension (defence-in-depth — upload-url already checks but client could bypass)
       const ext = getFileExtension(body.fileName);
-
-      // Reject unsupported formats with helpful message
       if (REJECTED_EXTENSIONS[ext]) {
-        return reply.status(400).send({
-          error: "Unsupported file format",
-          suggestion: REJECTED_EXTENSIONS[ext],
-        });
+        return reply.status(400).send({ error: "Unsupported file format", suggestion: REJECTED_EXTENSIONS[ext] });
       }
-
-      // Warn about unknown formats (but still allow — might be valid)
       if (ext && !ALLOWED_EXTENSIONS.has(ext)) {
-        console.warn(`[documents] Unknown file extension: ${ext} for ${body.fileName}`);
+        return reply.status(400).send({ error: `File type ${ext} is not allowed.` });
       }
 
-      // Detect file type from extension if not provided
+      // Re-enforce size limit
+      if (body.fileSize && body.fileSize > MAX_FILE_SIZE_BYTES) {
+        return reply.status(400).send({ error: "File exceeds 50 MB limit." });
+      }
+
       const fileType = body.fileType || ext.replace(".", "") || "unknown";
 
       const [newDoc] = await db
@@ -204,16 +234,22 @@ export async function documentsRoute(app: FastifyInstance) {
   // =========================================================================
   // DELETE /documents/:id — remove a document reference
   // =========================================================================
-  app.delete("/documents/:id", async (request, reply) => {
+  app.delete("/documents/:id", { preHandler: verifySession }, async (request, reply) => {
     try {
       const { id } = request.params as { id: string };
+      const { workspaceId } = request.query as { workspaceId?: string };
+
       if (!UUID_REGEX.test(id)) {
         return reply.status(400).send({ error: "id must be a valid UUID" });
       }
+      if (!workspaceId || !UUID_REGEX.test(workspaceId)) {
+        return reply.status(400).send({ error: "workspaceId required" });
+      }
 
+      // Ownership check — only delete if doc belongs to the caller's workspace
       const [deleted] = await db
         .delete(documents)
-        .where(eq(documents.id, id))
+        .where(and(eq(documents.id, id), eq(documents.workspaceId, workspaceId)))
         .returning();
 
       if (!deleted) {
