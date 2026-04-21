@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import MobileNav from "../components/MobileNav";
+import MobileAccordion from "../components/MobileAccordion";
 
 export default function Contact() {
   const [success, setSuccess] = useState(false);
@@ -135,6 +136,13 @@ export default function Contact() {
             <div className="eye">quick answers</div>
             <h2>before you <span className="serif-it">write to us.</span></h2>
           </div>
+          <MobileAccordion variant="beliefs" items={[
+            { label: "Q1", heading: "how long is a demo?", body: "30 minutes. Bring your actual project file and we walk through BluQ on your real schedule, not a sandbox. You leave knowing exactly what changes on day one." },
+            { label: "Q2", heading: "what file formats can we import?", body: "MS Project (.mpp) and Excel (.xlsx). All tasks, baselines, and resources preserved. Or drop your drawings and BOQ and BluQ will build the schedule from scratch." },
+            { label: "Q3", heading: "how fast can we go live?", body: "One afternoon. 10 minutes to import your schedule, 30 minutes to connect your site team on WhatsApp, first DPR sent to your client that evening." },
+            { label: "Q4", heading: "what does early access mean?", body: "Direct line to the product team. Priority onboarding. Pricing locked for life. And a real say in what we build next. Early access clients have shaped every major feature so far." },
+          ]} />
+
           <div className="m-faq-grid">
             <div className="m-faq-item">
               <h4>how long is a demo?</h4>

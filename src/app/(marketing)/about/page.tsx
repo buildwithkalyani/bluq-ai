@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import MobileNav from "../components/MobileNav";
 import MobileAccordion from "../components/MobileAccordion";
-import MobileStory from "../components/MobileStory";
 
 export const metadata: Metadata = {
   title: "about · bluq",
@@ -55,33 +54,32 @@ export default function About() {
         </div>
       </section>
 
-      {/* STORY — mobile collapsible */}
-      <MobileStory items={[
-        { label: "the gap", paragraphs: [
-          "98% of major construction projects run over time or over budget. Most of those delays are not bad luck. They are information arriving too late.",
-          "A delay that will hit you on Friday is already visible in your site data on Wednesday. BluQ reads the signals 48 hours early and tells you exactly how to stop it.",
-        ]},
-        { label: "what we're building", paragraphs: [
-          "Your site engineer sends his evening WhatsApp update. By end of day, your schedule is updated, your delay is caught, and the DPR is on its way to your client. Nobody typed a report. Nobody filled a form.",
-          "Most delays are stoppable. But only if you know about them while there is still time to act. BluQ gives you that time.",
-        ]},
-      ]} />
-
-      {/* STORY — desktop */}
-      <section className="m-story m-story-desktop">
+      {/* STORY */}
+      <section className="m-story">
         <div className="m-wrap">
           <div className="m-story-row">
             <div className="label">the gap</div>
             <div className="body">
-              <p>98% of major construction projects run over time or over budget. Most of those delays are not bad luck. They are information arriving too late.</p>
-              <p>A delay that will hit you on Friday is already visible in your site data on Wednesday. BluQ reads the signals 48 hours early and tells you exactly how to stop it.</p>
+              <span className="story-desktop">
+                <p>98% of major construction projects run over time or over budget. Most of those delays are not bad luck. They are information arriving too late.</p>
+                <p>A delay that will hit you on Friday is already visible in your site data on Wednesday. Most tools wait for it to show up in a report. BluQ reads the signals 48 hours early and tells you exactly how to stop it before it ever touches your schedule.</p>
+              </span>
+              <span className="story-mobile">
+                <p>98% of construction projects run over time or budget. Not bad luck. Information arriving too late. A Friday delay is visible in your site data on Wednesday. BluQ reads it 48 hours early.</p>
+              </span>
             </div>
           </div>
           <div className="m-story-row">
             <div className="label">what we&apos;re building</div>
             <div className="body">
-              <p>Your site engineer sends his evening WhatsApp update. By end of day, your schedule is updated, your delay is caught, and the DPR is on its way to your client. Nobody typed a report. Nobody filled a form.</p>
-              <p>Most delays are stoppable. But only if you know about them while there is still time to act. BluQ gives you that time.</p>
+              <span className="story-desktop">
+                <p>Your site engineer sends his evening WhatsApp update, the same way he always has. By end of day, your schedule is updated, your delay is caught, and the DPR is already on its way to your client. Nobody typed a report. Nobody filled a form.</p>
+                <p>We built BluQ because delays that formed on Tuesday were only showing up in reports on Friday. By then, three days of budget were already gone.</p>
+                <p>Most delays are stoppable. But only if you know about them while there is still time to act. BluQ gives you that time.</p>
+              </span>
+              <span className="story-mobile">
+                <p>Your engineer sends his evening WhatsApp. By end of day, your schedule is updated, your delay is caught, and the DPR is with your client. Nobody typed a report. Nobody filled a form.</p>
+              </span>
             </div>
           </div>
         </div>
