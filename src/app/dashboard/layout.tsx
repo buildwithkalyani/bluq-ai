@@ -636,9 +636,15 @@ function TopNav() {
     <div className="flex items-center justify-between px-6 py-2.5 border-b border-[#D0D7DE] bg-white flex-shrink-0">
       <div className="flex items-center gap-2.5">
         <span className="tracking-tight">
-        <a href="#" className="logo" style={{display:"flex", alignItems:"center", height:"100%"}}>
-  <img src="/bluq-logo.png" alt="BluQ" style={{height:"15px", width:"auto"}} />
-</a>
+        <a href="/" style={{display:"flex", alignItems:"center", gap:"6px", textDecoration:"none"}}>
+          <span style={{display:"flex", alignItems:"center", justifyContent:"center", width:"22px", height:"22px", background:"#0D1117", borderRadius:"4px"}}>
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14">
+              <path d="M4 20 L4 10 L12 4 L20 10 L20 20" stroke="#F4F1E8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M9 20 L9 14 L15 14 L15 20" stroke="#F4F1E8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </span>
+          <span style={{fontFamily:"monospace", fontWeight:600, fontSize:"13px", color:"#24292f", letterSpacing:"-0.03em"}}>blu<span style={{color:"#3A4EA2"}}>Q</span></span>
+        </a>
         </span>
         <span className="text-[#D0D7DE]">/</span>
         <Link href={nav.href} className="text-[13px] text-[#57606a] hover:text-[#24292f] hover:underline transition-colors">{nav.label}</Link>
