@@ -113,7 +113,7 @@ async function start() {
   startSchedulerWorker();
   startWhatsappWorker();
   startPdfWorker();
-  await startCronWorker();
+  startCronWorker();
 
   // =========================================================================
   // START SERVER

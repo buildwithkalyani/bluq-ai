@@ -81,8 +81,9 @@ export function startPdfWorker() {
     },
     {
       connection: redisConnection,
-      concurrency: 1,                        // PDFs are memory-heavy, one at a time
-      stalledInterval: 300_000,              // check stalled jobs every 5 min
+      concurrency: 1,
+      drainDelay: 30,
+      stalledInterval: 600_000,
       lockDuration: 300_000,
       removeOnComplete: { count: 100 },
       removeOnFail: { count: 50 },

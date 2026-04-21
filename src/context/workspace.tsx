@@ -46,10 +46,35 @@ async function getAuthToken(): Promise<string> {
   return session?.data?.session?.token ?? "";
 }
 
+const WS_CACHE_KEY = "bluq_workspace";
+
+function readWorkspaceCache(): { id: string; name: string } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(WS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeWorkspaceCache(id: string, name: string): void {
+  try {
+    localStorage.setItem(WS_CACHE_KEY, JSON.stringify({ id, name }));
+  } catch {}
+}
+
+function clearWorkspaceCache(): void {
+  try {
+    localStorage.removeItem(WS_CACHE_KEY);
+  } catch {}
+}
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
-  const [orgName, setOrgName] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const cached = readWorkspaceCache();
+  const [workspaceId, setWorkspaceId] = useState<string | null>(cached?.id ?? null);
+  const [orgName, setOrgName] = useState<string | null>(cached?.name ?? null);
+  const [loading, setLoading] = useState(cached === null); // skip loading if cache hit
   const { data: session } = authClient.useSession();
   const isDesignMode = DESIGN_ACCOUNTS.includes(session?.user?.email ?? "");
   const router = useRouter();
@@ -59,6 +84,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (session === undefined) return;
 
     if (!session?.user) {
+      clearWorkspaceCache();
       setLoading(false);
       return;
     }
@@ -78,13 +104,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           if (first) {
             setWorkspaceId(first.id);
             setOrgName(first.name);
-          } else if (pathname !== "/onboarding" && !pathname.startsWith("/invite")) {
-            router.replace("/onboarding");
+            writeWorkspaceCache(first.id, first.name);
+          } else {
+            clearWorkspaceCache();
+            if (pathname !== "/onboarding" && !pathname.startsWith("/invite")) {
+              router.replace("/onboarding");
+            }
           }
         })
         .catch((err) => {
           console.error("workspace fetch error:", err.message);
-          if (pathname !== "/onboarding" && !pathname.startsWith("/invite")) {
+          // keep cached value on network error — don't redirect if we have stale data
+          if (!workspaceId && pathname !== "/onboarding" && !pathname.startsWith("/invite")) {
             router.replace("/onboarding");
           }
         })

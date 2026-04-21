@@ -95,9 +95,10 @@ export function startSchedulerWorker() {
     },
     {
       connection: redisConnection,
-      concurrency: 2,             // process up to 2 jobs at once
-      stalledInterval: 300_000,   // check stalled jobs every 5 min (default ~30s)
-      lockDuration: 300_000,      // lock held for 5 min, matches stalledInterval
+      concurrency: 2,
+      drainDelay: 30,
+      stalledInterval: 600_000,
+      lockDuration: 300_000,
       removeOnComplete: { count: 50 },  // keep last 50 completed jobs
       removeOnFail: { count: 20 },      // keep last 20 failed jobs
     }
