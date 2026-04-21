@@ -175,9 +175,63 @@
 .m-btn:hover .m-btn-arrow { transform: translateX(3px); }
 
 @media (max-width: 900px) {
-  .m-nav-links a:not(.demo-nav) { display: none; }
+  .m-nav-links { display: none; }
   .m-nav-chip { display: none; }
 }
+
+/* HAMBURGER */
+.m-hamburger {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+  width: 36px;
+  height: 36px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+}
+.m-hamburger .bar {
+  display: block;
+  width: 20px;
+  height: 1.5px;
+  background: var(--ink);
+  border-radius: 2px;
+  transition: transform 0.2s, opacity 0.2s;
+}
+.m-hamburger .bar-1.open { transform: translateY(6.5px) rotate(45deg); }
+.m-hamburger .bar-2.open { opacity: 0; }
+.m-hamburger .bar-3.open { transform: translateY(-6.5px) rotate(-45deg); }
+@media (max-width: 900px) { .m-hamburger { display: flex; } }
+
+/* MOBILE MENU DROPDOWN */
+.m-mobile-menu {
+  position: fixed;
+  top: 57px;
+  left: 0;
+  right: 0;
+  background: rgba(244,241,232,0.98);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  z-index: 99;
+  padding: 8px 0 16px;
+}
+.m-mobile-menu a {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink-2);
+  text-decoration: none;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--line);
+  transition: color 0.15s;
+}
+.m-mobile-menu a:last-child { border-bottom: none; color: var(--ink); font-weight: 600; }
+.m-mobile-menu a.active { color: var(--cobalt); }
+.m-mobile-menu a:hover { color: var(--ink); }
 
 /* HERO */
 .m-hero {
@@ -1059,4 +1113,343 @@
   .m-faq-grid { grid-template-columns: 1fr; }
   .m-faq-item { padding: 24px 0 !important; border-right: none !important; }
   .m-faq-item:last-child { border-bottom: none; }
+}
+
+/* ── MOBILE SECTION VARIANTS (hidden by default, shown ≤640px) ── */
+.m-acc-list,
+.m-mob-tabs { display: none; }
+
+@keyframes acc-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* --- PROBLEMS: bold tap-cards with left accent bar --- */
+.m-acc-problems { display: none; flex-direction: column; gap: 10px; }
+.m-prob-card {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 16px;
+  cursor: pointer;
+  border-left: 3px solid var(--line-2);
+  transition: border-color 0.2s ease;
+}
+.m-prob-card.open { border-left-color: var(--red); background: rgba(200,56,32,0.04); }
+.m-prob-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.m-prob-card-label {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  color: var(--red);
+  opacity: 0.7;
+}
+.m-prob-card-arrow { font-family: var(--mono); font-size: 16px; color: var(--ink-3); }
+.m-prob-card-heading {
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+  color: var(--ink);
+}
+.m-prob-card-body {
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.6;
+  margin-top: 10px;
+  animation: acc-in 0.18s ease;
+}
+
+/* --- FEATURES: 2-col tile grid, tap to expand --- */
+.m-acc-features { display: none; }
+.m-feat-grid-mob {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.m-feat-tile {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 14px 12px;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.m-feat-tile.open {
+  background: var(--cobalt);
+  border-color: var(--cobalt);
+  grid-column: 1 / -1;
+}
+.m-feat-tile-icon {
+  width: 20px;
+  height: 20px;
+  margin-bottom: 8px;
+}
+.m-feat-tile-icon svg {
+  width: 20px;
+  height: 20px;
+  stroke: var(--ink-3);
+}
+.m-feat-tile.open .m-feat-tile-icon svg { stroke: rgba(255,255,255,0.7); }
+.m-feat-tile-num {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  margin-bottom: 4px;
+}
+.m-feat-tile.open .m-feat-tile-num { color: rgba(255,255,255,0.5); }
+.m-feat-tile-heading {
+  font-family: var(--mono);
+  font-size: 13.5px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  color: var(--ink);
+}
+.m-feat-tile.open .m-feat-tile-heading { color: #fff; }
+.m-feat-tile-body {
+  font-size: 13px;
+  color: rgba(255,255,255,0.8);
+  line-height: 1.6;
+  margin-top: 10px;
+  animation: acc-in 0.18s ease;
+}
+
+/* --- HOW STEPS: vertical stepper with connecting line --- */
+.m-acc-steps { display: none; padding: 8px 0; }
+.m-step-item {
+  display: flex;
+  gap: 14px;
+  position: relative;
+}
+.m-step-line-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  width: 16px;
+}
+.m-step-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--line-2);
+  background: var(--paper);
+  flex-shrink: 0;
+  margin-top: 6px;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.m-step-item.open .m-step-dot {
+  border-color: var(--cobalt);
+  background: var(--cobalt);
+}
+.m-step-line {
+  width: 1px;
+  flex: 1;
+  background: var(--line);
+  margin: 4px 0;
+  min-height: 24px;
+}
+.m-step-right { flex: 1; padding-bottom: 20px; }
+.m-step-trigger {
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}
+.m-step-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.m-step-num {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--cobalt);
+}
+.m-step-label {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  color: var(--ink-3);
+}
+.m-step-heading {
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  line-height: 1.25;
+}
+.m-step-body {
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.6;
+  margin-top: 8px;
+  animation: acc-in 0.18s ease;
+}
+
+/* --- AUDIENCE: tab switcher --- */
+.m-mob-tabs { flex-direction: column; gap: 0; }
+.m-mob-tab-bar {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+.m-mob-tab-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  border-right: 1px solid var(--line);
+  padding: 10px 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.m-mob-tab-btn:last-child { border-right: none; }
+.m-mob-tab-btn.active { background: var(--ink); color: var(--paper); }
+.m-mob-tab-content { animation: acc-in 0.2s ease; }
+.m-mob-tab-idx {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--cobalt);
+  margin-bottom: 8px;
+}
+.m-mob-tab-heading {
+  font-family: var(--mono);
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+  color: var(--ink);
+  margin-bottom: 10px;
+}
+.m-mob-tab-body {
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.6;
+  margin-bottom: 14px;
+}
+.m-mob-tab-bullets { display: flex; flex-direction: column; gap: 6px; }
+.m-mob-tab-bullet {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-2);
+  padding-left: 4px;
+}
+
+/* --- BELIEFS (about page) --- */
+.m-acc-beliefs { display: none; flex-direction: column; }
+.m-belief-acc-item { border-bottom: 1px solid var(--line); }
+.m-belief-acc-item:first-child { border-top: 1px solid var(--line); }
+.m-belief-acc-trigger {
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 16px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  text-align: left;
+}
+.m-belief-acc-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--cobalt);
+  flex-shrink: 0;
+  width: 28px;
+}
+.m-belief-acc-heading {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  line-height: 1.25;
+}
+.m-belief-acc-arrow {
+  font-family: var(--mono);
+  font-size: 16px;
+  color: var(--ink-3);
+  flex-shrink: 0;
+}
+.m-belief-acc-body {
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.6;
+  padding: 0 0 16px 38px;
+  animation: acc-in 0.18s ease;
+}
+
+/* ── MOBILE LAYOUT OPTIMISATION ─────────────────────────── */
+
+@media (max-width: 640px) {
+  /* --- Section padding --- */
+  .m-hero { padding: 32px 0 36px; }
+  .m-hero h1 { font-size: clamp(34px, 10vw, 48px) !important; }
+  .m-hero-sub { font-size: 14px !important; margin-top: 14px !important; }
+  .m-section-head { padding: 32px 0 16px !important; gap: 10px !important; }
+  .m-section-head h2 { font-size: clamp(24px, 7vw, 34px) !important; }
+  .m-features { padding: 4px 0 40px; }
+  .m-problem { padding-bottom: 36px; }
+  .m-section { padding: 36px 0 !important; }
+  .m-cta { padding: 44px 0 50px; }
+  .m-cta-c { padding: 44px 0 50px; }
+  .m-about-hero { padding: 32px 0 24px; }
+  .m-about-hero h1 { font-size: clamp(28px, 8vw, 40px) !important; }
+  .m-story { padding: 28px 0 16px; margin-top: 20px; }
+  .m-story-row { padding: 20px 0; }
+  .m-story-row .body { font-size: clamp(16px, 4.5vw, 20px) !important; }
+  .m-beliefs { padding: 28px 0; }
+  .m-beliefs-head { margin-bottom: 28px; }
+  .m-belief-grid { display: none; }
+  .m-nums { gap: 0 !important; flex-direction: column; }
+  .m-num { padding: 20px 0 !important; border-right: none !important; border-bottom: 1px solid var(--line); }
+  .m-contact-hero { padding: 32px 0 20px; }
+  .m-contact-section { padding: 16px 0 44px; }
+  .m-faq { padding: 28px 0; }
+  .m-faq-grid { gap: 0 !important; }
+  .m-faq-item { padding: 18px 0 !important; border-bottom: 1px solid var(--line); }
+  .m-faq-item:last-child { border-bottom: none; }
+  .m-footer { padding: 36px 0 24px; }
+  .m-foot-grid { gap: 20px !important; }
+
+  /* --- Show mobile variants, hide desktop grids --- */
+  .m-acc-problems { display: flex; }
+  .m-acc-features { display: block; }
+  .m-acc-steps { display: block; }
+  .m-acc-beliefs { display: flex; }
+  .m-mob-tabs { display: flex; }
+  .m-problem-grid { display: none; }
+  .m-aud-grid { display: none; }
+  .m-how-steps { display: none; }
+  .m-feat { display: none; }
+
+  /* --- Hide heavy sections --- */
+  .m-product { display: none; }
+  .m-sitelog-wrap { display: none; }
+  .m-note { display: none; }
+  .m-stats { display: none; }
+
+  /* --- Features heading: hide on mobile, eyebrow is enough --- */
+  .m-features .m-section-head h2 { display: none; }
 }
