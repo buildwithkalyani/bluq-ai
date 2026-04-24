@@ -545,7 +545,7 @@ function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete 
             </div>
             <div>
               <label className={labelCls}>End Date *</label>
-              <input type="date" value={f.endDate} onChange={e => set("endDate", e.target.value)} className={inputCls + " text-[#24292f]"} />
+              <input type="date" value={f.endDate} min={f.startDate || undefined} onChange={e => set("endDate", e.target.value)} className={inputCls + " text-[#24292f]"} />
             </div>
           </div>
 

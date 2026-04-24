@@ -60,7 +60,7 @@ export default function Home() {
               </p>
               <div className="m-hero-cta">
                 <a href="#demo" className="m-btn big">book a 30-min demo <span className="m-btn-arrow">→</span></a>
-                <a href="https://bluq.ai/login" className="m-btn ghost big">login</a>
+                <a href="/login" className="m-btn ghost big">login</a>
                 <span className="m-hero-meta">12 projects live now</span>
               </div>
             </div>

@@ -665,6 +665,18 @@ export async function pollReportStatus(
 // DOCUMENTS — register uploaded file reference
 // ---------------------------------------------------------------------------
 
+/** GET /documents/upload-url → signed Supabase upload URL + storagePath */
+export async function getDocumentUploadUrl(
+  fileName: string,
+  workspaceId: string,
+  projectId: string,
+  fileSize?: number,
+): Promise<{ signedUrl: string; storagePath: string }> {
+  const params = new URLSearchParams({ fileName, workspaceId, projectId });
+  if (fileSize) params.set("fileSize", String(fileSize));
+  return apiFetch(`/documents/upload-url?${params}`);
+}
+
 /** POST /documents — save Supabase Storage URL reference after upload */
 export async function deleteDocument(id: string): Promise<void> {
   const token = await getAuthToken();
