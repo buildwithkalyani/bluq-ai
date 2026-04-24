@@ -1,9 +1,27 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Btn } from "@/components/ui/bluq-ui";
 import { authClient } from "@/lib/auth-client";
+
+const WORK_AREAS = [
+  { id: "excavation",    label: "Excavation & Earthwork" },
+  { id: "foundation",   label: "Foundation" },
+  { id: "structure",    label: "Structure / RCC" },
+  { id: "masonry",      label: "Masonry & Brickwork" },
+  { id: "plumbing",     label: "Plumbing" },
+  { id: "electrical",   label: "Electrical" },
+  { id: "hvac",         label: "HVAC" },
+  { id: "plastering",   label: "Plastering" },
+  { id: "tiling",       label: "Tiling & Flooring" },
+  { id: "painting",     label: "Painting" },
+  { id: "carpentry",    label: "Carpentry & Woodwork" },
+  { id: "glazing",      label: "Glazing & Facade" },
+  { id: "waterproof",   label: "Waterproofing" },
+  { id: "landscaping",  label: "Landscaping" },
+  { id: "finishing",    label: "Interior Finishing" },
+];
 
 const STEPS = [
   { key: "org", label: "Create Org" },
@@ -19,6 +37,7 @@ async function getAuthToken(): Promise<string> {
 
 export default function OnboardingPage() {
   const router = useRouter();
+  const { data: session, isPending: sessionLoading } = authClient.useSession();
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [apiError, setApiError] = useState("");
@@ -29,24 +48,80 @@ export default function OnboardingPage() {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
 
-  // Form states
-  const [orgName, setOrgName] = useState("");
-  const [projectName, setProjectName] = useState("");
-  const [projectAddress, setProjectAddress] = useState("");
-  const [projectStage, setProjectStage] = useState("Foundation");
-  const [projectType, setProjectType] = useState("Residential");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [projectCode, setProjectCode] = useState("");
+  // Form states — initialised from localStorage so Back navigation restores data
+  const [orgName, setOrgName] = useState(() => localStorage.getItem("ob_orgName") ?? "");
+  const [projectName, setProjectName] = useState(() => localStorage.getItem("ob_projectName") ?? "");
+  const [projectAddress, setProjectAddress] = useState(() => localStorage.getItem("ob_projectAddress") ?? "");
+  const [projectStage, setProjectStage] = useState(() => localStorage.getItem("ob_projectStage") ?? "Foundation");
+  const [projectType, setProjectType] = useState(() => localStorage.getItem("ob_projectType") ?? "Residential");
+  const [startDate, setStartDate] = useState(() => localStorage.getItem("ob_startDate") ?? "");
+  const [endDate, setEndDate] = useState(() => localStorage.getItem("ob_endDate") ?? "");
+  const [projectCode, setProjectCode] = useState(() => localStorage.getItem("ob_projectCode") ?? "");
   const [inviteEmail, setInviteEmail] = useState("");
-  const [invites, setInvites] = useState<string[]>([]);
-  const [contractorName, setContractorName] = useState("");
-  const [contractorPhone, setContractorPhone] = useState("");
-  const [eodTime, setEodTime] = useState("18:00");
+  const [invites, setInvites] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("ob_invites") ?? "[]"); } catch { return []; }
+  });
+  const [eodTime, setEodTime] = useState(() => localStorage.getItem("ob_eodTime") ?? "18:00");
+
+  // Contractor step state
+  const [createdProjectId, setCreatedProjectId] = useState<string | null>(
+    () => localStorage.getItem("ob_projectId") ?? null
+  );
+  const [contractors, setContractors] = useState([
+    { name: "", countryCode: "+91", phone: "", selectedTaskIds: [] as string[] },
+  ]);
 
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
 
-  const apiPost = async (path: string, body: unknown) => {
+  // Persist form fields to localStorage so Back navigation restores them
+  useEffect(() => { localStorage.setItem("ob_orgName", orgName); }, [orgName]);
+  useEffect(() => { localStorage.setItem("ob_projectName", projectName); }, [projectName]);
+  useEffect(() => { localStorage.setItem("ob_projectAddress", projectAddress); }, [projectAddress]);
+  useEffect(() => { localStorage.setItem("ob_projectStage", projectStage); }, [projectStage]);
+  useEffect(() => { localStorage.setItem("ob_projectType", projectType); }, [projectType]);
+  useEffect(() => { localStorage.setItem("ob_startDate", startDate); }, [startDate]);
+  useEffect(() => { localStorage.setItem("ob_endDate", endDate); }, [endDate]);
+  useEffect(() => { localStorage.setItem("ob_projectCode", projectCode); }, [projectCode]);
+  useEffect(() => { localStorage.setItem("ob_invites", JSON.stringify(invites)); }, [invites]);
+  useEffect(() => { localStorage.setItem("ob_eodTime", eodTime); }, [eodTime]);
+
+  const endDateRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (endDateRef.current) {
+      if (startDate) endDateRef.current.min = startDate;
+      else endDateRef.current.removeAttribute("min");
+    }
+  }, [startDate]);
+
+  // Wait for session then restore step + org data
+  useEffect(() => {
+    if (sessionLoading) return;        // still loading — don't act yet
+    if (!session?.user) {
+      router.replace("/login");        // session resolved, no user → kick to login
+      return;
+    }
+
+    const savedStep = parseInt(localStorage.getItem("onboarding_step") ?? "0") || 0;
+    const fetchOrg = async () => {
+      try {
+        const token = await getAuthToken();
+        const res = await fetch(`${backendUrl}/orgs/mine`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) return;
+        const orgs = await res.json();
+        if (orgs?.[0]?.id) {
+          setCreatedWorkspaceId(orgs[0].id);
+          setOrgName(orgs[0].name ?? "");
+          setStep(Math.max(1, savedStep));
+        }
+      } catch {}
+    };
+    fetchOrg();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionLoading, session?.user?.id]);
+
+const apiPost = async (path: string, body: unknown) => {
     const token = await getAuthToken();
     const res = await fetch(`${backendUrl}${path}`, {
       method: "POST",
@@ -101,6 +176,7 @@ export default function OnboardingPage() {
         }
 
         setStep(1);
+        localStorage.setItem("onboarding_step", "1");
       } catch (err: any) {
         setApiError(err.message);
       } finally {
@@ -128,7 +204,7 @@ export default function OnboardingPage() {
           }
           if (!wsId) throw new Error("No workspace found. Please complete step 1 first.");
           setCreatedWorkspaceId(wsId);
-          await apiPost("/projects", {
+          const project = await apiPost("/projects", {
             workspaceId: wsId,
             projectName: projectName.trim(),
             projectCode: projectCode.trim() || undefined,
@@ -139,6 +215,10 @@ export default function OnboardingPage() {
             endDate: endDate || undefined,
             status: "active",
           });
+          if (project?.id) {
+            setCreatedProjectId(project.id);
+            localStorage.setItem("ob_projectId", project.id);
+          }
         } catch (err: any) {
           setApiError(err.message);
           setSaving(false);
@@ -149,16 +229,142 @@ export default function OnboardingPage() {
       }
     }
 
+    // Step 2: Send invites
+    if (step === 2 && invites.length > 0) {
+      setSaving(true);
+      try {
+        let wsId = createdWorkspaceId;
+        if (!wsId) {
+          const token = await getAuthToken();
+          const res = await fetch(`${backendUrl}/orgs/mine`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (res.ok) {
+            const orgs = await res.json();
+            wsId = orgs?.[0]?.id ?? null;
+            if (wsId) setCreatedWorkspaceId(wsId);
+          }
+        }
+        if (wsId) {
+          await Promise.all(
+            invites.map((email) =>
+              apiPost("/team/invite", {
+                email,
+                name: email.split("@")[0],
+                role: "member",
+                workspaceId: wsId,
+              })
+            )
+          );
+        }
+      } catch (err: any) {
+        setApiError(err.message);
+        setSaving(false);
+        return;
+      } finally {
+        setSaving(false);
+      }
+    }
+
     // For remaining steps just advance (they're informational/optional)
     if (step < STEPS.length - 1) {
-      setStep(step + 1);
+      const next = step + 1;
+      setStep(next);
+      localStorage.setItem("onboarding_step", next.toString());
     } else {
-      router.push("/dashboard/overview");
+      // Save contractors + team to project settingsJson so Project Settings page shows them
+      if (createdProjectId) {
+        const contractorEntries = contractors
+          .filter((c) => c.name.trim() && c.phone.trim())
+          .map((c) => ({
+            id: crypto.randomUUID(),
+            name: c.name.trim(),
+            phone: `${c.countryCode}${c.phone.trim().replace(/\D/g, "")}`,
+            trade: c.selectedTaskIds.length > 0
+              ? (WORK_AREAS.find((a) => a.id === c.selectedTaskIds[0])?.label ?? "Civil")
+              : "Civil",
+          }));
+        const teamEntries = invites.map((email) => ({
+          id: crypto.randomUUID(),
+          name: email.split("@")[0],
+          email,
+          role: "Editor" as const,
+        }));
+        if (contractorEntries.length > 0 || teamEntries.length > 0) {
+          try {
+            const token = await getAuthToken();
+            await fetch(`${backendUrl}/projects/${createdProjectId}`, {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              },
+              body: JSON.stringify({
+                settingsJson: {
+                  contractors: contractorEntries,
+                  team: teamEntries,
+                  eodTime,
+                },
+              }),
+            });
+
+            // Send WhatsApp welcome message to each contractor
+            if (contractorEntries.length > 0) {
+              const token2 = await getAuthToken();
+              await Promise.allSettled(
+                contractorEntries.map((c) =>
+                  fetch(`${backendUrl}/whatsapp/send-welcome`, {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      ...(token2 ? { Authorization: `Bearer ${token2}` } : {}),
+                    },
+                    body: JSON.stringify({
+                      phone: c.phone,
+                      contractorName: c.name,
+                      projectName: projectName.trim() || "your project",
+                    }),
+                  })
+                )
+              );
+            }
+          } catch {}
+        }
+      }
+
+      localStorage.removeItem("onboarding_step");
+      localStorage.setItem("onboarding_done", "true");
+      const params = new URLSearchParams();
+      if (createdProjectId) params.set("projectId", createdProjectId);
+      if (createdWorkspaceId) params.set("workspaceId", createdWorkspaceId);
+      const qs = params.toString();
+      router.push(`/dashboard/overview${qs ? `?${qs}` : ""}`);
     }
   };
 
-  const back = () => { setApiError(""); step > 0 && setStep(step - 1); };
-  const skip = () => { setApiError(""); setStep(s => Math.min(s + 1, STEPS.length - 1)); if (step === STEPS.length - 1) router.push("/dashboard/overview"); };
+  const back = () => {
+    setApiError("");
+    if (step > 0) {
+      const prev = step - 1;
+      setStep(prev);
+      localStorage.setItem("onboarding_step", prev.toString());
+    }
+  };
+  const skip = () => {
+    setApiError("");
+    if (step === STEPS.length - 1) {
+      localStorage.removeItem("onboarding_step");
+      localStorage.setItem("onboarding_done", "true");
+      ["ob_orgName","ob_projectName","ob_projectAddress","ob_projectStage","ob_projectType",
+       "ob_startDate","ob_endDate","ob_projectCode","ob_invites","ob_eodTime","ob_projectId"]
+        .forEach(k => localStorage.removeItem(k));
+      router.push("/dashboard/overview");
+    } else {
+      const next = Math.min(step + 1, STEPS.length - 1);
+      setStep(next);
+      localStorage.setItem("onboarding_step", next.toString());
+    }
+  };
 
   const addInvite = () => {
     if (inviteEmail && !invites.includes(inviteEmail)) {
@@ -280,10 +486,26 @@ export default function OnboardingPage() {
             </div>
             <div className="flex gap-3">
               <FormField label="Start Date *" className="flex-1">
-                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="form-input" />
+                <input
+                  type="date"
+                  value={startDate}
+                  max={endDate || undefined}
+                  onChange={(e) => {
+                    setStartDate(e.target.value);
+                    if (endDate && e.target.value > endDate) setEndDate("");
+                  }}
+                  className="form-input"
+                />
               </FormField>
               <FormField label="End Date *" className="flex-1">
-                <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="form-input" />
+                <input
+                  ref={endDateRef}
+                  type="date"
+                  value={endDate}
+                  min={startDate || undefined}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="form-input"
+                />
               </FormField>
             </div>
             <FormField label="Project Code *">
@@ -341,12 +563,6 @@ export default function OnboardingPage() {
                 </span>
               </div>
             ))}
-            <div className="mt-3 flex gap-2">
-              <div className="flex-1 bg-[#f6f8fa] border border-[#D0D7DE] rounded-md px-2.5 py-1.5 text-xs text-[#8C959F] overflow-hidden whitespace-nowrap text-ellipsis">
-                https://app.bluq.io/invite/abc123...
-              </div>
-              <Btn small>📋 Copy</Btn>
-            </div>
           </>
         )}
 
@@ -360,39 +576,118 @@ export default function OnboardingPage() {
               Add contractors and assign tasks. The Bluq bot will collect daily
               updates from them on WhatsApp.
             </p>
-            <div className="bg-[#f6f8fa] border border-[#D0D7DE] rounded-lg p-3.5 mb-3">
-              <div className="flex gap-3 mb-2.5">
-                <FormField label="Contractor Name" className="flex-1">
-                  <input type="text" placeholder="Rajesh Kumar" value={contractorName} onChange={(e) => setContractorName(e.target.value)} className="form-input" />
-                </FormField>
-                <FormField label="WhatsApp Number" className="flex-1">
-                  <input type="tel" placeholder="+971 50 123 4567" value={contractorPhone} onChange={(e) => setContractorPhone(e.target.value)} className="form-input" />
-                </FormField>
-              </div>
-              <label className="block text-xs font-semibold text-[#57606a] mb-1.5">
-                Assign Tasks
-              </label>
-              <div className="flex flex-wrap gap-1.5">
-                {["Foundation Works", "Rebar Installation", "Formwork"].map(
-                  (t, i) => (
+
+            {contractors.map((contractor, ci) => (
+              <div key={ci} className="bg-[#f6f8fa] border border-[#D0D7DE] rounded-lg p-3.5 mb-3">
+                <div className="flex items-center justify-between mb-2.5">
+                  <span className="text-[11px] font-semibold text-[#57606a]">
+                    Contractor {ci + 1}
+                  </span>
+                  {contractors.length > 1 && (
                     <span
-                      key={i}
-                      className={`px-2.5 py-1 rounded text-[11px] font-semibold cursor-pointer border transition-colors ${
-                        i < 2
-                          ? "bg-[#ddf4ff] text-[#3A4EA2] border-[#3A4EA240]"
-                          : "bg-[#f0f1f3] text-[#8C959F] border-[#D0D7DE]"
-                      }`}
+                      className="text-[11px] text-[#CF222E] cursor-pointer"
+                      onClick={() => setContractors(prev => prev.filter((_, j) => j !== ci))}
                     >
-                      {i < 2 ? "✓ " : ""}
-                      {t}
+                      Remove
                     </span>
-                  )
-                )}
+                  )}
+                </div>
+                <div className="flex gap-3 mb-2.5">
+                  <FormField label="Contractor Name" className="flex-1">
+                    <input
+                      type="text"
+                      placeholder="Rajesh Kumar"
+                      value={contractor.name}
+                      onChange={(e) => setContractors(prev =>
+                        prev.map((c, j) => j === ci ? { ...c, name: e.target.value } : c)
+                      )}
+                      className="form-input"
+                    />
+                  </FormField>
+                  <FormField label="WhatsApp Number" className="flex-1">
+                    <div className="flex gap-1">
+                      <select
+                        value={contractor.countryCode}
+                        onChange={(e) => setContractors(prev =>
+                          prev.map((c, j) => j === ci ? { ...c, countryCode: e.target.value } : c)
+                        )}
+                        className="form-input"
+                        style={{ width: 90, flexShrink: 0 }}
+                      >
+                        {[
+                          { code: "+91", flag: "🇮🇳", label: "IN" },
+                          { code: "+971", flag: "🇦🇪", label: "AE" },
+                          { code: "+1",  flag: "🇺🇸", label: "US" },
+                          { code: "+44", flag: "🇬🇧", label: "GB" },
+                          { code: "+966", flag: "🇸🇦", label: "SA" },
+                          { code: "+974", flag: "🇶🇦", label: "QA" },
+                          { code: "+968", flag: "🇴🇲", label: "OM" },
+                          { code: "+965", flag: "🇰🇼", label: "KW" },
+                          { code: "+973", flag: "🇧🇭", label: "BH" },
+                          { code: "+92",  flag: "🇵🇰", label: "PK" },
+                          { code: "+880", flag: "🇧🇩", label: "BD" },
+                          { code: "+94",  flag: "🇱🇰", label: "LK" },
+                          { code: "+60",  flag: "🇲🇾", label: "MY" },
+                          { code: "+65",  flag: "🇸🇬", label: "SG" },
+                        ].map(({ code, flag, label }) => (
+                          <option key={code} value={code}>{flag} {code}</option>
+                        ))}
+                      </select>
+                      <input
+                        type="tel"
+                        placeholder="50 123 4567"
+                        value={contractor.phone}
+                        onChange={(e) => setContractors(prev =>
+                          prev.map((c, j) => j === ci ? { ...c, phone: e.target.value } : c)
+                        )}
+                        className="form-input"
+                      />
+                    </div>
+                  </FormField>
+                </div>
+                <label className="block text-xs font-semibold text-[#57606a] mb-1">
+                  Assign Work Areas <span className="font-normal text-[#8C959F]">(optional)</span>
+                </label>
+                <p className="text-[11px] text-[#8C959F] mb-1.5">Select what this contractor is responsible for. You can fine-tune task assignments later.</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {WORK_AREAS.map((area) => {
+                    const selected = contractor.selectedTaskIds.includes(area.id);
+                    return (
+                      <span
+                        key={area.id}
+                        onClick={() => setContractors(prev =>
+                          prev.map((c, j) => j !== ci ? c : {
+                            ...c,
+                            selectedTaskIds: selected
+                              ? c.selectedTaskIds.filter(id => id !== area.id)
+                              : [...c.selectedTaskIds, area.id],
+                          })
+                        )}
+                        className={`px-2.5 py-1 rounded text-[11px] font-semibold cursor-pointer border transition-colors ${
+                          selected
+                            ? "bg-[#ddf4ff] text-[#3A4EA2] border-[#3A4EA240]"
+                            : "bg-[#f0f1f3] text-[#8C959F] border-[#D0D7DE]"
+                        }`}
+                      >
+                        {selected ? "✓ " : ""}{area.label}
+                      </span>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-            <Btn small className="mb-4">
+            ))}
+
+            <Btn
+              small
+              className="mb-4"
+              onClick={() => setContractors(prev => [
+                ...prev,
+                { name: "", countryCode: "+91", phone: "", selectedTaskIds: [] },
+              ])}
+            >
               + Add Another Contractor
             </Btn>
+
             <div className="border-t border-[#e1e4e8] pt-3 flex items-center gap-3">
               <label className="text-xs font-semibold text-[#57606a]">
                 EOD Prompt Time
@@ -427,7 +722,7 @@ export default function OnboardingPage() {
                 !endDate ||
                 !projectCode.trim()
               )) ||
-              (step === 2 && invites.length === 0)
+              false
             }
           >
             {saving

@@ -588,6 +588,72 @@ export async function generateReport(opts: {
   });
 }
 
+// ---------------------------------------------------------------------------
+// SCHEDULE VERSIONS
+// ---------------------------------------------------------------------------
+
+export interface ScheduleVersion {
+  id: string;
+  versionNumber: number;
+  isBaseline: boolean;
+  isLocked: boolean;
+  createdAt: string;
+  scheduleJson: {
+    gapCheck?: {
+      suspectedGaps: Array<{
+        taskName: string;
+        phase: string;
+        reason: string;
+        confidence: "high" | "medium" | "low";
+        alreadyCovered: boolean;
+      }>;
+      coverageAssessment: string;
+      notes: string;
+    };
+    [key: string]: unknown;
+  };
+}
+
+/** GET /schedule/versions?projectId=&workspaceId= → latest version with gapCheck */
+export async function fetchLatestScheduleVersion(
+  projectId: string,
+  workspaceId: string,
+): Promise<ScheduleVersion | null> {
+  try {
+    const versions = await apiFetch<ScheduleVersion[]>(
+      `/schedule/versions?projectId=${projectId}&workspaceId=${workspaceId}`
+    );
+    return versions?.[0] ?? null; // versions are ordered desc by versionNumber
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GAP CHECK
+// ---------------------------------------------------------------------------
+
+/** POST /schedule/gap-check/accept */
+export async function acceptGapCheckItem(body: {
+  scheduleVersionId: string;
+  workspaceId: string;
+  projectId: string;
+  taskName: string;
+  phase: string;
+  reason: string;
+  dismissed: boolean;
+}): Promise<{ success: boolean; action: string; task?: unknown }> {
+  const result = await apiPost<{ success: boolean; action: string; task?: unknown }>(
+    "/schedule/gap-check/accept",
+    body,
+  );
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// REPORTS — PDF generation
+// ---------------------------------------------------------------------------
+
 /** GET /reports/status/:jobId — polls until done or failed */
 export async function pollReportStatus(
   jobId: string

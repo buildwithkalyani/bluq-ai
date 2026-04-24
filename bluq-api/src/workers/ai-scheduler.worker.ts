@@ -45,6 +45,8 @@ import { extractParameters, type ProjectParameters } from "../lib/parameter-extr
 import { selectTasks, printTaskSummary, type RulesEngineResult } from "../lib/rules-engine.js";
 import { calculateSchedule, type ScheduleResult, type ScheduledTask } from "../lib/duration-calculator.js";
 import { generateNovelTasks } from "../lib/novel-task-generator.js";
+import { checkTaskGaps, type GapCheckResult } from "../lib/gap-checker.js";
+import { getIO } from "../lib/socket.js";
 
 // ---------------------------------------------------------------------------
 // JOB TYPES
@@ -138,11 +140,13 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
   }
 
   const totalSteps = 7;
+  const pipelineStart = Date.now();
 
   // =========================================================================
   // STEP 1: Fetch document records from database
   // =========================================================================
   await updateProgress(job, 1, totalSteps, "Fetching project documents...");
+  const step1Start = Date.now();
 
   const projectDocuments = await db
     .select()
@@ -159,11 +163,13 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
       "No documents found for this project. Please upload drawings, scope of work, or BOQ before generating a schedule."
     );
   }
+  console.log(`[worker] Step 1 completed in ${Date.now() - step1Start}ms`);
 
   // =========================================================================
   // STEP 2: Download and parse files
   // =========================================================================
   await updateProgress(job, 2, totalSteps, `Parsing ${projectDocuments.length} document(s)...`);
+  const step2Start = Date.now();
 
   // Check required env vars before attempting downloads
   const supabaseUrl = process.env.SUPABASE_URL;
@@ -226,11 +232,13 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
       errors.map(e => `${e.fileName}: ${e.error}`).join("; ")
     );
   }
+  console.log(`[worker] Step 2 completed in ${Date.now() - step2Start}ms`);
 
   // =========================================================================
   // STEP 3: Extract parameters via Claude
   // =========================================================================
   await updateProgress(job, 3, totalSteps, "AI is reading your documents...");
+  const step3Start = Date.now();
 
   const extractionResult = await extractParameters(parsed, apiKey, {
     runs: job.data.extractionRuns || 1,
@@ -251,11 +259,13 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     `[worker] Extracted params: ${params.buildingType}, ${params.floors} floors, ` +
     `${params.regionCode}, soil=${params.soilType}, confidence=${params.confidence.overall}`
   );
+  console.log(`[worker] Step 3 completed in ${Date.now() - step3Start}ms`);
 
   // =========================================================================
   // STEP 4: Select tasks deterministically
   // =========================================================================
   await updateProgress(job, 4, totalSteps, "Selecting construction tasks...");
+  const step4Start = Date.now();
 
   const rulesResult: RulesEngineResult = selectTasks(params);
 
@@ -264,11 +274,16 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
   if (rulesResult.tasks.length === 0) {
     throw new Error("Rules engine returned zero tasks. This should not happen — please report this bug.");
   }
+  console.log(`[worker] Step 4 completed in ${Date.now() - step4Start}ms`);
+
+  // Kick off gap check in parallel with duration calculation — does not add to wall-clock time
+  const gapCheckPromise = checkTaskGaps(rulesResult.tasks, params, apiKey);
 
   // =========================================================================
   // STEP 5: Calculate durations and schedule
   // =========================================================================
   await updateProgress(job, 5, totalSteps, "Calculating durations and scheduling...");
+  const step5Start = Date.now();
 
   const scheduleResult: ScheduleResult = calculateSchedule(rulesResult.tasks, params);
 
@@ -278,13 +293,16 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     `${scheduleResult.summary.criticalPathTasks} on critical path, ` +
     `${scheduleResult.summary.totalMonsoonImpactDays} monsoon impact days`
   );
+  console.log(`[worker] Step 5 completed in ${Date.now() - step5Start}ms`);
 
   // =========================================================================
   // STEP 6: Handle novel scope items (optional AI step)
   // =========================================================================
   await updateProgress(job, 6, totalSteps, "Checking for non-standard scope items...");
+  const step6Start = Date.now();
 
   let novelTasks: ScheduledTask[] = [];
+  let placementWarnings: string[] = [];
 
   if (params.novelScopeItems.length > 0) {
     console.log(
@@ -293,24 +311,35 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     );
 
     // Call Claude Haiku to generate tasks for items not in the 143-task library.
-    // These are appended after the main schedule and flagged source: "ai_generated".
+    // Novel tasks are placed at the correct phase boundary (not appended at end).
     // The PM sees them with an "AI-generated, needs review" badge.
-    novelTasks = await generateNovelTasks(
+    const novelResult = await generateNovelTasks(
       params.novelScopeItems,
       params,
       apiKey,
-      scheduleResult.summary.projectEndDate,
+      scheduleResult.tasks,
     );
+
+    novelTasks = novelResult.tasks;
+    placementWarnings = novelResult.placementWarnings;
 
     if (novelTasks.length > 0) {
       console.log(`[worker] Generated ${novelTasks.length} novel tasks via Claude Haiku`);
     }
+    if (placementWarnings.length > 0) {
+      console.warn(`[worker] ${placementWarnings.length} novel task(s) could not be placed:`, placementWarnings);
+    }
   }
+
+  // Collect gap check result (was running in parallel since Step 4)
+  const gapCheck: GapCheckResult = await gapCheckPromise;
+  console.log(`[worker] Step 6 completed in ${Date.now() - step6Start}ms`);
 
   // =========================================================================
   // STEP 7: Save to database
   // =========================================================================
   await updateProgress(job, 7, totalSteps, "Saving schedule...");
+  const step7Start = Date.now();
 
   const allTasks = [...scheduleResult.tasks, ...novelTasks];
 
@@ -323,6 +352,24 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
   const nextVersion = existingVersions.length > 0
     ? Math.max(...existingVersions.map(v => v.versionNumber)) + 1
     : 1;
+
+  // Aggregate all warnings from every source
+  const allWarnings: string[] = [
+    ...rulesResult.warnings,
+    ...placementWarnings,
+  ];
+
+  // Gap check warnings
+  if (gapCheck.coverageAssessment === "significant_gaps") {
+    allWarnings.push(
+      "AI gap check flagged potential missing tasks. Review gapCheck field before sharing schedule with contractor."
+    );
+  }
+  for (const gap of gapCheck.suspectedGaps) {
+    if (gap.confidence === "high" && !gap.alreadyCovered) {
+      allWarnings.push(`High confidence gap detected: ${gap.taskName}. Verify task library coverage.`);
+    }
+  }
 
   // Save the schedule version (full snapshot as JSON)
   const scheduleJson = {
@@ -348,9 +395,13 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     })),
     summary: scheduleResult.summary,
     rulesApplied: rulesResult.rulesApplied,
-    warnings: rulesResult.warnings,
+    warnings: allWarnings,
     novelScopeItems: params.novelScopeItems,
     parseSummary,
+    gapCheck,
+    compressionSummary: scheduleResult.summary.compressionSummary,
+    resourceSummary: scheduleResult.resourceSummary,
+    spatialAnalysis: scheduleResult.spatialAnalysis,
   };
 
   const [savedVersion] = await db
@@ -472,14 +523,18 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     `[worker] Saved: version ${nextVersion}, ${insertedTasks.length} tasks, ` +
     `${dependencyInserts.length} dependencies`
   );
+  console.log(`[worker] Step 7 completed in ${Date.now() - step7Start}ms`);
 
-  // TODO: Emit Socket.IO event to frontend
-  // socketIO.to(workspaceId).emit("schedule:generated", {
-  //   projectId,
-  //   versionNumber: nextVersion,
-  //   scheduleVersionId: savedVersion.id,
-  //   taskCount: insertedTasks.length,
-  // });
+  // Notify connected clients so the Gantt chart refreshes automatically
+  getIO()?.to(workspaceId).emit("schedule:generated", {
+    projectId,
+    versionNumber: nextVersion,
+    scheduleVersionId: savedVersion.id,
+    taskCount: insertedTasks.length,
+    compressionFeasible: scheduleResult.summary.compressionSummary?.feasible ?? true,
+  });
+
+  console.log(`[worker] Pipeline total: ${Date.now() - pipelineStart}ms`);
 
   return {
     scheduleVersionId: savedVersion.id,

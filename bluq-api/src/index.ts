@@ -79,14 +79,19 @@ async function start() {
       const allowed = [
         "https://bluq.ai",
         "https://www.bluq.ai",
-        "https://bluq-ai.vercel.app",
       ];
-      if (!origin || origin.startsWith("http://localhost:") || allowed.includes(origin)) {
+      if (
+        !origin ||
+        origin.startsWith("http://localhost:") ||
+        origin.endsWith(".vercel.app") ||
+        allowed.includes(origin)
+      ) {
         cb(null, true);
       } else {
         cb(new Error("Not allowed by CORS"), false);
       }
     },
+    methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
   });
 
   await app.register(rateLimit, {

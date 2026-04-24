@@ -6,10 +6,16 @@
 // Claude Haiku to generate TaskTemplate-compatible tasks for them.
 //
 // Generated tasks are:
-//   - Flagged with source: "ai_generated"
-//   - Appended after the main schedule
+//   - Flagged with source: "ai_generated" (placed) or "ai_generated_unplaced"
+//   - Inserted at the correct phase boundary in the schedule (NOT appended at end)
 //   - Shown to PM with "AI-generated, needs review" badge in the frontend
 //   - Never auto-approved — PM must manually confirm or delete each one
+//
+// IMPORTANT: Novel task placement is driven entirely by the `predecessorPhases`
+// field returned by the AI. The scope document is the source of truth for what
+// comes before a novel task — no hardcoded phase mapping exists here. If a
+// novel task's predecessorPhases cannot be resolved to actual tasks in this
+// project, it is flagged as unplaced and the PM is warned.
 //
 // Uses Claude Haiku (not Sonnet) — cheap and fast for structured generation.
 // Task library is sent as cached context so Haiku knows the exact format.
@@ -17,7 +23,6 @@
 
 import type { ProjectParameters } from "./parameter-extractor.js";
 import type { ScheduledTask } from "./duration-calculator.js";
-import { CORE_TASKS } from "./task-library.js";
 
 // ---------------------------------------------------------------------------
 // SYSTEM PROMPT (cached) — task format template
@@ -86,6 +91,15 @@ interface GeneratedTask {
 }
 
 // ---------------------------------------------------------------------------
+// RETURN TYPE
+// ---------------------------------------------------------------------------
+
+export interface GenerateNovelTasksResult {
+  tasks: ScheduledTask[];
+  placementWarnings: string[];
+}
+
+// ---------------------------------------------------------------------------
 // MAIN FUNCTION
 // ---------------------------------------------------------------------------
 
@@ -95,16 +109,16 @@ interface GeneratedTask {
  * @param novelScopeItems - Items from parameter extraction not in the library
  * @param params - Full project parameters (for context: region, floors, area)
  * @param apiKey - Anthropic API key
- * @param mainScheduleEndDate - ISO date — novel tasks start after main schedule
- * @returns ScheduledTask[] with source: "ai_generated"
+ * @param scheduledTasks - The main schedule; used to place novel tasks at the
+ *   correct phase boundary rather than blindly appending them at the end.
  */
 export async function generateNovelTasks(
   novelScopeItems: string[],
   params: ProjectParameters,
   apiKey: string,
-  mainScheduleEndDate: string,
-): Promise<ScheduledTask[]> {
-  if (novelScopeItems.length === 0) return [];
+  scheduledTasks: ScheduledTask[],
+): Promise<GenerateNovelTasksResult> {
+  if (novelScopeItems.length === 0) return { tasks: [], placementWarnings: [] };
 
   const userPrompt = `
 Project context:
@@ -145,7 +159,7 @@ Generate one task per item. Output ONLY a JSON array.`.trim();
     if (!response.ok) {
       const errBody = await response.text();
       console.error(`[novel-task-generator] Haiku API error: ${response.status} — ${errBody}`);
-      return [];
+      return { tasks: [], placementWarnings: [] };
     }
 
     const data = await response.json() as {
@@ -167,18 +181,17 @@ Generate one task per item. Output ONLY a JSON array.`.trim();
 
     if (!Array.isArray(generated)) {
       console.error("[novel-task-generator] Response was not an array");
-      return [];
+      return { tasks: [], placementWarnings: [] };
     }
 
     console.log(`[novel-task-generator] Generated ${generated.length} novel tasks via Haiku`);
 
-    // Convert to ScheduledTask format, placed sequentially after main schedule
-    return convertToScheduledTasks(generated, mainScheduleEndDate, params);
+    return convertToScheduledTasks(generated, scheduledTasks, params);
 
   } catch (err: any) {
     // Non-fatal: log and continue. PM will be notified via novelScopeItems in the schedule version.
     console.error("[novel-task-generator] Failed:", err.message);
-    return [];
+    return { tasks: [], placementWarnings: [] };
   }
 }
 
@@ -186,24 +199,88 @@ Generate one task per item. Output ONLY a JSON array.`.trim();
 // CONVERTER — GeneratedTask[] → ScheduledTask[]
 // ---------------------------------------------------------------------------
 
+// IMPORTANT: Novel task placement is driven entirely by the `predecessorPhases`
+// field returned by the AI. The scope document is the source of truth for what
+// precedes each novel task. No hardcoded phase mapping exists here. If
+// predecessorPhases is empty or references a phase not present in this project,
+// the task is flagged as unplaced and the PMC is warned.
+
 function convertToScheduledTasks(
   generated: GeneratedTask[],
-  mainScheduleEndDate: string,
+  scheduledTasks: ScheduledTask[],
   params: ProjectParameters,
-): ScheduledTask[] {
+): GenerateNovelTasksResult {
   const results: ScheduledTask[] = [];
-  let currentStart = new Date(mainScheduleEndDate);
+  const placementWarnings: string[] = [];
 
-  // Add 1 day gap after main schedule before novel tasks begin
-  currentStart.setDate(currentStart.getDate() + 1);
+  // Build a map: normalizedPhase → latest endDate task in that phase
+  const phaseLatestEnd = new Map<string, { endDate: string; code: string }>();
+  for (const t of scheduledTasks) {
+    const norm = t.phase.toLowerCase();
+    const existing = phaseLatestEnd.get(norm);
+    if (!existing || t.endDate > existing.endDate) {
+      phaseLatestEnd.set(norm, { endDate: t.endDate, code: t.code });
+    }
+  }
 
   for (const t of generated) {
     const durationDays = Math.max(1, Math.round(t.durationDays || 7));
-    const startDate = formatDate(currentStart);
-    const endDate = addDays(currentStart, durationDays - 1);
+    const predecessorPhases: string[] = Array.isArray(t.predecessorPhases) ? t.predecessorPhases : [];
+
+    // ------------------------------------------------------------------
+    // Scenario 1: predecessorPhases is empty or null
+    // ------------------------------------------------------------------
+    if (predecessorPhases.length === 0) {
+      placementWarnings.push(
+        `Could not place ${t.name} in schedule — predecessor phase unknown. Manual placement required.`
+      );
+      results.push(makeUnplacedTask(t, durationDays));
+      continue;
+    }
+
+    // ------------------------------------------------------------------
+    // Find the latest endDate among all matching predecessor phases
+    // ------------------------------------------------------------------
+    let latestEnd: string | null = null;
+    let latestPredCode: string | null = null;
+    const missingPhases: string[] = [];
+
+    for (const phase of predecessorPhases) {
+      const norm = phase.toLowerCase().trim();
+      const entry = phaseLatestEnd.get(norm);
+      if (!entry) {
+        missingPhases.push(phase);
+        continue;
+      }
+      if (!latestEnd || entry.endDate > latestEnd) {
+        latestEnd = entry.endDate;
+        latestPredCode = entry.code;
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // Scenario 2: every referenced phase has no tasks in this project
+    // ------------------------------------------------------------------
+    if (!latestEnd) {
+      const phaseList = missingPhases.join(", ");
+      placementWarnings.push(
+        `Could not place ${t.name} in schedule — referenced phase ${phaseList} has no tasks in this project. Manual placement required.`
+      );
+      results.push(makeUnplacedTask(t, durationDays));
+      continue;
+    }
+
+    // ------------------------------------------------------------------
+    // Happy path: place 1 day after latest predecessor phase end
+    // ------------------------------------------------------------------
+    const startDate = addCalendarDays(latestEnd, 1);
+    const endDate = addCalendarDays(startDate, durationDays - 1);
+
+    const predecessor = latestPredCode
+      ? [{ taskCode: latestPredCode, type: "FS" as const, lagDays: 1, note: "ai_generated phase predecessor" }]
+      : [];
 
     results.push({
-      // Identity
       code: t.code,
       originalCode: t.code,
       phase: sanitizePhase(t.phase),
@@ -211,39 +288,31 @@ function convertToScheduledTasks(
       fullName: t.name,
       unit: sanitizeUnit(t.unit),
 
-      // Floor info — novel tasks are project-level (not per-floor)
       floorNumber: undefined,
       floorLabel: undefined,
 
-      // Quantities — unknown for novel tasks, PM will fill in
       estimatedQuantity: 1,
       quantityUnit: t.unit,
       baseDurationDays: durationDays,
       adjustedDurationDays: durationDays,
       finalDurationDays: durationDays,
 
-      // Dates — sequential after main schedule
       startDate,
-      endDate: formatDate(addDays(currentStart, durationDays - 1)),
+      endDate,
 
-      // Dependencies — no cross-references to main schedule tasks
-      predecessors: [],
+      predecessors: predecessor,
 
-      // Crew
       crew: Array.isArray(t.crew) ? t.crew : [{ role: "Specialist", count: 1 }],
 
-      // MIF — no monsoon calculation for novel tasks (PM adjusts)
       monsoonImpactFactor: 1.0,
       monsoonOverlapDays: 0,
       monsoonAdjustedDays: 0,
 
-      // Scheduling metadata — novel tasks are never on critical path
       earliestStart: 0,
       earliestFinish: durationDays,
       isCriticalPath: false,
       totalFloat: 999,
 
-      // Source — this is the key flag the frontend reads for the badge
       source: "ai_generated",
       isPerFloor: false,
       isPerFlat: false,
@@ -255,27 +324,58 @@ function convertToScheduledTasks(
         monsoonMifMultiplier: 1.0,
       },
     });
-
-    // Next novel task starts the day after this one ends
-    currentStart = new Date(endDate);
-    currentStart.setDate(currentStart.getDate() + 1);
   }
 
-  return results;
+  return { tasks: results, placementWarnings };
 }
 
 // ---------------------------------------------------------------------------
 // HELPERS
 // ---------------------------------------------------------------------------
 
-function formatDate(date: Date): string {
-  return date.toISOString().split("T")[0];
+function makeUnplacedTask(t: GeneratedTask, durationDays: number): ScheduledTask {
+  return {
+    code: t.code,
+    originalCode: t.code,
+    phase: sanitizePhase(t.phase),
+    name: t.name,
+    fullName: t.name,
+    unit: sanitizeUnit(t.unit),
+    floorNumber: undefined,
+    floorLabel: undefined,
+    estimatedQuantity: 1,
+    quantityUnit: t.unit,
+    baseDurationDays: durationDays,
+    adjustedDurationDays: durationDays,
+    finalDurationDays: durationDays,
+    startDate: "",
+    endDate: "",
+    predecessors: [],
+    crew: Array.isArray(t.crew) ? t.crew : [{ role: "Specialist", count: 1 }],
+    monsoonImpactFactor: 1.0,
+    monsoonOverlapDays: 0,
+    monsoonAdjustedDays: 0,
+    earliestStart: 0,
+    earliestFinish: durationDays,
+    isCriticalPath: false,
+    totalFloat: 999,
+    source: "ai_generated_unplaced",
+    isPerFloor: false,
+    isPerFlat: false,
+    contractorType: t.contractorType || "Civil",
+    regionalAdjustments: {
+      labourCostIndex: 1.0,
+      materialCostIndex: 1.0,
+      productivityIndex: 1.0,
+      monsoonMifMultiplier: 1.0,
+    },
+  };
 }
 
-function addDays(date: Date, days: number): Date {
-  const result = new Date(date);
-  result.setDate(result.getDate() + days);
-  return result;
+function addCalendarDays(iso: string, days: number): string {
+  const d = new Date(iso);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split("T")[0];
 }
 
 const VALID_PHASES = new Set([
@@ -287,7 +387,7 @@ const VALID_PHASES = new Set([
 
 function sanitizePhase(phase: string): string {
   if (VALID_PHASES.has(phase)) return phase;
-  return "special_systems"; // safe default for unknown phases
+  return "special_systems";
 }
 
 const VALID_UNITS = new Set([
@@ -296,5 +396,5 @@ const VALID_UNITS = new Set([
 
 function sanitizeUnit(unit: string): string {
   if (VALID_UNITS.has(unit)) return unit;
-  return "LS"; // safe default
+  return "LS";
 }

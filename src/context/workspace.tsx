@@ -105,6 +105,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             setWorkspaceId(first.id);
             setOrgName(first.name);
             writeWorkspaceCache(first.id, first.name);
+            // Only redirect if user abandoned mid-flow (step saved) AND never explicitly finished
+            const savedStep = parseInt(localStorage.getItem("onboarding_step") ?? "0") || 0;
+            const done = localStorage.getItem("onboarding_done") === "true";
+            if (!done && savedStep > 0 && pathname !== "/onboarding") {
+              router.replace("/onboarding");
+              return;
+            }
           } else {
             clearWorkspaceCache();
             if (pathname !== "/onboarding" && !pathname.startsWith("/invite")) {
