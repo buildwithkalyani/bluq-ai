@@ -518,6 +518,32 @@ export const verification = pgTable("verification", {
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 });
 
+export const gapCheckFeedback = pgTable("gap_check_feedback", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	scheduleVersionId: uuid("schedule_version_id").notNull(),
+	workspaceId: uuid("workspace_id").notNull(),
+	projectId: uuid("project_id").notNull(),
+	taskName: text("task_name").notNull(),
+	phase: text().notNull(),
+	reason: text(),
+	action: text().notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	index("idx_gcf_schedule_version").using("btree", table.scheduleVersionId.asc().nullsLast().op("uuid_ops")),
+	index("idx_gcf_workspace").using("btree", table.workspaceId.asc().nullsLast().op("uuid_ops")),
+	foreignKey({
+		columns: [table.scheduleVersionId],
+		foreignColumns: [scheduleVersions.id],
+		name: "gap_check_feedback_schedule_version_id_fkey",
+	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.workspaceId],
+		foreignColumns: [orgs.id],
+		name: "gap_check_feedback_workspace_id_fkey",
+	}).onDelete("cascade"),
+	check("gap_check_feedback_action_check", sql`action = ANY (ARRAY['accepted'::text, 'dismissed'::text])`),
+]);
+
 export const demoRequests = pgTable("demo_requests", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	name: text(),

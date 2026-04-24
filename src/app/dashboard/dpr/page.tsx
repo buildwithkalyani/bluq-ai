@@ -1,13 +1,11 @@
 "use client";
 
 import { useEffect, useState, useMemo, Suspense } from 'react';
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import {
-  getDPRHistory,
   type DPREntry,
   type Project,
 } from "@/lib/mock-data-extended";
-import { getScheduleTasks } from "@/lib/mock-data";
 import {
   fetchDPRHistory,
   fetchProjects,
@@ -29,9 +27,11 @@ const REPORT_SECTIONS = [
 
 function DPRPageContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const urlProjectIdParam = searchParams.get("projectId") ?? "0";
   const urlWorkspaceId    = searchParams.get("workspaceId");
-  const { workspaceId: ctxWorkspaceId, isDesignMode } = useWorkspace();
+  const { workspaceId: ctxWorkspaceId, isDesignMode, orgName } = useWorkspace();
   const workspaceId   = urlWorkspaceId ?? ctxWorkspaceId;
   // Detect real mode: projectId is a UUID (not numeric "0") and workspaceId available
   const isRealData = !isDesignMode && /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(urlProjectIdParam) && !!workspaceId;
@@ -41,6 +41,7 @@ function DPRPageContent() {
   const [history, setHistory] = useState<DPREntry[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | number>(urlProjectIdParam);
+  const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // Live project metrics
@@ -99,25 +100,11 @@ function DPRPageContent() {
         .catch(console.error)
         .finally(() => setLoading(false));
     } else {
-      // Mock fallback
-      Promise.all([
-        getDPRHistory(Number(selectedProjectId)),
-        getScheduleTasks(Number(selectedProjectId)),
-      ]).then(([h, tasks]) => {
-        setHistory(h || []);
-        const parents = tasks.filter(t => !t.parentTaskId);
-        if (parents.length > 0) {
-          const actual = Math.round(parents.reduce((s, t) => s + t.pct, 0) / parents.length);
-          setActualProgress(actual);
-          setPlannedProgress(Math.min(100, actual + 5));
-          setWorkersOnSite(parents.reduce((s, t) => s + (t.pct > 0 ? 8 : 0), 0));
-        } else {
-          setActualProgress(0);
-          setPlannedProgress(0);
-          setWorkersOnSite(0);
-        }
-        setLoading(false);
-      }).catch(() => setLoading(false));
+      setActualProgress(0);
+      setPlannedProgress(0);
+      setWorkersOnSite(0);
+      setHistory([]);
+      setLoading(false);
     }
   }, [selectedProjectId, projectUuid, workspaceId]);
 
@@ -146,66 +133,66 @@ function DPRPageContent() {
 
   const toggleSection = (id: string) => setSections(prev => ({ ...prev, [id]: !prev[id] }));
 
+  const handleProjectSelect = (project: Project) => {
+    const params = workspaceId
+      ? `?projectId=${project.id}&workspaceId=${workspaceId}`
+      : `?projectId=${project.id}`;
+    router.push(`${pathname}${params}`);
+    setProjectDropdownOpen(false);
+  };
+
   const handleGenerate = async () => {
     if (!isRealData) {
-      // Mock mode — simulate as before
-      setGenerating(true);
-      setTimeout(() => { setGenerating(false); alert("PDF Generated and downloaded successfully! (demo mode)"); }, 2000);
+      alert("Select a project first to generate a report.");
       return;
     }
 
     setGenerating(true);
     try {
-      // 1. Queue the job
       const enabledSections = Object.entries(sections)
         .filter(([, on]) => on)
         .map(([id]) => id);
 
-      const { jobId } = await generateReport({
+      const sectionMap: Record<string, string> = {
+        executive_summary: "ai_summary", s_curve: "s_curve",
+        site_progress: "site_progress", site_attendance: "site_attendance",
+        material_usage: "material_usage", issues: "critical_issues", site_photos: "site_photos",
+      };
+      const mappedSections = enabledSections.map(s => sectionMap[s]).filter(Boolean).join(",");
+
+      const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
+      const { authClient } = await import("@/lib/auth-client");
+      const sessionData = await authClient.getSession();
+      const token = sessionData?.data?.session?.token ?? "";
+
+      const params = new URLSearchParams({
         projectId: projectUuid!,
         workspaceId: workspaceId!,
         reportDate,
-        sections: enabledSections,
+        sections: mappedSections,
       });
 
-      // 2. Poll until done (max 120s, every 3s)
-      let attempts = 0;
-      const poll = async (): Promise<void> => {
-        attempts++;
-        const result = await pollReportStatus(jobId);
+      const res = await fetch(`${BACKEND_URL}/reports/download?${params}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
 
-        if (result.status === "completed" && result.signedUrl) {
-          // 3. Auto-download the PDF
-          const a = document.createElement("a");
-          a.href = result.signedUrl;
-          a.download = `DPR-${reportDate}.pdf`;
-          a.target = "_blank";
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          setGenerating(false);
-          return;
-        }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
+        throw new Error(err.error ?? `HTTP ${res.status}`);
+      }
 
-        if (result.status === "failed") {
-          alert(`PDF generation failed: ${result.error ?? "Unknown error"}`);
-          setGenerating(false);
-          return;
-        }
-
-        if (attempts >= 40) {
-          alert("PDF generation is taking longer than expected. Check Reports History in a few minutes.");
-          setGenerating(false);
-          return;
-        }
-
-        // Still processing — poll again
-        setTimeout(poll, 3000);
-      };
-
-      setTimeout(poll, 3000);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `DPR-${reportDate}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     } catch (err: any) {
       alert(`Failed to generate report: ${err.message}`);
+    } finally {
       setGenerating(false);
     }
   };
@@ -266,18 +253,32 @@ function DPRPageContent() {
         <div className="flex items-center gap-4">
           <SectionTitle>Daily Progress Report</SectionTitle>
           <div className="relative">
-            <select
-              value={selectedProjectId}
-              onChange={e => setSelectedProjectId(Number(e.target.value))}
-              className="appearance-none bg-white border border-[#D0D7DE] rounded-md py-1.5 pl-3 pr-8 text-[13px] font-semibold text-[#24292f] cursor-pointer outline-none focus:border-[#3A4EA2] focus:ring-1 focus:ring-[#3A4EA2] shadow-sm"
+            <div
+              onClick={() => setProjectDropdownOpen(o => !o)}
+              className="flex items-center gap-1.5 border border-[#D0D7DE] rounded-md px-3 py-1.5 bg-white cursor-pointer text-[13px] font-semibold text-[#24292f] hover:bg-[#f6f8fa] shadow-sm"
             >
-              {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-[#57606a]">
-              <svg className="h-4 w-4 fill-current" viewBox="0 0 20 20">
-                <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" />
-              </svg>
+              <span className="w-2 h-2 rounded-full bg-[#3A4EA2] shrink-0" />
+              <span>{projects.find(p => String(p.id) === String(selectedProjectId))?.name ?? "Select Project..."}</span>
+              <span className="text-[#8C959F] text-[11px]">▾</span>
             </div>
+            {projectDropdownOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setProjectDropdownOpen(false)} />
+                <div className="absolute left-0 top-full mt-1 w-56 bg-white border border-[#D0D7DE] rounded-md shadow-lg z-50 py-1">
+                  <div className="px-3 py-1.5 text-[10px] font-bold text-[#8C959F] uppercase tracking-wider">Your Projects</div>
+                  {projects.length === 0 && (
+                    <div className="px-3 py-2 text-[12px] text-[#8C959F]">No projects found</div>
+                  )}
+                  {projects.map(p => (
+                    <div key={String(p.id)} onClick={() => handleProjectSelect(p)}
+                      className={`px-3 py-2 text-[12px] cursor-pointer hover:bg-[#f0f1f3] flex items-center justify-between ${String(p.id) === String(selectedProjectId) ? "text-[#3A4EA2] font-bold" : "text-[#24292f]"}`}>
+                      {p.name}
+                      {String(p.id) === String(selectedProjectId) && <span className="text-[10px]">✓</span>}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
         <div className="inline-flex rounded-md overflow-hidden border border-[#D0D7DE] shadow-sm">
@@ -337,7 +338,7 @@ function DPRPageContent() {
                   </div>
                   <div className="text-right">
                     <div className="text-sm font-bold text-[#24292f]">{reportDate}</div>
-                    <div className="text-[10px] font-bold text-[#3A4EA2] tracking-[1px] uppercase mt-1">Bluq Engineering</div>
+                    <div className="text-[10px] font-bold text-[#3A4EA2] tracking-[1px] uppercase mt-1">{orgName ?? "Bluq Engineering"}</div>
                   </div>
                 </div>
               </Card>
@@ -405,28 +406,21 @@ function DPRPageContent() {
               {sections.material_usage && (
                 <Card className="bg-white shadow-sm border-[#D0D7DE]">
                   <div className="text-[10px] text-[#57606a] font-bold mb-2 font-mono uppercase">Material Usage</div>
-                  <div className="text-[12px] text-[#8C959F] italic">
-                    Material data will be populated from contractor WhatsApp updates.
-                  </div>
+                  <div className="text-[12px] text-[#8C959F]">No material data recorded yet. Data is captured via contractor WhatsApp updates.</div>
                 </Card>
               )}
 
               {sections.issues && (
-                <Card className="bg-[#ffebe9] border-[#ff8182] shadow-sm">
-                  <div className="text-[10px] text-[#cf222e] font-bold mb-1.5 font-mono uppercase">Critical Issues & Requests</div>
-                  <div className="text-[12px] text-[#cf222e] font-medium flex items-start gap-2">
-                    <span>⚠️</span>
-                    <div>Issues are pulled from the project&apos;s open issue log.</div>
-                  </div>
+                <Card className="bg-white shadow-sm border-[#D0D7DE]">
+                  <div className="text-[10px] text-[#57606a] font-bold mb-1.5 font-mono uppercase">Critical Issues & Requests</div>
+                  <div className="text-[12px] text-[#8C959F]">No open issues recorded for this project.</div>
                 </Card>
               )}
 
               {sections.site_photos && (
                 <Card className="bg-white shadow-sm border-[#D0D7DE]">
                   <div className="text-[10px] text-[#57606a] font-bold mb-3 font-mono uppercase">Site Photos</div>
-                  <div className="flex gap-3 overflow-x-auto pb-2">
-                    <div className="w-32 h-24 bg-[#f6f8fa] rounded flex items-center justify-center text-[10px] text-[#8C959F] border border-[#e1e4e8] shrink-0">Photos from WhatsApp</div>
-                  </div>
+                  <div className="text-[12px] text-[#8C959F]">No site photos uploaded yet. Photos are captured via contractor WhatsApp updates.</div>
                 </Card>
               )}
 
@@ -475,7 +469,9 @@ function DPRPageContent() {
                 </div>
               </Card>
             )) : (
-              <div className="text-center py-10 text-[13px] text-[#57606a]">No history found for {selectedProject?.name}.</div>
+              <div className="text-center py-10 text-[13px] text-[#57606a]">
+                {isRealData ? "No DPR history found for this project." : "Select a project to view report history."}
+              </div>
             )}
           </div>
         </div>

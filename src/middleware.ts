@@ -1,36 +1,37 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export async function middleware(request: NextRequest) {
-  // LOCAL DEV BYPASS: skip auth check so you can view pages without a database connection.
-  // Remove this block before deploying or committing.
+  // Skip auth in local dev — no database connection required.
   if (process.env.NODE_ENV === "development") {
     return NextResponse.next();
   }
 
-  // We use fetch to call the Better Auth endpoint directly.
-  // This prevents importing the `pg` database library into the Edge Runtime.
-  const response = await fetch(new URL("/api/auth/get-session", request.url), {
-    headers: {
-      // Pass the cookie so Better Auth knows who is asking
-      cookie: request.headers.get("cookie") || "",
-    },
-  });
+  const loginUrl = new URL("/login", request.url);
+  loginUrl.searchParams.set("redirect", request.nextUrl.pathname);
 
-  const session = await response.json();
+  try {
+    // Call Better Auth session endpoint directly to avoid importing `pg` into Edge Runtime.
+    const response = await fetch(new URL("/api/auth/get-session", request.url), {
+      headers: { cookie: request.headers.get("cookie") || "" },
+    });
 
-  // Better Auth returns a session object if logged in, or null/empty if not
-  if (!response.ok || !session || !session.user) {
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("redirect", request.nextUrl.pathname);
+    // Fail-closed: any non-OK response or missing session → redirect to login
+    if (!response.ok) return NextResponse.redirect(loginUrl);
+
+    const session = await response.json();
+    if (!session?.user) return NextResponse.redirect(loginUrl);
+
+    return NextResponse.next();
+  } catch {
+    // Fail-closed: network error or crash → redirect to login, never let through
     return NextResponse.redirect(loginUrl);
   }
-
-  return NextResponse.next();
 }
 
 export const config = {
   matcher: [
     "/dashboard/:path*",
+    "/onboarding",
     "/projects/:path*",
     "/schedule/:path*",
     "/reports/:path*",

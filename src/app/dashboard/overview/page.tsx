@@ -23,6 +23,8 @@ export default function OverviewPage() {
   const { workspaceId, loading: wsLoading, isDesignMode } = useWorkspace();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
   const [search, setSearch] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
 
@@ -34,6 +36,7 @@ export default function OverviewPage() {
 
     if (workspaceId && !isDesignMode) {
       // Real backend
+      setFetchError("");
       fetchProjects(workspaceId)
         .then((rows) => {
           setProjects(
@@ -54,7 +57,10 @@ export default function OverviewPage() {
             }))
           );
         })
-        .catch(console.error)
+        .catch((err) => {
+          console.error(err);
+          setFetchError(err?.message ?? "Failed to load projects");
+        })
         .finally(() => setLoading(false));
     } else if (isDesignMode) {
       // Design account — always mock
@@ -62,8 +68,11 @@ export default function OverviewPage() {
         setProjects(data);
         setLoading(false);
       });
+    } else {
+      // No workspace and not design mode — nothing to load
+      setLoading(false);
     }
-  }, [workspaceId, wsLoading, isDesignMode]);
+  }, [workspaceId, wsLoading, isDesignMode, refreshKey]);
 
   const filtered = projects.filter((p) =>
     p.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -74,6 +83,22 @@ export default function OverviewPage() {
     selectedProjectId === null
       ? null
       : projects.find((p) => p.id === selectedProjectId) ?? null;
+
+  if (fetchError && !loading) {
+    return (
+      <div className="p-5">
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-600">
+          Failed to load projects: {fetchError}.{" "}
+          <span
+            className="underline cursor-pointer"
+            onClick={() => { setLoading(true); setFetchError(""); setRefreshKey(k => k + 1); }}
+          >
+            Retry
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

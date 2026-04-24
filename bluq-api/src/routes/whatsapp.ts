@@ -20,7 +20,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { whatsappQueue } from "../lib/queues.js";
 import { db } from "../db/client.js";
 import { whatsappUpdates, tasks, dprPhotos, projects } from "../db/schema.js";
-import { sendText } from "../lib/whatsapp-send.js";
+import { sendText, sendTemplate } from "../lib/whatsapp-send.js";
 import { eq, and, desc } from "drizzle-orm";
 import { verifySession } from "../lib/verifySession.js";
 
@@ -234,17 +234,29 @@ export async function whatsappRoute(app: FastifyInstance) {
       return reply.status(400).send({ error: "phone, contractorName, projectName required" });
     }
 
-    const message =
-      `Hi ${contractorName}! 👋\n\n` +
-      `You've been added as a contractor on *${projectName}* via Bluq — your construction management assistant.\n\n` +
-      `Every evening I'll send you a quick check-in to log your daily progress, materials, and any issues on site. It takes less than 2 minutes.\n\n` +
-      `Reply *HELP* anytime if you need assistance. See you on site! 🏗️`;
+    // Credentials check — fail fast with a clear message instead of a cryptic Meta 401
+    if (!process.env.WHATSAPP_ACCESS_TOKEN || !process.env.WHATSAPP_PHONE_NUMBER_ID) {
+      console.warn("[whatsapp] send-welcome skipped — WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID not set");
+      return reply.status(503).send({ error: "WhatsApp not configured on this environment" });
+    }
+
+    // Normalise phone: strip leading + (Meta API expects E.164 without +)
+    const normalised = phone.replace(/^\+/, "");
 
     try {
-      await sendText(phone, message);
+      await sendTemplate(normalised, "contractor_welcome", "en", [
+        {
+          type: "body",
+          parameters: [
+            { type: "text", text: contractorName },
+            { type: "text", text: projectName },
+          ],
+        },
+      ]);
+      console.log(`[whatsapp] Welcome sent to ${normalised} (${contractorName})`);
       return { ok: true };
     } catch (err: any) {
-      console.error("[whatsapp] Failed to send welcome to", phone, err.message);
+      console.error("[whatsapp] Failed to send welcome to", normalised, err.message);
       return reply.status(500).send({ error: err.message });
     }
   });

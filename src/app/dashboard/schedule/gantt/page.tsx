@@ -3,7 +3,8 @@
 import { useEffect, useState, useRef, useMemo, Suspense } from 'react';
 import { useSearchParams } from "next/navigation";
 import { getScheduleTasks, getScheduleDeps, type ScheduleTask, type TaskDependency } from "@/lib/mock-data";
-import { fetchTasks, fetchTaskDependencies, createTaskDependency, deleteTaskDependency, isRealProject } from "@/lib/api-client";
+import { fetchTasks, fetchTaskDependencies, createTaskDependency, deleteTaskDependency, fetchLatestScheduleVersion, isRealProject, type ScheduleVersion } from "@/lib/api-client";
+import { GapCheckPanel, type SuspectedGap } from "@/components/ui/GapCheckPanel";
 import { useWorkspace } from "@/context/workspace";
 import { useTaskSocket } from "@/hooks/useTaskSocket";
 
@@ -544,7 +545,7 @@ function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete 
             </div>
             <div>
               <label className={labelCls}>End Date *</label>
-              <input type="date" value={f.endDate} onChange={e => set("endDate", e.target.value)} className={inputCls + " text-[#24292f]"} />
+              <input type="date" value={f.endDate} min={f.startDate || undefined} onChange={e => set("endDate", e.target.value)} className={inputCls + " text-[#24292f]"} />
             </div>
           </div>
 
@@ -648,10 +649,13 @@ function GanttChartContent() {
   const [tasks, setTasks] = useState<ScheduleTask[]>([]);
   const [deps, setDeps] = useState<TaskDependency[]>([]);
   const [depIds, setDepIds] = useState<Record<string, string>>({});
+  const [scheduleVersion, setScheduleVersion] = useState<ScheduleVersion | null>(null);
   const depIdKey = (from: string, to: string) => `${from}__${to}`;
+
   useEffect(() => {
     if (real) {
       fetchTasks(projectIdParam, workspaceId!).then(setTasks);
+      fetchLatestScheduleVersion(projectIdParam, workspaceId!).then(setScheduleVersion);
       fetchTaskDependencies(projectIdParam, workspaceId!).then(rows => {
         setDeps(rows.map(r => ({ from: r.predecessorId, to: r.successorId, type: r.dependencyType, label: r.dependencyType })));
         const ids: Record<string, string> = {};
@@ -667,6 +671,13 @@ function GanttChartContent() {
       setDeps([]);
     }
   }, [projectIdParam, workspaceId, isDesignMode]);
+
+  const gapCheckGaps: SuspectedGap[] =
+    scheduleVersion?.scheduleJson?.gapCheck?.suspectedGaps?.filter(g => !g.alreadyCovered) ?? [];
+
+  const refreshTasks = () => {
+    if (real) fetchTasks(projectIdParam, workspaceId!).then(setTasks);
+  };
 
   // Real-time task updates via Socket.IO — patches tasks state when WhatsApp
   // updates arrive from site workers. Uses UUID when real project is selected.
@@ -1044,6 +1055,17 @@ function GanttChartContent() {
         <div className="px-4 py-3 text-[15px] font-bold text-[#24292f] border-b border-gray-200 bg-white">
           Gantt
         </div>
+
+        {/* Gap Check Panel — advisory only, never blocking */}
+        {real && scheduleVersion && gapCheckGaps.length > 0 && (
+          <GapCheckPanel
+            scheduleVersionId={scheduleVersion.id}
+            workspaceId={workspaceId!}
+            projectId={projectIdParam}
+            gaps={gapCheckGaps}
+            onTaskAdded={refreshTasks}
+          />
+        )}
 
         {/* 2. Toolbar */}
         <div className="flex justify-between items-center px-4 py-2.5 border-b border-gray-200 bg-gray-50 flex-wrap gap-3">

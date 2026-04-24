@@ -774,7 +774,7 @@ export const CORE_TASKS: TaskTemplate[] = [
     ],
     predecessors: [
       { taskCode: "FN-05", type: "FS", lagDays: 3, note: "for ground floor" },
-      { taskCode: "SS-09", type: "FS", lagDays: 3, note: "for upper floors" }
+      { taskCode: "SS-09", type: "FS", lagDays: 21, note: "for upper floors" }
     ],
     isCodeRef: ["IS 456", "IS 13920"],
     dsrRef: "DSR 8.1-8.4",
@@ -2045,7 +2045,7 @@ export const CORE_TASKS: TaskTemplate[] = [
       { role: "Mason", count: 2 },
       { role: "Labourer", count: 4 }
     ],
-    predecessors: [{ taskCode: "SP-10", type: "FS", lagDays: 7 }],
+    predecessors: [{ taskCode: "SS-09", type: "FS", lagDays: 0, note: "terrace" }],
     isCodeRef: ["IS 1905"],
     dsrRef: "DSR 4.1, 5.9",
     safetyChecks: ["Foundation for compound wall; plumb check"],

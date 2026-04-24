@@ -17,6 +17,9 @@ function LoginForm() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  const [isNewUser, setIsNewUser] = useState(false);
+  const isInviteFlow = redirect.startsWith("/invite");
+
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -30,11 +33,14 @@ function LoginForm() {
         body: JSON.stringify({ email: otpEmail }),
       });
       const { exists } = await checkRes.json();
-      if (!exists) {
+
+      if (!exists && !isInviteFlow) {
         setError("No account found with this email. Please sign up first.");
         setLoading(false);
         return;
       }
+
+      if (!exists) setIsNewUser(true);
 
       const { error: sendError } = await authClient.emailOtp.sendVerificationOtp({
         email: otpEmail,
@@ -61,10 +67,7 @@ function LoginForm() {
     setError("");
 
     try {
-      const { error: verifyError } = await authClient.signIn.emailOtp({
-        email: otpEmail,
-        otp,
-      });
+      const { error: verifyError } = await authClient.signIn.emailOtp({ email: otpEmail, otp });
 
       if (verifyError) {
         setError(verifyError.message || "Invalid or expired OTP.");
@@ -109,7 +112,12 @@ function LoginForm() {
         </form>
       ) : (
         <form onSubmit={handleVerifyOtp}>
-          {success && (
+          {isNewUser && (
+            <div className="mb-3 text-[12px] text-[#0969da] bg-[#ddf4ff] border border-[#0969da30] rounded-md px-3 py-2">
+              Creating your account — enter the OTP sent to {otpEmail}.
+            </div>
+          )}
+          {success && !isNewUser && (
             <div className="mb-3 text-[12px] text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">
               {success}
             </div>

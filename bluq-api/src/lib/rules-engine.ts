@@ -564,13 +564,18 @@ import {
             type: pred.type,
             lagDays: pred.lagDays,
           });
-        } else if (pred.note?.includes("for upper floors") && currentFloor > 0) {
-          // Upper floors depend on previous floor's version of this predecessor
-          resolved.push({
-            taskCode: wfc(pred.taskCode, currentFloor - 1),
-            type: pred.type,
-            lagDays: pred.lagDays,
-          });
+        } else if (pred.note?.includes("for upper floors")) {
+          // Upper floors wait for previous floor's completion.
+          // Ground floor (currentFloor === 0) skips this — it has no previous floor.
+          // Without this guard the default branch would add SS-09-F0 as a predecessor
+          // of SS-01-F0, creating a cycle that breaks the entire CPM forward pass.
+          if (currentFloor > 0) {
+            resolved.push({
+              taskCode: wfc(pred.taskCode, currentFloor - 1),
+              type: pred.type,
+              lagDays: pred.lagDays,
+            });
+          }
         } else if (pred.note?.includes("per floor") || pred.note?.includes("same floor")) {
           // Same floor dependency
           resolved.push({

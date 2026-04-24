@@ -2,7 +2,14 @@
 // Backend generates the signed upload URL using service role key — no Supabase
 // credentials needed on the frontend.
 
+import { authClient } from "@/lib/auth-client";
+
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
+
+async function getToken(): Promise<string> {
+  const session = await authClient.getSession();
+  return session?.data?.session?.token ?? "";
+}
 
 export async function uploadFileToStorage(
   file: File,
@@ -16,9 +23,12 @@ export async function uploadFileToStorage(
 
   onProgress?.(10);
 
+  const token = await getToken();
   // Step 1: get signed upload URL from backend
-  const params = new URLSearchParams({ fileName: file.name, workspaceId, projectId });
-  const urlRes = await fetch(`${BACKEND_URL}/documents/upload-url?${params}`);
+  const params = new URLSearchParams({ fileName: file.name, workspaceId, projectId, fileSize: String(file.size) });
+  const urlRes = await fetch(`${BACKEND_URL}/documents/upload-url?${params}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
   if (!urlRes.ok) {
     const body = await urlRes.json().catch(() => ({})) as { error?: string };
     throw new Error(body.error ?? "Failed to get upload URL");

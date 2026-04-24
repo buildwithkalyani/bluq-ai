@@ -3,7 +3,8 @@
 import { useState, useRef, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useWorkspace } from "@/context/workspace";
-import { fetchProjects, fetchDocuments, isRealProject, type BackendProject } from "@/lib/api-client";
+import { fetchProjects, fetchDocuments, isRealProject, registerDocument, type BackendProject } from "@/lib/api-client";
+import { uploadFileToStorage } from "@/lib/supabase-storage";
 
 // --- TYPESCRIPT INTERFACES ---
 type ApprovalStatus = "pending" | "approved" | "rejected";
@@ -101,11 +102,11 @@ function DocumentsPageContent() {
   const urlWorkspaceId = searchParams.get("workspaceId");
   const workspaceId = urlWorkspaceId ?? ctxWorkspaceId;
   const { isDesignMode } = useWorkspace();
-  const real = !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
 
   const [backendProjects, setBackendProjects] = useState<BackendProject[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>((!isDesignMode && isRealProject(projectIdParam)) ? projectIdParam : null);
-  const [files, setFiles] = useState<FileRecord[]>(isDesignMode ? INITIAL_FILES : real ? [] : []);
+  const real = !isDesignMode && isRealProject(activeProjectId ?? "") && !!workspaceId;
+  const [files, setFiles] = useState<FileRecord[]>(isDesignMode ? INITIAL_FILES : []);
   const [activeFolderId, setActiveFolderId] = useState<string>("drawings");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: null, direction: "asc" });
@@ -119,6 +120,8 @@ function DocumentsPageContent() {
   const [uploadDocType, setUploadDocType] = useState<string>("");
   const [uploadFileType, setUploadFileType] = useState<string>(SUPPORTED_FORMATS[15]);
   const [uploadFileVersion, setUploadFileVersion] = useState<string>("v1");
+  const [uploading, setUploading] = useState<boolean>(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load real projects
@@ -200,29 +203,55 @@ function DocumentsPageContent() {
     }
   };
 
-  const resetUploadState = () => { setShowUpload(false); setUploadFile(null); setUploadFileName(""); };
+  const resetUploadState = () => { setShowUpload(false); setUploadFile(null); setUploadFileName(""); setUploadError(null); };
 
-  const handleUploadSubmit = () => {
+  const handleUploadSubmit = async () => {
     if (!uploadFile) return;
     const match = uploadFileType.match(/\*\.([a-z0-9]+)\)/i);
     const fmt = match ? match[1].toUpperCase() : "DOC";
     const thumb = ["DWG","DXF"].includes(fmt) ? "📐" : ["ZIP","RAR"].includes(fmt) ? "📦" : ["3DS","OBJ","IFC","FBX","DAE","GLB"].includes(fmt) ? "🧊" : "📄";
+    const displayName = uploadFileName.trim() || uploadFile.name;
 
-    const newFile: FileRecord = {
-      id: Date.now(),
-      folderId: activeFolderId,
-      name: uploadFileName.trim() || uploadFile.name,
-      date: new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
-      docType: uploadDocType,
-      format: fmt,
-      uploadedBy: "Current User",
-      approvedBy: null,
-      approvalStatus: "pending",
-      ver: uploadFileVersion,
-      thumb,
-    };
-    setFiles([newFile, ...files]);
-    resetUploadState();
+    // In design mode or no real project — just add locally (no backend)
+    if (!real || !activeProjectId || !workspaceId) {
+      setFiles([{
+        id: Date.now(), folderId: activeFolderId, name: displayName,
+        date: new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
+        docType: uploadDocType, format: fmt, uploadedBy: "Current User",
+        approvedBy: null, approvalStatus: "pending", ver: uploadFileVersion, thumb,
+      }, ...files]);
+      resetUploadState();
+      return;
+    }
+
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const storagePath = await uploadFileToStorage(uploadFile, activeProjectId, workspaceId);
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+      const fileUrl = `${supabaseUrl}/storage/v1/object/documents/${storagePath}`;
+      const saved = await registerDocument({
+        workspaceId,
+        projectId: activeProjectId,
+        fileName: displayName,
+        fileUrl,
+        fileType: uploadDocType,
+        fileSize: uploadFile.size,
+        folder: activeFolderId,
+      });
+      setFiles(prev => [{
+        id: Date.now(), folderId: activeFolderId, name: saved.fileName,
+        date: new Date(saved.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
+        docType: saved.fileType ?? uploadDocType, format: fmt,
+        uploadedBy: saved.uploadedBy ?? "Current User",
+        approvedBy: null, approvalStatus: "pending", ver: uploadFileVersion, thumb,
+      }, ...prev]);
+      resetUploadState();
+    } catch (err: any) {
+      setUploadError(err.message ?? "Upload failed");
+    } finally {
+      setUploading(false);
+    }
   };
 
   const toggleMenu = (id: number, e: React.MouseEvent) => { e.stopPropagation(); setMenuOpenId(menuOpenId === id ? null : id); };
@@ -376,11 +405,14 @@ function DocumentsPageContent() {
                   {uploadFile ? <span className="text-[#3A4EA2] font-bold">{uploadFile.name}</span> : <>Drag & drop files here or <span className="text-[#3A4EA2] font-semibold">browse</span></>}
                 </div>
               </div>
+              {uploadError && (
+                <div className="mb-2 text-[12px] text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1">{uploadError}</div>
+              )}
               <div className="flex justify-end gap-2">
-                <button onClick={resetUploadState} className="px-3 py-1.5 text-[13px] font-semibold border border-[#D0D7DE] rounded-md text-[#24292f]">Cancel</button>
-                <button onClick={handleUploadSubmit} disabled={!uploadFile}
-                  className={`px-3 py-1.5 text-[13px] font-semibold text-white rounded-md ${uploadFile ? "bg-[#3A4EA2] hover:bg-[#0353a4]" : "bg-[#8C959F]"}`}>
-                  Upload File
+                <button onClick={resetUploadState} disabled={uploading} className="px-3 py-1.5 text-[13px] font-semibold border border-[#D0D7DE] rounded-md text-[#24292f]">Cancel</button>
+                <button onClick={handleUploadSubmit} disabled={!uploadFile || uploading}
+                  className={`px-3 py-1.5 text-[13px] font-semibold text-white rounded-md ${uploadFile && !uploading ? "bg-[#3A4EA2] hover:bg-[#0353a4]" : "bg-[#8C959F]"}`}>
+                  {uploading ? "Uploading…" : "Upload File"}
                 </button>
               </div>
             </Card>
