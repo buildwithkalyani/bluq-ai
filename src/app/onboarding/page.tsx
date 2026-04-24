@@ -48,24 +48,26 @@ export default function OnboardingPage() {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
 
+  const ls = (key: string) => (typeof window !== "undefined" ? localStorage.getItem(key) : null);
+
   // Form states — initialised from localStorage so Back navigation restores data
-  const [orgName, setOrgName] = useState(() => localStorage.getItem("ob_orgName") ?? "");
-  const [projectName, setProjectName] = useState(() => localStorage.getItem("ob_projectName") ?? "");
-  const [projectAddress, setProjectAddress] = useState(() => localStorage.getItem("ob_projectAddress") ?? "");
-  const [projectStage, setProjectStage] = useState(() => localStorage.getItem("ob_projectStage") ?? "Foundation");
-  const [projectType, setProjectType] = useState(() => localStorage.getItem("ob_projectType") ?? "Residential");
-  const [startDate, setStartDate] = useState(() => localStorage.getItem("ob_startDate") ?? "");
-  const [endDate, setEndDate] = useState(() => localStorage.getItem("ob_endDate") ?? "");
-  const [projectCode, setProjectCode] = useState(() => localStorage.getItem("ob_projectCode") ?? "");
+  const [orgName, setOrgName] = useState(() => ls("ob_orgName") ?? "");
+  const [projectName, setProjectName] = useState(() => ls("ob_projectName") ?? "");
+  const [projectAddress, setProjectAddress] = useState(() => ls("ob_projectAddress") ?? "");
+  const [projectStage, setProjectStage] = useState(() => ls("ob_projectStage") ?? "Foundation");
+  const [projectType, setProjectType] = useState(() => ls("ob_projectType") ?? "Residential");
+  const [startDate, setStartDate] = useState(() => ls("ob_startDate") ?? "");
+  const [endDate, setEndDate] = useState(() => ls("ob_endDate") ?? "");
+  const [projectCode, setProjectCode] = useState(() => ls("ob_projectCode") ?? "");
   const [inviteEmail, setInviteEmail] = useState("");
   const [invites, setInvites] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem("ob_invites") ?? "[]"); } catch { return []; }
+    try { return JSON.parse(ls("ob_invites") ?? "[]"); } catch { return []; }
   });
-  const [eodTime, setEodTime] = useState(() => localStorage.getItem("ob_eodTime") ?? "18:00");
+  const [eodTime, setEodTime] = useState(() => ls("ob_eodTime") ?? "18:00");
 
   // Contractor step state
   const [createdProjectId, setCreatedProjectId] = useState<string | null>(
-    () => localStorage.getItem("ob_projectId") ?? null
+    () => ls("ob_projectId") ?? null
   );
   const [contractors, setContractors] = useState([
     { name: "", countryCode: "+91", phone: "", selectedTaskIds: [] as string[] },
