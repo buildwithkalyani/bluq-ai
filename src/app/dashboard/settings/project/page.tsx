@@ -809,7 +809,7 @@ function TeamTab({ project, isMock = false, onSettingsUpdated }: { project: Back
 type SidebarItem = "General" | "Contractors" | "Team";
 
 function ProjectSettingsPageInner() {
-  const { workspaceId, isDesignMode } = useWorkspace();
+  const { workspaceId, isDesignMode, loading: wsLoading } = useWorkspace();
   const searchParams = useSearchParams();
   const urlProjectId = searchParams.get("projectId");
 
@@ -839,7 +839,8 @@ function ProjectSettingsPageInner() {
       }).finally(() => setLoadingProjects(false));
       return;
     }
-    if (!workspaceId) return;
+    if (wsLoading) return; // workspace still resolving
+    if (!workspaceId) { setLoadingProjects(false); return; }
     setLoadingProjects(true);
     fetchProjects(workspaceId)
       .then((data) => {
@@ -851,7 +852,7 @@ function ProjectSettingsPageInner() {
       })
       .catch(console.error)
       .finally(() => setLoadingProjects(false));
-  }, [workspaceId, urlProjectId, isDesignMode]);
+  }, [workspaceId, wsLoading, urlProjectId, isDesignMode]);
 
   const project = projects.find((p) => p.id === activeProjectId);
 

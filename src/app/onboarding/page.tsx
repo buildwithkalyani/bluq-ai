@@ -42,8 +42,10 @@ export default function OnboardingPage() {
   const [saving, setSaving] = useState(false);
   const [apiError, setApiError] = useState("");
 
-  // Created IDs — passed to subsequent steps
-  const [createdWorkspaceId, setCreatedWorkspaceId] = useState<string | null>(null);
+  // Created IDs — persisted in localStorage so returning users resume same org/project
+  const [createdWorkspaceId, setCreatedWorkspaceId] = useState<string | null>(
+    () => typeof window !== "undefined" ? localStorage.getItem("ob_workspaceId") : null
+  );
 
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
@@ -86,6 +88,9 @@ export default function OnboardingPage() {
   useEffect(() => { localStorage.setItem("ob_projectCode", projectCode); }, [projectCode]);
   useEffect(() => { localStorage.setItem("ob_invites", JSON.stringify(invites)); }, [invites]);
   useEffect(() => { localStorage.setItem("ob_eodTime", eodTime); }, [eodTime]);
+  useEffect(() => {
+    if (createdWorkspaceId) localStorage.setItem("ob_workspaceId", createdWorkspaceId);
+  }, [createdWorkspaceId]);
 
   const endDateRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -148,7 +153,24 @@ const apiPost = async (path: string, body: unknown) => {
       if (!orgName.trim()) return;
       setSaving(true);
       try {
-        const org = await apiPost("/orgs", { name: orgName.trim() });
+        // Reuse existing org if one already exists — prevents duplicate orgs on retry
+        let org: { id: string; name: string } | null = null;
+        if (createdWorkspaceId) {
+          org = { id: createdWorkspaceId, name: orgName.trim() };
+        } else {
+          const token = await getAuthToken();
+          const existing = await fetch(`${backendUrl}/orgs/mine`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (existing.ok) {
+            const orgs = await existing.json();
+            if (orgs?.[0]?.id) org = orgs[0];
+          }
+        }
+        if (!org) {
+          org = await apiPost("/orgs", { name: orgName.trim() });
+        }
+        if (!org?.id) throw new Error("Failed to create or load workspace.");
         setCreatedWorkspaceId(org.id);
 
         if (logoFile) {
@@ -337,6 +359,7 @@ const apiPost = async (path: string, body: unknown) => {
 
       localStorage.removeItem("onboarding_step");
       localStorage.setItem("onboarding_done", "true");
+      localStorage.removeItem("ob_workspaceId");
       const params = new URLSearchParams();
       if (createdProjectId) params.set("projectId", createdProjectId);
       if (createdWorkspaceId) params.set("workspaceId", createdWorkspaceId);
@@ -355,18 +378,17 @@ const apiPost = async (path: string, body: unknown) => {
   };
   const skip = () => {
     setApiError("");
-    if (step === STEPS.length - 1) {
-      localStorage.removeItem("onboarding_step");
-      localStorage.setItem("onboarding_done", "true");
-      ["ob_orgName","ob_projectName","ob_projectAddress","ob_projectStage","ob_projectType",
-       "ob_startDate","ob_endDate","ob_projectCode","ob_invites","ob_eodTime","ob_projectId"]
-        .forEach(k => localStorage.removeItem(k));
-      router.push("/dashboard/overview");
-    } else {
-      const next = Math.min(step + 1, STEPS.length - 1);
-      setStep(next);
-      localStorage.setItem("onboarding_step", next.toString());
-    }
+    // Any skip = user explicitly done — mark complete, never redirect back to onboarding
+    localStorage.removeItem("onboarding_step");
+    localStorage.setItem("onboarding_done", "true");
+    ["ob_orgName","ob_projectName","ob_projectAddress","ob_projectStage","ob_projectType",
+     "ob_startDate","ob_endDate","ob_projectCode","ob_invites","ob_eodTime","ob_projectId","ob_workspaceId"]
+      .forEach(k => localStorage.removeItem(k));
+    const params = new URLSearchParams();
+    if (createdWorkspaceId) params.set("workspaceId", createdWorkspaceId);
+    if (createdProjectId)   params.set("projectId",   createdProjectId);
+    const qs = params.toString();
+    router.push(`/dashboard/overview${qs ? `?${qs}` : ""}`);
   };
 
   const addInvite = () => {
