@@ -44,7 +44,7 @@ export default function OnboardingPage() {
 
   // Created IDs — persisted in localStorage so returning users resume same org/project
   const [createdWorkspaceId, setCreatedWorkspaceId] = useState<string | null>(
-    () => ls("ob_workspaceId") ?? null
+    () => typeof window !== "undefined" ? localStorage.getItem("ob_workspaceId") : null
   );
 
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -170,6 +170,7 @@ const apiPost = async (path: string, body: unknown) => {
         if (!org) {
           org = await apiPost("/orgs", { name: orgName.trim() });
         }
+        if (!org?.id) throw new Error("Failed to create or load workspace.");
         setCreatedWorkspaceId(org.id);
 
         if (logoFile) {
