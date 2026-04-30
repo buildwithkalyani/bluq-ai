@@ -445,6 +445,7 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     endDate: t.endDate,
     durationDays: t.finalDurationDays,
     contractor: t.contractorType,
+    phase: t.phase ?? null,
     area: t.wingLabel
       ? `${t.wingLabel} — ${t.floorLabel ?? ""}`.trim()
       : (t.floorLabel ?? null),

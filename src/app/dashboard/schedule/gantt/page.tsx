@@ -729,6 +729,29 @@ function getActivePreset(zoom: number): string | null {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Gantt Cache (stale-while-revalidate)
+// ─────────────────────────────────────────────────────────────
+type GanttCache = {
+  tasks: ScheduleTask[];
+  deps: TaskDependency[];
+  depIds: Record<string, string>;
+  lastFetchedAt: number;
+};
+
+function readGanttCache(projectId: string): GanttCache | null {
+  try {
+    const raw = localStorage.getItem(`bluq_gantt_${projectId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function writeGanttCache(projectId: string, data: Omit<GanttCache, "lastFetchedAt">): void {
+  try {
+    localStorage.setItem(`bluq_gantt_${projectId}`, JSON.stringify({ ...data, lastFetchedAt: Date.now() }));
+  } catch {}
+}
+
+// ─────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────
 function GanttChartContent() {
@@ -747,14 +770,30 @@ function GanttChartContent() {
 
   useEffect(() => {
     if (real) {
-      fetchTasks(projectIdParam, workspaceId!).then(setTasks);
-      fetchLatestScheduleVersion(projectIdParam, workspaceId!).then(setScheduleVersion);
-      fetchTaskDependencies(projectIdParam, workspaceId!).then(rows => {
-        setDeps(rows.map(r => ({ from: r.predecessorId, to: r.successorId, type: r.dependencyType, label: r.dependencyType })));
-        const ids: Record<string, string> = {};
-        rows.forEach(r => { ids[depIdKey(r.predecessorId, r.successorId)] = r.id; });
-        setDepIds(ids);
-      }).catch(() => setDeps([]));
+      // Show cached data instantly so chart isn't blank on navigate-back
+      const cached = readGanttCache(projectIdParam);
+      if (cached) {
+        setTasks(cached.tasks);
+        setDeps(cached.deps);
+        setDepIds(cached.depIds);
+      }
+
+      // Fetch fresh in background
+      Promise.all([
+        fetchTasks(projectIdParam, workspaceId!),
+        fetchTaskDependencies(projectIdParam, workspaceId!),
+        fetchLatestScheduleVersion(projectIdParam, workspaceId!),
+      ]).then(([freshTasks, depRows, version]) => {
+        const freshDeps = depRows.map(r => ({ from: r.predecessorId, to: r.successorId, type: r.dependencyType, label: r.dependencyType }));
+        const freshDepIds: Record<string, string> = {};
+        depRows.forEach(r => { freshDepIds[depIdKey(r.predecessorId, r.successorId)] = r.id; });
+
+        setTasks(freshTasks);
+        setDeps(freshDeps);
+        setDepIds(freshDepIds);
+        setScheduleVersion(version);
+        writeGanttCache(projectIdParam, { tasks: freshTasks, deps: freshDeps, depIds: freshDepIds });
+      }).catch(console.error);
     } else if (isDesignMode) {
       const numId = Number(projectIdParam);
       getScheduleTasks(numId).then(setTasks);
@@ -769,7 +808,10 @@ function GanttChartContent() {
     scheduleVersion?.scheduleJson?.gapCheck?.suspectedGaps?.filter(g => !g.alreadyCovered) ?? [];
 
   const refreshTasks = () => {
-    if (real) fetchTasks(projectIdParam, workspaceId!).then(setTasks);
+    if (real) fetchTasks(projectIdParam, workspaceId!).then(fresh => {
+      setTasks(fresh);
+      writeGanttCache(projectIdParam, { tasks: fresh, deps, depIds });
+    }).catch(console.error);
   };
 
   // Real-time task updates via Socket.IO — patches tasks state when WhatsApp

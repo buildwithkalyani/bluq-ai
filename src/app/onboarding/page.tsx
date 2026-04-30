@@ -310,25 +310,26 @@ const apiPost = async (path: string, body: unknown) => {
               }),
             });
 
-            // Send WhatsApp welcome message to each contractor
+            // Fire-and-forget WhatsApp welcome messages (don't block navigation)
             if (contractorEntries.length > 0) {
-              const token2 = await getAuthToken();
-              await Promise.allSettled(
-                contractorEntries.map((c) =>
-                  fetch(`${backendUrl}/whatsapp/send-welcome`, {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      ...(token2 ? { Authorization: `Bearer ${token2}` } : {}),
-                    },
-                    body: JSON.stringify({
-                      phone: c.phone,
-                      contractorName: c.name,
-                      projectName: projectName.trim() || "your project",
-                    }),
-                  })
-                )
-              );
+              getAuthToken().then((token2) => {
+                Promise.allSettled(
+                  contractorEntries.map((c) =>
+                    fetch(`${backendUrl}/whatsapp/send-welcome`, {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        ...(token2 ? { Authorization: `Bearer ${token2}` } : {}),
+                      },
+                      body: JSON.stringify({
+                        phone: c.phone,
+                        contractorName: c.name,
+                        projectName: projectName.trim() || "your project",
+                      }),
+                    })
+                  )
+                );
+              });
             }
           } catch {}
         }

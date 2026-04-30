@@ -48,7 +48,9 @@ async function getAuthToken(): Promise<string> {
 
 const WS_CACHE_KEY = "bluq_workspace";
 
-function readWorkspaceCache(): { id: string; name: string } | null {
+type WorkspaceCache = { id: string; name: string; userId: string };
+
+function readWorkspaceCache(): WorkspaceCache | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(WS_CACHE_KEY);
@@ -58,9 +60,9 @@ function readWorkspaceCache(): { id: string; name: string } | null {
   }
 }
 
-function writeWorkspaceCache(id: string, name: string): void {
+function writeWorkspaceCache(id: string, name: string, userId: string): void {
   try {
-    localStorage.setItem(WS_CACHE_KEY, JSON.stringify({ id, name }));
+    localStorage.setItem(WS_CACHE_KEY, JSON.stringify({ id, name, userId }));
   } catch {}
 }
 
@@ -71,22 +73,36 @@ function clearWorkspaceCache(): void {
 }
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const cached = readWorkspaceCache();
-  const [workspaceId, setWorkspaceId] = useState<string | null>(cached?.id ?? null);
-  const [orgName, setOrgName] = useState<string | null>(cached?.name ?? null);
-  const [loading, setLoading] = useState(cached === null); // skip loading if cache hit
   const { data: session } = authClient.useSession();
   const isDesignMode = DESIGN_ACCOUNTS.includes(session?.user?.email ?? "");
   const router = useRouter();
   const pathname = usePathname();
 
+  // Always start blank — cache is only trusted AFTER session confirms userId match.
+  // This prevents User B from briefly seeing User A's workspace on the same device.
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [orgName, setOrgName] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
   useEffect(() => {
-    if (session === undefined) return;
+    if (session === undefined) return; // auth still resolving
 
     if (!session?.user) {
-      clearWorkspaceCache();
       setLoading(false);
       return;
+    }
+
+    const userId = session.user.id;
+    const cached = readWorkspaceCache();
+
+    if (cached && cached.userId === userId) {
+      // Cache belongs to this exact user — safe to use immediately
+      setWorkspaceId(cached.id);
+      setOrgName(cached.name);
+      setLoading(false); // show cached data; backend verify runs below
+    } else if (cached && cached.userId !== userId) {
+      // Different user's cache — discard it
+      clearWorkspaceCache();
     }
 
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
@@ -104,7 +120,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           if (first) {
             setWorkspaceId(first.id);
             setOrgName(first.name);
-            writeWorkspaceCache(first.id, first.name);
+            writeWorkspaceCache(first.id, first.name, userId);
             const savedStep = parseInt(localStorage.getItem("onboarding_step") ?? "0") || 0;
             const done = localStorage.getItem("onboarding_done") === "true";
             if (!done && savedStep > 0 && pathname !== "/onboarding") {
@@ -120,9 +136,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         })
         .catch((err) => {
           console.error("workspace fetch error:", err.message);
-          // keep cached value on network error — don't redirect if we have stale data
-          if (!workspaceId && pathname !== "/onboarding" && !pathname.startsWith("/invite")) {
-            router.replace("/onboarding");
+          // If we had no valid cache and backend fails, redirect to onboarding
+          if (!cached?.userId || cached.userId !== userId) {
+            if (pathname !== "/onboarding" && !pathname.startsWith("/invite")) {
+              router.replace("/onboarding");
+            }
           }
         })
         .finally(() => setLoading(false));

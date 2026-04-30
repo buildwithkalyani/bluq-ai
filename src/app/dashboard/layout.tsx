@@ -7,6 +7,7 @@ import { getProjects, Project } from "@/lib/mock-data";
 import { WorkspaceProvider, useWorkspace } from "@/context/workspace";
 import { fetchProjects, createProject, clearAuthTokenCache } from "@/lib/api-client";
 import { authClient } from "@/lib/auth-client";
+import { useSchedulePoller } from "@/hooks/useSchedulePoller";
 
 // ─── NAV CONFIGURATION ───────────────────────────────────────
 const NAV_ITEMS = [
@@ -507,7 +508,6 @@ function ProfileDropdown() {
   const handleLogout = async () => {
     setIsOpen(false);
     clearAuthTokenCache();
-    localStorage.removeItem("bluq_workspace");
     await authClient.signOut();
     router.push("/login");
   };
@@ -626,6 +626,12 @@ function ProfileDropdown() {
     </>
   );
 }
+// ─── BACKGROUND SCHEDULE POLLER ─────────────────────────────
+function SchedulePollerMount() {
+  useSchedulePoller();
+  return null;
+}
+
 // ─── MAIN COMPONENTS ────────────────────────────────────────
 function TopNav() {
   const pathname = usePathname();
@@ -669,6 +675,7 @@ export default function DashboardLayout({
 }) {
   return (
     <WorkspaceProvider>
+      <SchedulePollerMount />
       <div className="h-screen flex flex-col bg-[#F6F8FA] text-[#24292f]">
         <Suspense fallback={null}>
           <TopNav />
