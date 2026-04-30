@@ -93,6 +93,16 @@ function ListViewPageContent() {
   const contractorOptions = useMemo(() => ["All", ...Array.from(new Set(tasks.filter(t => t.contractor && !t.parentTaskId).map(t => t.contractor))).sort()], [tasks]);
   const spaceOptions      = useMemo(() => ["All", ...Array.from(new Set(tasks.filter(t => t.space && !t.parentTaskId).map(t => t.space))).sort()], [tasks]);
 
+  const headerStats = useMemo(() => {
+    const parents = tasks.filter(t => !t.parentTaskId);
+    const completed  = parents.filter(t => t.status === "completed").length;
+    const inProgress = parents.filter(t => t.status === "inProgress").length;
+    const atRisk     = parents.filter(t => t.status === "runningLate" || t.status === "delayed").length;
+    const total      = parents.length;
+    const overall    = total ? Math.round(parents.reduce((s, t) => s + t.pct, 0) / total) : 0;
+    return { completed, inProgress, atRisk, total, overall };
+  }, [tasks]);
+
   const filteredTasks = useMemo(() => tasks.filter(t => {
     const q = search.toLowerCase();
     if (!(t.name.toLowerCase().includes(q) || t.contractor?.toLowerCase().includes(q) || t.space?.toLowerCase().includes(q))) return false;
@@ -154,8 +164,35 @@ function ListViewPageContent() {
   return (
     <div className="p-5 overflow-y-auto h-full bg-[#f6f8fa]">
       {/* Toolbar */}
-      <div className="flex justify-between items-center mb-4">
-        <SectionTitle>Task List</SectionTitle>
+      <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
+        <div className="flex items-center gap-5">
+          <SectionTitle>Task List</SectionTitle>
+          <div className="flex items-center gap-4 pl-4 border-l border-[#D0D7DE]">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[#22c55e] shrink-0" />
+              <span className="text-[12px] text-[#57606a] font-medium">{headerStats.completed} Completed</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[#3b82f6] shrink-0" />
+              <span className="text-[12px] text-[#57606a] font-medium">{headerStats.inProgress} In Progress</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[#d97706] shrink-0" />
+              <span className="text-[12px] text-[#57606a] font-medium">{headerStats.atRisk} At Risk</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[#94a3b8] shrink-0" />
+              <span className="text-[12px] text-[#57606a] font-medium">{headerStats.total} Total</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 pl-4 border-l border-[#D0D7DE]">
+            <span className="text-[12px] font-semibold text-[#3A4EA2]">Overall</span>
+            <div className="w-28 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+              <div className="h-full rounded-full bg-[#3A4EA2] transition-all" style={{ width: `${headerStats.overall}%` }} />
+            </div>
+            <span className="text-[13px] font-bold text-[#3A4EA2] tabular-nums">{headerStats.overall}%</span>
+          </div>
+        </div>
         <div className="flex gap-3 items-center">
           <div className="flex items-center gap-2 border border-[#D0D7DE] rounded-md px-2.5 py-1.5 bg-white shadow-sm focus-within:border-[#3A4EA2] transition-all">
             <span className="text-[12px] text-[#8C959F]">🔍</span>

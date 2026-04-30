@@ -234,6 +234,7 @@ export async function tasksRoute(app: FastifyInstance) {
         durationDays?: number;
         contractor?: string;
         area?: string;
+        phase?: string;
         isMilestone?: boolean;
         parentTaskId?: string;
         sortOrder?: number;

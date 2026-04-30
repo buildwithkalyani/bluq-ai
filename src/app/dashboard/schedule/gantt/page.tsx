@@ -16,7 +16,7 @@ const STATUS_CONFIG = {
   inProgress:  { color: "#3b82f6", label: "In progress" },
   runningLate: { color: "#d97706", label: "Running late" },
   delayed:     { color: "#ef4444", label: "Delayed" },
-  notStarted:  { color: "#94a3b8", label: "Not started" },
+  notStarted:  { color: "#6366f1", label: "Not started" },
 } as const;
 
 type StatusKey = keyof typeof STATUS_CONFIG;
@@ -130,6 +130,9 @@ function calculateCriticalPath(tasks: ScheduleTask[], deps: TaskDependency[]): S
 // ─────────────────────────────────────────────────────────────
 const SUB_ROW_H = 36;
 
+const effectiveStatus = (t: { status: string; pct: number }): StatusKey =>
+  t.status === "notStarted" && t.pct > 0 ? "inProgress" : t.status as StatusKey;
+
 function GanttRow({ t, selected, chartStart, pixelsPerDay, onSelect, onUpdateDates, isOnCriticalPath, showCriticalPath, onStartConnection, onDropConnection, drawingDep }: any) {
   const [isDragging, setIsDragging] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -165,7 +168,7 @@ function GanttRow({ t, selected, chartStart, pixelsPerDay, onSelect, onUpdateDat
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
   }, [isDragging, t, onUpdateDates, pixelsPerDay]);
 
-  const sc = STATUS_CONFIG[t.status as StatusKey];
+  const sc = STATUS_CONFIG[effectiveStatus(t)];
   const isCrit = showCriticalPath && isOnCriticalPath;
   const barColor = isCrit ? "#ef4444" : sc.color;
   const showPorts = hovered || !!drawingDep;
@@ -237,7 +240,7 @@ function SVGArrows({ deps, tasks, taskYMap, chartStart, pixelsPerDay, totalH, sh
     <svg className="absolute top-0 overflow-visible" style={{ left: 0, width: "100%", height: totalH, zIndex: 5, pointerEvents: "none" }}>
       <defs>
         <marker id="arr-crit" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M1,1 L5,3 L1,5 Z" fill="#ef4444" /></marker>
-        <marker id="arr-norm" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M1,1 L5,3 L1,5 Z" fill="#94a3b8" /></marker>
+        <marker id="arr-norm" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M1,1 L5,3 L1,5 Z" fill="#64748b" /></marker>
         <marker id="arr-hover" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M1,1 L5,3 L1,5 Z" fill="#3b82f6" /></marker>
         <marker id="arr-draw" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M1,1 L5,3 L1,5 Z" fill="#3b82f6" /></marker>
       </defs>
@@ -250,8 +253,8 @@ function SVGArrows({ deps, tasks, taskYMap, chartStart, pixelsPerDay, totalH, sh
         const isOnCritical = showCriticalPath && criticalPathTasks.has(dep.from) && criticalPathTasks.has(dep.to);
         const isHov = hoveredDep === i || editingDep === i;
         const baseOpacity = showCriticalPath && !isOnCritical ? 0.2 : 1;
-        const color = isHov ? "#3b82f6" : isOnCritical ? "#ef4444" : "#94a3b8";
-        const sw = isHov ? 2 : isOnCritical ? 2 : 1.5;
+        const color = isHov ? "#3b82f6" : isOnCritical ? "#ef4444" : "#64748b";
+        const sw = isHov ? 2.5 : isOnCritical ? 2.5 : 1.5;
         const marker = isHov ? "url(#arr-hover)" : isOnCritical ? "url(#arr-crit)" : "url(#arr-norm)";
 
         const fromStartX = diffDays(chartStart, fromT.startDate) * pixelsPerDay;
@@ -259,31 +262,96 @@ function SVGArrows({ deps, tasks, taskYMap, chartStart, pixelsPerDay, totalH, sh
         const toStartX   = diffDays(chartStart, toT.startDate)   * pixelsPerDay;
         const toEndX     = diffDays(chartStart, toT.endDate)     * pixelsPerDay;
 
-        let x1: number, x2: number, elbowX: number;
-        if (dep.type === "FS") {
-          x1 = fromEndX; x2 = toStartX;
-          elbowX = x2 > x1 + 20 ? Math.round((x1 + x2) / 2) : x1 + 16;
-        } else if (dep.type === "SS") {
-          x1 = fromStartX; x2 = toStartX;
-          elbowX = Math.min(x1, x2) - 14;
-        } else if (dep.type === "FF") {
-          x1 = fromEndX; x2 = toEndX;
-          elbowX = Math.max(x1, x2) + 14;
-        } else { // SF
-          x1 = fromStartX; x2 = toEndX;
-          elbowX = Math.min(x1, x2) - 14;
-        }
-
-        // bar center per task: barTop + barH/2
-        const getBarY = (t: any) => {
+        const midBarY = (t: any) => {
           const bt = t.parentTaskId ? 11 : 14;
           const bh = t.parentTaskId ? 14 : 20;
           return (taskYMap[t.id] ?? 0) + bt + bh / 2;
         };
-        const y1 = getBarY(fromT);
-        const y2 = getBarY(toT);
-        const pts = `${x1},${y1} ${elbowX},${y1} ${elbowX},${y2} ${x2},${y2}`;
-        const midY = Math.round((y1 + y2) / 2);
+
+        const dotY1 = midBarY(fromT);
+        const dotY2 = midBarY(toT);
+
+        let x1: number, x2: number, pathD: string;
+
+        const fromRowY = taskYMap[fromT.id] ?? 0;
+        const toRowY   = taskYMap[toT.id]   ?? 0;
+
+        // Collect bar-body X spans for all tasks whose rows overlap the vertical routing range
+        const segTopY = Math.min(dotY1, dotY2);
+        const segBotY = Math.max(dotY1, dotY2);
+        const spans = (tasks as any[])
+          .filter(t => {
+            const ty = taskYMap[t.id];
+            if (ty === undefined || ty === fromRowY || ty === toRowY) return false;
+            const bt = t.parentTaskId ? 11 : 14;
+            const bb = bt + (t.parentTaskId ? 14 : 20);
+            return ty + bb > segTopY && ty + bt < segBotY;
+          })
+          .map(t => ({
+            l: diffDays(chartStart, t.startDate) * pixelsPerDay,
+            r: diffDays(chartStart, t.endDate)   * pixelsPerDay,
+          }));
+
+        // Include from/to bars in clearance so vertical elbow never crosses them
+        const fromBarSpan = { l: fromStartX, r: fromEndX };
+        const toBarSpan   = { l: toStartX,   r: toEndX   };
+        const allSpans    = [...spans, fromBarSpan, toBarSpan];
+        const isClear     = (cx: number) => allSpans.every(b => cx < b.l - 8 || cx > b.r + 8);
+        const leftEdge    = Math.min(...allSpans.map(b => b.l));
+        const rightEdge   = Math.max(...allSpans.map(b => b.r));
+        const pickX = (candidates: number[]) =>
+          candidates.find(cx => isClear(cx)) ?? (rightEdge + 50);
+
+        const toRH   = toT.parentTaskId ? SUB_ROW_H : ROW_H;
+        const fromRH = fromT.parentTaskId ? SUB_ROW_H : ROW_H;
+        // Route below to-row: 2px past to-row bottom, outside any bar body
+        const belowTo      = toRowY   + toRH + 2;
+        const gapBelowFrom = fromRowY + fromRH;
+
+        const fsPath = (ex: number): string => {
+          if (ex > x2 + 1) {
+            // Backward/overlap FS: go right → drop past B's row bottom → slide left of B → rise into B
+            return `M ${x1},${dotY1} L ${ex},${dotY1} L ${ex},${belowTo} L ${x2 - 4},${belowTo} L ${x2 - 4},${dotY2} L ${x2},${dotY2}`;
+          }
+          if (ex < x1 - 1) {
+            return `M ${x1},${dotY1} L ${x1 + 1},${dotY1} L ${x1 + 1},${gapBelowFrom} L ${ex},${gapBelowFrom} L ${ex},${dotY2} L ${x2},${dotY2}`;
+          }
+          return `M ${x1},${dotY1} L ${ex},${dotY1} L ${ex},${dotY2} L ${x2},${dotY2}`;
+        };
+
+        if (dep.type === "FS") {
+          x1 = fromEndX; x2 = toStartX;
+          const ex = x2 >= x1 + 2
+            // Forward: prefer midpoint (always between x1 and x2 → clean L)
+            ? pickX([Math.round((x1 + x2) / 2), leftEdge - 24, rightEdge + 50])
+            // Backward: must be right of BOTH bars so vertical clears them
+            : pickX([Math.max(fromEndX, toEndX) + 30, rightEdge + 50, leftEdge - 24]);
+          pathD = fsPath(ex);
+        } else if (dep.type === "SS") {
+          x1 = fromStartX; x2 = toStartX;
+          // Elbow left of both starts — first seg exits bar-left cleanly, last arrives from left
+          const ex = pickX([Math.min(x1, x2) - 24, leftEdge - 24, rightEdge + 50]);
+          pathD = `M ${x1},${dotY1} L ${ex},${dotY1} L ${ex},${dotY2} L ${x2},${dotY2}`;
+        } else if (dep.type === "FF") {
+          x1 = fromEndX; x2 = toEndX;
+          // Elbow right of both ends — last seg arrives at bar-right from outside (no crossing)
+          const ex = pickX([Math.max(x1, x2) + 24, rightEdge + 24, leftEdge - 24]);
+          pathD = `M ${x1},${dotY1} L ${ex},${dotY1} L ${ex},${dotY2} L ${x2},${dotY2}`;
+        } else { // SF
+          x1 = fromStartX; x2 = toEndX;
+          const ex = pickX([Math.min(x1, x2) - 24, leftEdge - 24, rightEdge + 50]);
+          const toStartXSF = diffDays(chartStart, toT.startDate) * pixelsPerDay;
+          if (ex < toStartXSF - 1) {
+            // Route below to-row to arrive at bar-right without crossing
+            pathD = `M ${x1},${dotY1} L ${ex},${dotY1} L ${ex},${belowTo} L ${x2 + 4},${belowTo} L ${x2 + 4},${dotY2} L ${x2},${dotY2}`;
+          } else {
+            pathD = `M ${x1},${dotY1} L ${ex},${dotY1} L ${ex},${dotY2} L ${x2},${dotY2}`;
+          }
+        }
+
+        // popup anchor = elbow point
+        const elbowX = Math.round((x1 + x2) / 2);
+        const midY = Math.round((dotY1 + dotY2) / 2);
 
         return (
           <g key={i} opacity={baseOpacity} style={{ pointerEvents: "all" }}
@@ -292,12 +360,14 @@ function SVGArrows({ deps, tasks, taskYMap, chartStart, pixelsPerDay, totalH, sh
             onClick={(e) => { e.stopPropagation(); setEditingDep(editingDep === i ? null : i); }}
           >
             {/* Fat invisible hit strip */}
-            <polyline points={pts} fill="none" stroke="transparent" strokeWidth={14} style={{ cursor: "pointer" }} />
+            <path d={pathD} fill="none" stroke="transparent" strokeWidth={14} style={{ cursor: "pointer" }} />
             {/* Visible arrow */}
-            <polyline points={pts} fill="none" stroke={color} strokeWidth={sw}
-              strokeDasharray={isOnCritical ? "" : "5 3"} markerEnd={marker} style={{ pointerEvents: "none" }} />
-            {/* Origin dot */}
-            <circle cx={x1} cy={y1} r={3} fill={color} style={{ pointerEvents: "none" }} />
+            <path d={pathD} fill="none" stroke={color} strokeWidth={sw}
+              markerEnd={marker} style={{ pointerEvents: "none" }} />
+            {/* Origin dot — right-center of from-bar */}
+            <circle cx={x1} cy={dotY1} r={3} fill={color} style={{ pointerEvents: "none" }} />
+            {/* Destination dot — left-center of to-bar */}
+            <circle cx={x2} cy={dotY2} r={3} fill={color} style={{ pointerEvents: "none" }} />
 
             {/* Edit popup on click */}
             {editingDep === i && (
@@ -452,7 +522,21 @@ function TaskDetailPanel({ task, deps, tasks, onClose, onEditClick, onDelete, cr
 
 const PHASE_OPTIONS = ["Site Preparation","Foundation","Structure","MEP","Finishing","Handover"];
 
-function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete }: any) {
+function DonutRing({ pct, size = 20, color = "#3A4EA2" }: { pct: number; size?: number; color?: string }) {
+  const r = (size - 4) / 2;
+  const circ = 2 * Math.PI * r;
+  const dash = Math.max(0, Math.min(pct / 100, 1)) * circ;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink: 0 }}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#e5e7eb" strokeWidth={3} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={3}
+        strokeDasharray={`${dash} ${circ}`} strokeLinecap="round"
+        transform={`rotate(-90 ${size / 2} ${size / 2})`} />
+    </svg>
+  );
+}
+
+function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete, defaultPhase, defaultArea }: any) {
   const emptyForm = { name: "", phase: "", contractor: "", space: "", startDate: "", endDate: "", status: "notStarted" as StatusKey, pct: 0 };
   const [formData, setFormData] = useState(emptyForm);
   const [selectedPreds, setSelectedPreds] = useState<{id: string, type: string}[]>([]);
@@ -464,7 +548,7 @@ function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete 
         setFormData({ name: task.name, phase: task.phase || "", contractor: task.contractor || "", space: task.space || "", startDate: task.startDate, endDate: task.endDate, status: task.status || "notStarted", pct: task.pct ?? 0 });
         setSelectedPreds(deps.filter((d: any) => d.to === task.id).map((d: any) => ({ id: d.from, type: d.type })));
       } else {
-        setFormData(emptyForm);
+        setFormData({ ...emptyForm, phase: defaultPhase || "", space: defaultArea || "" });
         setSelectedPreds([]);
       }
       setError("");
@@ -516,26 +600,35 @@ function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete 
             <input type="text" placeholder="e.g. Column Formwork Level 3" value={f.name} onChange={e => set("name", e.target.value)} className={inputCls} />
           </div>
 
-          {/* Phase + Space */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>Phase *</label>
-              <select value={f.phase} onChange={e => set("phase", e.target.value)} className={inputCls}>
-                <option value="">Select phase…</option>
-                {PHASE_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
+          {/* Phase + Space — hidden when pre-filled from area "+" button */}
+          {!(defaultPhase && defaultArea) && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Phase *</label>
+                <select value={f.phase} onChange={e => set("phase", e.target.value)} className={inputCls}>
+                  <option value="">Select phase…</option>
+                  {PHASE_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>Space / Zone</label>
+                <input type="text" placeholder="e.g. Zone A — L3" value={f.space} onChange={e => set("space", e.target.value)} className={inputCls} />
+              </div>
             </div>
-            <div>
-              <label className={labelCls}>Space / Zone</label>
-              <input type="text" placeholder="e.g. Zone A — L3" value={f.space} onChange={e => set("space", e.target.value)} className={inputCls} />
+          )}
+          {defaultPhase && defaultArea && (
+            <div className="text-[12px] text-gray-500 bg-gray-50 rounded-md px-3 py-2">
+              Adding to <span className="font-semibold text-gray-800">{defaultPhase}</span> › <span className="font-semibold text-gray-800">{defaultArea}</span>
             </div>
-          </div>
+          )}
 
-          {/* Contractor */}
-          <div>
-            <label className={labelCls}>Contractor</label>
-            <input type="text" placeholder="e.g. Rajesh Kumar" value={f.contractor} onChange={e => set("contractor", e.target.value)} className={inputCls} />
-          </div>
+          {/* Contractor — hidden when adding from area shortcut */}
+          {!(defaultPhase && defaultArea) && (
+            <div>
+              <label className={labelCls}>Contractor</label>
+              <input type="text" placeholder="e.g. Rajesh Kumar" value={f.contractor} onChange={e => set("contractor", e.target.value)} className={inputCls} />
+            </div>
+          )}
 
           {/* Start + End */}
           <div className="grid grid-cols-2 gap-3">
@@ -636,6 +729,29 @@ function getActivePreset(zoom: number): string | null {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Gantt Cache (stale-while-revalidate)
+// ─────────────────────────────────────────────────────────────
+type GanttCache = {
+  tasks: ScheduleTask[];
+  deps: TaskDependency[];
+  depIds: Record<string, string>;
+  lastFetchedAt: number;
+};
+
+function readGanttCache(projectId: string): GanttCache | null {
+  try {
+    const raw = localStorage.getItem(`bluq_gantt_${projectId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function writeGanttCache(projectId: string, data: Omit<GanttCache, "lastFetchedAt">): void {
+  try {
+    localStorage.setItem(`bluq_gantt_${projectId}`, JSON.stringify({ ...data, lastFetchedAt: Date.now() }));
+  } catch {}
+}
+
+// ─────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────
 function GanttChartContent() {
@@ -654,14 +770,30 @@ function GanttChartContent() {
 
   useEffect(() => {
     if (real) {
-      fetchTasks(projectIdParam, workspaceId!).then(setTasks);
-      fetchLatestScheduleVersion(projectIdParam, workspaceId!).then(setScheduleVersion);
-      fetchTaskDependencies(projectIdParam, workspaceId!).then(rows => {
-        setDeps(rows.map(r => ({ from: r.predecessorId, to: r.successorId, type: r.dependencyType, label: r.dependencyType })));
-        const ids: Record<string, string> = {};
-        rows.forEach(r => { ids[depIdKey(r.predecessorId, r.successorId)] = r.id; });
-        setDepIds(ids);
-      }).catch(() => setDeps([]));
+      // Show cached data instantly so chart isn't blank on navigate-back
+      const cached = readGanttCache(projectIdParam);
+      if (cached) {
+        setTasks(cached.tasks);
+        setDeps(cached.deps);
+        setDepIds(cached.depIds);
+      }
+
+      // Fetch fresh in background
+      Promise.all([
+        fetchTasks(projectIdParam, workspaceId!),
+        fetchTaskDependencies(projectIdParam, workspaceId!),
+        fetchLatestScheduleVersion(projectIdParam, workspaceId!),
+      ]).then(([freshTasks, depRows, version]) => {
+        const freshDeps = depRows.map(r => ({ from: r.predecessorId, to: r.successorId, type: r.dependencyType, label: r.dependencyType }));
+        const freshDepIds: Record<string, string> = {};
+        depRows.forEach(r => { freshDepIds[depIdKey(r.predecessorId, r.successorId)] = r.id; });
+
+        setTasks(freshTasks);
+        setDeps(freshDeps);
+        setDepIds(freshDepIds);
+        setScheduleVersion(version);
+        writeGanttCache(projectIdParam, { tasks: freshTasks, deps: freshDeps, depIds: freshDepIds });
+      }).catch(console.error);
     } else if (isDesignMode) {
       const numId = Number(projectIdParam);
       getScheduleTasks(numId).then(setTasks);
@@ -676,7 +808,10 @@ function GanttChartContent() {
     scheduleVersion?.scheduleJson?.gapCheck?.suspectedGaps?.filter(g => !g.alreadyCovered) ?? [];
 
   const refreshTasks = () => {
-    if (real) fetchTasks(projectIdParam, workspaceId!).then(setTasks);
+    if (real) fetchTasks(projectIdParam, workspaceId!).then(fresh => {
+      setTasks(fresh);
+      writeGanttCache(projectIdParam, { tasks: fresh, deps, depIds });
+    }).catch(console.error);
   };
 
   // Real-time task updates via Socket.IO — patches tasks state when WhatsApp
@@ -725,7 +860,9 @@ function GanttChartContent() {
   const BASE_PIXELS_PER_DAY = 20;
   const pixelsPerDay = BASE_PIXELS_PER_DAY * zoomLevel;
 
-  const [modalConfig, setModalConfig] = useState({ isOpen: false, mode: "add", taskId: null as string | null });
+  const [modalConfig, setModalConfig] = useState({ isOpen: false, mode: "add", taskId: null as string | null, defaultPhase: "", defaultArea: "" });
+  const [showContractors, setShowContractors] = useState(true);
+  const leftPanelW = showContractors ? 440 : 320;
 
   // Zoom helpers
   const zoomIn = () => setZoomLevel(p => Math.min(3, +(p + 0.2).toFixed(1)));
@@ -735,6 +872,17 @@ function GanttChartContent() {
   // Derived filter option lists
   const contractorOptions = useMemo(() => ["All", ...Array.from(new Set(tasks.filter(t => t.contractor).map(t => t.contractor))).sort()], [tasks]);
   const spaceOptions = useMemo(() => ["All", ...Array.from(new Set(tasks.filter(t => t.space).map(t => t.space))).sort()], [tasks]);
+
+  // Header stats (parent tasks only)
+  const headerStats = useMemo(() => {
+    const parents = tasks.filter(t => !t.parentTaskId);
+    const completed  = parents.filter(t => t.status === "completed").length;
+    const inProgress = parents.filter(t => t.status === "inProgress").length;
+    const atRisk     = parents.filter(t => t.status === "runningLate" || t.status === "delayed").length;
+    const total      = parents.length;
+    const overall    = total ? Math.round(parents.reduce((s, t) => s + t.pct, 0) / total) : 0;
+    return { completed, inProgress, atRisk, total, overall };
+  }, [tasks]);
 
   // 1. Search & Filter
   const filteredTasks = tasks.filter((t) => {
@@ -1051,9 +1199,36 @@ function GanttChartContent() {
     <div className="flex w-full h-full min-h-[600px] border border-gray-200 rounded-xl overflow-hidden bg-white font-sans relative">
       <div className="flex-1 flex flex-col min-w-0">
         
-        {/* 1. Gantt Heading */}
-        <div className="px-4 py-3 text-[15px] font-bold text-[#24292f] border-b border-gray-200 bg-white">
-          Gantt
+        {/* 1. Gantt Heading + Stats */}
+        <div className="px-4 py-2.5 border-b border-gray-200 bg-white" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+          <span className="text-[15px] font-bold text-[#24292f]">Gantt</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e", display: "inline-block", flexShrink: 0 }} />
+                <span style={{ fontSize: 12, color: "#57606a", fontWeight: 500 }}>{headerStats.completed} Completed</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#3b82f6", display: "inline-block", flexShrink: 0 }} />
+                <span style={{ fontSize: 12, color: "#57606a", fontWeight: 500 }}>{headerStats.inProgress} In Progress</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#d97706", display: "inline-block", flexShrink: 0 }} />
+                <span style={{ fontSize: 12, color: "#57606a", fontWeight: 500 }}>{headerStats.atRisk} At Risk</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#94a3b8", display: "inline-block", flexShrink: 0 }} />
+                <span style={{ fontSize: 12, color: "#57606a", fontWeight: 500 }}>{headerStats.total} Total</span>
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, borderLeft: "1px solid #e5e7eb", paddingLeft: 16 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "#3A4EA2" }}>Overall</span>
+              <div style={{ width: 100, height: 6, background: "#e5e7eb", borderRadius: 9999, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${headerStats.overall}%`, background: "#3A4EA2", borderRadius: 9999, transition: "width 0.3s" }} />
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#3A4EA2", fontVariantNumeric: "tabular-nums" }}>{headerStats.overall}%</span>
+            </div>
+          </div>
         </div>
 
         {/* Gap Check Panel — advisory only, never blocking */}
@@ -1184,7 +1359,7 @@ function GanttChartContent() {
 
             {/* Add Task Button */}
             <button
-              onClick={() => setModalConfig({ isOpen: true, mode: "add", taskId: null })}
+              onClick={() => setModalConfig({ isOpen: true, mode: "add", taskId: null, defaultPhase: "", defaultArea: "" })}
               className="px-4 py-1.5 text-[12px] font-semibold bg-[#3A4EA2] text-white rounded-md flex items-center gap-1.5 shadow-sm hover:bg-[#0353A4] transition-colors ml-1"
             >
               + Add Task
@@ -1223,8 +1398,19 @@ function GanttChartContent() {
           onMouseUp={() => setDrawingDep(null)}
         >
           {/* Frozen Left Column */}
-          <div className="sticky left-0 z-30 bg-white border-r border-gray-200 shadow-[1px_0_0_0_#e5e7eb]" style={{ width: TIMELINE_LEFT_OFFSET, minWidth: TIMELINE_LEFT_OFFSET }}>
-            <div className="flex items-center px-4 text-[11px] font-medium text-gray-500 border-b bg-gray-50" style={{ height: HEADER_H }}>Task Name</div>
+          <div className="sticky left-0 z-30 bg-white border-r border-gray-200 shadow-[1px_0_0_0_#e5e7eb]" style={{ width: leftPanelW, minWidth: leftPanelW }}>
+            <div className="flex items-center border-b bg-gray-50 text-[11px] font-medium text-gray-500" style={{ height: HEADER_H }}>
+              <div className="flex-1 px-4">Task Name</div>
+              <div className="w-[120px] shrink-0 border-l border-gray-200 flex items-center justify-between px-2 h-full">
+                <span>{showContractors ? "Contractors" : ""}</span>
+                <button
+                  onClick={() => setShowContractors(v => !v)}
+                  className="text-[10px] text-gray-400 hover:text-gray-600 outline-none focus:outline-none"
+                  title={showContractors ? "Hide contractors" : "Show contractors"}
+                >{showContractors ? "◀" : "▶"}</button>
+              </div>
+              <div className="w-[60px] shrink-0 border-l border-gray-200" />
+            </div>
             <div>
               {groupedData.map(([phase, areas]) => {
                 const avg = phaseAvgPct(areas);
@@ -1237,17 +1423,21 @@ function GanttChartContent() {
                       style={{ height: GROUP_H }}
                       onClick={() => togglePhase(phase)}
                     >
-                      <div className="flex items-center justify-between h-full gap-2">
-                        <div className="flex items-center gap-1.5 min-w-0">
+                      <div className="flex items-center h-full">
+                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
                           <span className="text-[10px] text-gray-400 shrink-0">{collapsed ? "▶" : "▼"}</span>
                           <span className="text-[12px] font-semibold text-gray-800 truncate">{phase}</span>
                         </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <div className="w-14 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                            <div className="h-full rounded-full bg-[#3A4EA2]" style={{ width: `${avg}%` }} />
-                          </div>
-                          <span className="text-[10px] font-bold text-[#3A4EA2] tabular-nums">{avg}%</span>
-                        </div>
+                        {showContractors && <div className="w-[120px] shrink-0" />}
+                        {(() => {
+                          const phaseColor = avg >= 100 ? STATUS_CONFIG.completed.color : avg > 0 ? STATUS_CONFIG.inProgress.color : STATUS_CONFIG.notStarted.color;
+                          return (
+                            <div className="w-[60px] flex items-center justify-end gap-1 shrink-0 pr-1">
+                              <DonutRing pct={avg} size={18} color={phaseColor} />
+                              <span className="text-[10px] font-bold tabular-nums" style={{ color: phaseColor }}>{avg}%</span>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                     {/* Area subheaders + task rows */}
@@ -1262,10 +1452,15 @@ function GanttChartContent() {
                           style={{ height: AREA_H }}
                           onClick={() => toggleArea(areaKey)}
                         >
-                          <div className="flex items-center gap-1.5 min-w-0">
+                          <div className="flex items-center gap-1.5 min-w-0 flex-1">
                             <span className="text-[9px] text-gray-400 shrink-0">{areaCollapsed ? "▶" : "▼"}</span>
                             <span className="text-[11px] font-semibold text-gray-600 truncate">{area}</span>
                           </div>
+                          <button
+                            onClick={e => { e.stopPropagation(); setModalConfig({ isOpen: true, mode: "add", taskId: null, defaultPhase: phase, defaultArea: area }); }}
+                            className="shrink-0 w-5 h-5 flex items-center justify-center rounded text-gray-400 hover:bg-blue-100 hover:text-blue-600 text-[14px] font-bold leading-none"
+                            title={`Add task to ${area}`}
+                          >+</button>
                         </div>
                         {!areaCollapsed && ts.filter(t => !t.parentTaskId).flatMap((t) => {
                           const taskCollapsed = collapsedTasks.has(t.id);
@@ -1275,8 +1470,9 @@ function GanttChartContent() {
                           rows.push(
                             <div
                               key={`name-${t.id}`}
-                              className={`flex items-center border-b cursor-pointer gap-1 pr-2 ${selectedId === t.id ? "bg-blue-50" : "hover:bg-gray-50"}`}
+                              className={`flex items-center border-b cursor-pointer gap-1 ${selectedId === t.id ? "bg-blue-50" : "hover:bg-gray-50"}`}
                               style={{ height: ROW_H, opacity: showCriticalPath && !criticalPathTasks.has(t.id) ? 0.4 : 1, paddingLeft: 8 }}
+                              onClick={() => setSelectedId(t.id)}
                             >
                               {/* WBS number */}
                               <span className="text-[10px] text-gray-400 font-mono shrink-0 w-[38px] text-right pr-1.5">{wbsMap[t.id]}</span>
@@ -1285,12 +1481,14 @@ function GanttChartContent() {
                                 className="text-[9px] text-gray-400 shrink-0 w-3 text-center cursor-pointer"
                                 onClick={e => { e.stopPropagation(); if (hasChildren) toggleTask(t.id); }}
                               >{hasChildren ? (taskCollapsed ? "▶" : "▼") : ""}</span>
-                              {/* Status dot */}
-                              <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: STATUS_CONFIG[t.status as StatusKey].color }} />
-                              <span
-                                className="truncate text-[12px] font-medium text-gray-900 flex-1"
-                                onClick={() => setSelectedId(t.id)}
-                              >{t.name}</span>
+                              <span className="truncate text-[12px] font-medium text-gray-900 flex-1 min-w-0">{t.name}</span>
+                              {showContractors && (
+                                <span className="w-[120px] shrink-0 border-l border-gray-100 px-2 text-[10px] text-gray-500 truncate">{t.contractor || "—"}</span>
+                              )}
+                              <div className="w-[60px] flex items-center justify-end gap-1 shrink-0 pr-1 border-l border-gray-100">
+                                <DonutRing pct={t.pct} size={18} color={STATUS_CONFIG[effectiveStatus(t)].color} />
+                                <span className="text-[10px] font-bold tabular-nums" style={{ color: STATUS_CONFIG[effectiveStatus(t)].color }}>{t.pct}%</span>
+                              </div>
                             </div>
                           );
                           // Sub-task rows
@@ -1300,13 +1498,19 @@ function GanttChartContent() {
                                 <div
                                   key={`name-${s.id}`}
                                   onClick={() => setSelectedId(s.id)}
-                                  className={`flex items-center border-b cursor-pointer gap-1 pr-2 bg-gray-50/50 ${selectedId === s.id ? "bg-blue-50" : "hover:bg-gray-50"}`}
+                                  className={`flex items-center border-b cursor-pointer gap-1 bg-gray-50/50 ${selectedId === s.id ? "bg-blue-50" : "hover:bg-gray-50"}`}
                                   style={{ height: SUB_ROW_H, opacity: showCriticalPath && !criticalPathTasks.has(s.id) ? 0.4 : 1, paddingLeft: 8 }}
                                 >
                                   <span className="text-[10px] text-gray-400 font-mono shrink-0 w-[38px] text-right pr-1.5">{wbsMap[s.id]}</span>
-                                  <span className="w-3 shrink-0" />
-                                  <span className="text-gray-300 text-[10px] shrink-0">└</span>
-                                  <span className="truncate text-[11px] text-gray-600 flex-1">{s.name}</span>
+                                  <span className="w-3 shrink-0 text-gray-300 text-[10px] text-center">└</span>
+                                  <span className="truncate text-[11px] text-gray-600 flex-1 min-w-0">{s.name}</span>
+                                  {showContractors && (
+                                    <span className="w-[120px] shrink-0 border-l border-gray-100 px-2 text-[10px] text-gray-400 truncate">{s.contractor || "—"}</span>
+                                  )}
+                                  <div className="w-[60px] flex items-center justify-end gap-1 shrink-0 pr-1 border-l border-gray-100">
+                                    <DonutRing pct={s.pct} size={18} color={STATUS_CONFIG[effectiveStatus(s)].color} />
+                                    <span className="text-[10px] tabular-nums" style={{ color: STATUS_CONFIG[effectiveStatus(s)].color }}>{s.pct}%</span>
+                                  </div>
                                 </div>
                               );
                             });
@@ -1325,7 +1529,26 @@ function GanttChartContent() {
           {/* Scrollable Timeline Area */}
           <div className="relative" style={{ width: timelineWidthPx }} ref={timelineRef}>
             {renderHeaders()}
-            <div className="relative" style={{ minHeight: totalH }}>
+            <div className="relative" style={{ minHeight: Math.max(totalH, 600) }}>
+              {/* Column background stripes — weekends light blue, weekdays alternate subtle gray */}
+              {Array.from({ length: totalDays }).map((_, i) => {
+                const date = new Date(new Date(chartStart).getTime() + i * MS_PER_DAY);
+                const dow = date.getDay();
+                const isWeekend = dow === 0 || dow === 6;
+                const isAltWeek = Math.floor(i / 7) % 2 === 1;
+                if (!isWeekend && !isAltWeek) return null;
+                return (
+                  <div
+                    key={i}
+                    className="absolute top-0 bottom-0 pointer-events-none"
+                    style={{
+                      left: i * pixelsPerDay,
+                      width: pixelsPerDay,
+                      background: isWeekend ? "rgba(219,228,255,0.45)" : "rgba(240,242,255,0.25)",
+                    }}
+                  />
+                );
+              })}
               {/* Today vertical line — 2px solid red, full chart height */}
               {todayOffsetDays >= 0 && todayOffsetDays <= totalDays && (
                 <div className="absolute top-0 pointer-events-none z-10" style={{ left: todayX - 1, width: 2, height: totalH, background: "#ef4444", opacity: 0.7 }} />
@@ -1503,11 +1726,11 @@ function GanttChartContent() {
 
       {/* Side Panel */}
       {selectedTask && (
-        <TaskDetailPanel task={selectedTask} deps={deps} tasks={filteredTasks} criticalPathTasks={criticalPathTasks} onClose={() => setSelectedId(null)} onEditClick={() => setModalConfig({ isOpen: true, mode: "edit", taskId: selectedTask.id })} onDelete={handleDeleteTask} />
+        <TaskDetailPanel task={selectedTask} deps={deps} tasks={filteredTasks} criticalPathTasks={criticalPathTasks} onClose={() => setSelectedId(null)} onEditClick={() => setModalConfig({ isOpen: true, mode: "edit", taskId: selectedTask.id, defaultPhase: "", defaultArea: "" })} onDelete={handleDeleteTask} />
       )}
 
       {/* Modal */}
-      <TaskModal isOpen={modalConfig.isOpen} mode={modalConfig.mode} task={tasks.find(t => t.id === modalConfig.taskId)} tasks={filteredTasks} deps={deps} onClose={() => setModalConfig({ ...modalConfig, isOpen: false })} onSave={handleSaveModal} onDelete={handleDeleteTask} />
+      <TaskModal isOpen={modalConfig.isOpen} mode={modalConfig.mode} task={tasks.find(t => t.id === modalConfig.taskId)} tasks={filteredTasks} deps={deps} defaultPhase={modalConfig.defaultPhase} defaultArea={modalConfig.defaultArea} onClose={() => setModalConfig({ ...modalConfig, isOpen: false })} onSave={handleSaveModal} onDelete={handleDeleteTask} />
     </div>
   );
 }
