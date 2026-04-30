@@ -5,8 +5,22 @@ import Link from "next/link";
 
 export default function SignupPage() {
   const [email, setEmail] = useState("");
+  const [countryCode, setCountryCode] = useState("+91");
   const [phone, setPhone] = useState("");
   const [firmName, setFirmName] = useState("");
+
+  const COUNTRY_CODES = [
+    { code: "+91", flag: "🇮🇳", label: "IN" },
+    { code: "+1",  flag: "🇺🇸", label: "US" },
+    { code: "+44", flag: "🇬🇧", label: "GB" },
+    { code: "+971", flag: "🇦🇪", label: "AE" },
+    { code: "+65", flag: "🇸🇬", label: "SG" },
+    { code: "+61", flag: "🇦🇺", label: "AU" },
+    { code: "+49", flag: "🇩🇪", label: "DE" },
+    { code: "+33", flag: "🇫🇷", label: "FR" },
+    { code: "+974", flag: "🇶🇦", label: "QA" },
+    { code: "+966", flag: "🇸🇦", label: "SA" },
+  ];
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -23,7 +37,7 @@ export default function SignupPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: email.trim().toLowerCase(),
-          phone: phone.trim() || undefined,
+          phone: phone.trim() ? `${countryCode}${phone.trim().replace(/\D/g, "")}` : undefined,
           companyName: firmName.trim(),
           source: "signup",
         }),
@@ -112,13 +126,24 @@ export default function SignupPage() {
                 <label className="block text-xs font-semibold text-[#57606a] mb-1">
                   Phone Number
                 </label>
-                <input
-                  type="tel"
-                  placeholder="+91 98765 43210"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  className="w-full bg-white border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] text-[#24292f] placeholder:text-[#8C959F] focus:outline-none focus:ring-2 focus:ring-[#3A4EA2] focus:border-transparent"
-                />
+                <div className="flex gap-1.5">
+                  <select
+                    value={countryCode}
+                    onChange={(e) => setCountryCode(e.target.value)}
+                    className="bg-white border border-[#D0D7DE] rounded-md px-2 py-2 text-[13px] text-[#24292f] focus:outline-none focus:ring-2 focus:ring-[#3A4EA2] focus:border-transparent shrink-0"
+                  >
+                    {COUNTRY_CODES.map(c => (
+                      <option key={c.code} value={c.code}>{c.flag} {c.code}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="tel"
+                    placeholder="98765 43210"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className="flex-1 bg-white border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] text-[#24292f] placeholder:text-[#8C959F] focus:outline-none focus:ring-2 focus:ring-[#3A4EA2] focus:border-transparent"
+                  />
+                </div>
               </div>
 
               <div className="mb-4">
