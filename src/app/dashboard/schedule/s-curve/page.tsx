@@ -3,7 +3,8 @@
 import { useState, useEffect, useMemo, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { getScheduleTasks } from "@/lib/mock-data";
-import { fetchTasks, isRealProject, type ScheduleTask } from "@/lib/api-client";
+import { fetchTasks, isRealProject } from "@/lib/api-client";
+import type { ScheduleTask } from "@/lib/mock-data";
 import { useWorkspace } from "@/context/workspace";
 
 const Card = ({ children, className = "", style }: { children: React.ReactNode; className?: string; style?: React.CSSProperties }) => (
