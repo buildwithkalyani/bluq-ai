@@ -121,15 +121,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             setWorkspaceId(first.id);
             setOrgName(first.name);
             writeWorkspaceCache(first.id, first.name, userId);
-            const savedStep = parseInt(localStorage.getItem("onboarding_step") ?? "0") || 0;
+            // Redirect to resume onboarding only if user hasn't explicitly skipped/finished
             const done = localStorage.getItem("onboarding_done") === "true";
+            const savedStep = parseInt(localStorage.getItem("onboarding_step") ?? "0") || 0;
             if (!done && savedStep > 0 && pathname !== "/onboarding") {
               router.replace("/onboarding");
               return;
             }
           } else {
             clearWorkspaceCache();
-            if (pathname !== "/onboarding" && !pathname.startsWith("/invite")) {
+            // No workspace at all → must onboard (unless already skipped/done)
+            const done = localStorage.getItem("onboarding_done") === "true";
+            if (!done && pathname !== "/onboarding" && !pathname.startsWith("/invite")) {
               router.replace("/onboarding");
             }
           }
