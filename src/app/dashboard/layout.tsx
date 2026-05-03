@@ -668,6 +668,33 @@ function TopNav() {
   );
 }
 
+function DashboardShell({ children }: { children: React.ReactNode }) {
+  const { loading } = useWorkspace();
+  if (loading) return (
+    <div className="h-screen bg-[#F6F8FA] flex items-center justify-center">
+      <div className="w-6 h-6 border-2 border-[#3A4EA2] border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+  return (
+    <div className="h-screen flex flex-col bg-[#F6F8FA] text-[#24292f]">
+      <Suspense fallback={null}>
+        <TopNav />
+      </Suspense>
+      <div className="flex-1 flex overflow-hidden">
+        <Suspense fallback={null}>
+          <Sidebar />
+        </Suspense>
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <Suspense fallback={null}>
+            <ProjectAwareSubTabs />
+          </Suspense>
+          <div className="flex-1 overflow-auto">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardLayout({
   children,
 }: {
@@ -676,22 +703,7 @@ export default function DashboardLayout({
   return (
     <WorkspaceProvider>
       <SchedulePollerMount />
-      <div className="h-screen flex flex-col bg-[#F6F8FA] text-[#24292f]">
-        <Suspense fallback={null}>
-          <TopNav />
-        </Suspense>
-        <div className="flex-1 flex overflow-hidden">
-          <Suspense fallback={null}>
-            <Sidebar />
-          </Suspense>
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <Suspense fallback={null}>
-              <ProjectAwareSubTabs />
-            </Suspense>
-            <div className="flex-1 overflow-auto">{children}</div>
-          </div>
-        </div>
-      </div>
+      <DashboardShell>{children}</DashboardShell>
     </WorkspaceProvider>
   );
 }

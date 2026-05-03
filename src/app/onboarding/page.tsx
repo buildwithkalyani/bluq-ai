@@ -376,9 +376,8 @@ const apiPost = async (path: string, body: unknown) => {
       localStorage.setItem("onboarding_step", prev.toString());
     }
   };
-  const skip = () => {
+  const finishOnboarding = () => {
     setApiError("");
-    // Any skip = user explicitly done — mark complete, never redirect back to onboarding
     localStorage.removeItem("onboarding_step");
     localStorage.setItem("onboarding_done", "true");
     ["ob_orgName","ob_projectName","ob_projectAddress","ob_projectStage","ob_projectType",
@@ -389,6 +388,17 @@ const apiPost = async (path: string, body: unknown) => {
     if (createdProjectId)   params.set("projectId",   createdProjectId);
     const qs = params.toString();
     router.push(`/dashboard/overview${qs ? `?${qs}` : ""}`);
+  };
+
+  const skip = () => {
+    setApiError("");
+    const lastStep = STEPS.length - 1;
+    if (step >= lastStep) {
+      finishOnboarding();
+    } else {
+      setStep(step + 1);
+      localStorage.setItem("onboarding_step", String(step + 1));
+    }
   };
 
   const addInvite = () => {
