@@ -80,6 +80,24 @@ export async function reportsRoute(app: FastifyInstance) {
       taskRows,
     });
 
+    // Save a snapshot record so DPR history tracks generated reports by date
+    const totalTasks = taskRows.length;
+    const doneTasks = taskRows.filter(t => t.status === "completed").length;
+    const avgPct = totalTasks > 0 ? Math.round(doneTasks / totalTasks * 100) : 0;
+    const existingSnapshot = await db.select({ id: dprs.id }).from(dprs)
+      .where(and(eq(dprs.projectId, projectId), eq(dprs.workspaceId, workspaceId), eq(dprs.reportDate, date), eq(dprs.source, "generated")))
+      .limit(1);
+    if (existingSnapshot.length === 0) {
+      await db.insert(dprs).values({
+        workspaceId,
+        projectId,
+        reportDate: date,
+        source: "generated",
+        workDone: `PDF report generated. Tasks: ${doneTasks}/${totalTasks} complete.`,
+        percentComplete: String(avgPct),
+      }).catch(() => {});
+    }
+
     reply
       .header("Content-Type", "application/pdf")
       .header("Content-Disposition", `attachment; filename="DPR-${project.projectName}-${date}.pdf"`)

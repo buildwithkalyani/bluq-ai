@@ -480,13 +480,13 @@ export async function fetchDPRHistory(
       day: "numeric",
       year: "numeric",
     }),
-    submittedBy: d.reportedBy ?? "WhatsApp",
+    submittedBy: d.source === "generated" ? "Generated PDF" : (d.reportedBy ?? "WhatsApp"),
     tasksSummary: d.workDone ?? "—",
     overallProgress: Number(d.percentComplete ?? 0),
     workersOnSite: d.labourCount ?? 0,
     issuesCount: d.delayReason ? 1 : 0,
     photosCount: 0,
-    status: "submitted" as const,
+    status: (d.source === "generated" ? "generated" : "submitted") as "generated" | "submitted",
   }));
 }
 
