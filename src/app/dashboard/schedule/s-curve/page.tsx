@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, Suspense } from "react";
+import { useState, useEffect, useMemo, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { getScheduleTasks } from "@/lib/mock-data";
 import { fetchTasks, isRealProject } from "@/lib/api-client";
@@ -147,6 +147,7 @@ function SCurveContent() {
   const [startDate, setStartDate] = useState("2026-03-01");
   const [endDate, setEndDate] = useState("2026-04-15");
   const [isDownloading, setIsDownloading] = useState(false);
+  const printRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const loader = real
@@ -192,8 +193,29 @@ function SCurveContent() {
     : "";
 
   const handleDownload = () => {
+    if (!printRef.current) return;
     setIsDownloading(true);
-    setTimeout(() => { setIsDownloading(false); alert("S-Curve PDF downloaded successfully!"); }, 1500);
+    const content = printRef.current.innerHTML;
+    const win = window.open("", "_blank");
+    if (!win) { setIsDownloading(false); return; }
+    win.document.write(`
+      <html><head><title>S-Curve</title>
+      <style>
+        body { font-family: sans-serif; padding: 24px; }
+        svg { width: 100%; height: auto; }
+        .stats { display: flex; gap: 24px; margin-top: 16px; }
+        .stat { flex: 1; border: 1px solid #D0D7DE; border-radius: 8px; padding: 16px; text-align: center; }
+        .stat-label { font-size: 12px; color: #57606a; }
+        .stat-value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+        @media print { body { padding: 0; } }
+      </style></head>
+      <body><h2 style="color:#24292f;margin-bottom:16px;">S-Curve Report — ${startDate} to ${endDate}</h2>
+      ${content}
+      </body></html>
+    `);
+    win.document.close();
+    win.focus();
+    setTimeout(() => { win.print(); win.close(); setIsDownloading(false); }, 500);
   };
 
   return (
@@ -217,6 +239,7 @@ function SCurveContent() {
         </div>
       </div>
 
+      <div ref={printRef}>
       <Card className="!p-6 mb-4 shadow-sm">
         {tasks.filter(t => !t.parentTaskId).length === 0 ? (
           <div className="flex items-center justify-center h-[220px] text-[13px] text-[#8C959F]">
@@ -330,6 +353,7 @@ function SCurveContent() {
           )}
         </div>
       </Card>
+      </div>
     </div>
   );
 }
