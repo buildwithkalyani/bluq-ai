@@ -3,6 +3,7 @@ import { db } from "../db/client.js";
 import { tasks, taskDependencies } from "../db/schema.js";
 import { eq, and, ne, lte, gte } from "drizzle-orm";
 import { verifySession } from "../lib/verifySession.js";
+import { detectPhase } from "../lib/detect-phase.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -243,6 +244,7 @@ export async function tasksRoute(app: FastifyInstance) {
       if (!UUID_REGEX.test(body.workspaceId) || !UUID_REGEX.test(body.projectId)) {
         return reply.status(400).send({ error: "workspaceId and projectId must be valid UUIDs" });
       }
+      if (!body.phase) body.phase = detectPhase(body.title) ?? undefined;
       const [newTask] = await db.insert(tasks).values(body).returning();
       return reply.status(201).send(newTask);
     } catch (err: any) {
