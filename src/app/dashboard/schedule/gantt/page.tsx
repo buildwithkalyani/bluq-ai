@@ -1744,7 +1744,7 @@ function GanttChartContent() {
 
       {/* Side Panel */}
       {selectedTask && (
-        <TaskDetailPanel task={selectedTask} deps={deps} tasks={filteredTasks} criticalPathTasks={criticalPathTasks} onClose={() => setSelectedId(null)} onEditClick={() => setModalConfig({ isOpen: true, mode: "edit", taskId: selectedTask.id, defaultPhase: "", defaultArea: "" })} onDelete={handleDeleteTask} />
+        <TaskDetailPanel task={selectedTask} deps={deps} tasks={filteredTasks} criticalPathTasks={criticalPathTasks} onClose={() => setSelectedId(null)} onEditClick={() => { setSelectedId(null); setModalConfig({ isOpen: true, mode: "edit", taskId: selectedTask.id, defaultPhase: "", defaultArea: "" }); }} onDelete={handleDeleteTask} />
       )}
 
       {/* Modal */}
