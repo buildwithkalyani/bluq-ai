@@ -34,6 +34,23 @@ const TIMELINE_LEFT_OFFSET = 260;
 
 const PHASE_ORDER = ["Site Preparation", "Foundation", "Structure", "MEP", "Finishing", "Handover"];
 
+const PHASE_KEYWORDS: [string, string[]][] = [
+  ["Site Preparation", ["site survey","demarcation","layout","site clearing","clearing","grubbing","excavation","earthwork","dewatering","temporary fencing","temporary office","site office","mobilisation","mobilization","hoarding"]],
+  ["Foundation", ["pile","piling","bored pile","driven pile","footing","foundation","raft","plinth","grade beam","pile cap","underpinning","anti-termite","damp proof"]],
+  ["Structure", ["column","beam","slab","rcc","rc ","reinforced concrete","reinforcement","rebar","formwork","shuttering","shutter","centering","concrete","casting","concreting","pour","structural wall","core wall","shear wall","lift core","staircase","stair","lintel","sunshade","parapet"]],
+  ["MEP", ["plumbing","sanitary","drainage","sewage","water supply","fire fighting","fire sprinkler","electrical","wiring","conduit","cable","switchboard","panel","mep","hvac","air conditioning","duct","ductwork","ventilation","elevator","lift installation","escalator","bms"]],
+  ["Finishing", ["plaster","plastering","render","paint","painting","putty","tile","tiling","flooring","marble","granite","vitrified","false ceiling","gypsum","drywall","partition","interior","waterproof","waterproofing","cladding","facade","glazing","aluminium","aluminum","window","door","carpentry","woodwork","cabinet","railing","handrail","landscaping","finishing"]],
+  ["Handover", ["handover","commissioning","testing","snag","snagging","defect","punch list","inspection","noc","certificate","completion","final inspection","trial run"]],
+];
+
+function detectPhase(name: string): string {
+  const lower = name.toLowerCase();
+  for (const [phase, kws] of PHASE_KEYWORDS) {
+    if (kws.some(kw => lower.includes(kw))) return phase;
+  }
+  return "";
+}
+
 // ─────────────────────────────────────────────────────────────
 // Date Math Utilities
 // ─────────────────────────────────────────────────────────────
@@ -545,7 +562,8 @@ function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete,
   useEffect(() => {
     if (isOpen) {
       if (mode === "edit" && task) {
-        setFormData({ name: task.name, phase: task.phase || "", contractor: task.contractor || "", space: task.space || "", startDate: task.startDate, endDate: task.endDate, status: task.status || "notStarted", pct: task.pct ?? 0 });
+        const autoPhase = task.phase || detectPhase(task.name);
+        setFormData({ name: task.name, phase: autoPhase, contractor: task.contractor || "", space: task.space || "", startDate: task.startDate, endDate: task.endDate, status: task.status || "notStarted", pct: task.pct ?? 0 });
         setSelectedPreds(deps.filter((d: any) => d.to === task.id).map((d: any) => ({ id: d.from, type: d.type })));
       } else {
         setFormData({ ...emptyForm, phase: defaultPhase || "", space: defaultArea || "" });
@@ -1726,7 +1744,7 @@ function GanttChartContent() {
 
       {/* Side Panel */}
       {selectedTask && (
-        <TaskDetailPanel task={selectedTask} deps={deps} tasks={filteredTasks} criticalPathTasks={criticalPathTasks} onClose={() => setSelectedId(null)} onEditClick={() => setModalConfig({ isOpen: true, mode: "edit", taskId: selectedTask.id, defaultPhase: "", defaultArea: "" })} onDelete={handleDeleteTask} />
+        <TaskDetailPanel task={selectedTask} deps={deps} tasks={filteredTasks} criticalPathTasks={criticalPathTasks} onClose={() => setSelectedId(null)} onEditClick={() => { setSelectedId(null); setModalConfig({ isOpen: true, mode: "edit", taskId: selectedTask.id, defaultPhase: "", defaultArea: "" }); }} onDelete={handleDeleteTask} />
       )}
 
       {/* Modal */}

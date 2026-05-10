@@ -369,7 +369,7 @@ export interface DPREntry {
   workersOnSite: number;
   issuesCount: number;
   photosCount: number;
-  status: "submitted" | "reviewed" | "draft";
+  status: "submitted" | "reviewed" | "draft" | "generated";
 }
 
 const DPR_HISTORY: DPREntry[] = [
