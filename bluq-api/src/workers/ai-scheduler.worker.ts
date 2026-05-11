@@ -434,6 +434,25 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     return crew.map((c) => `${c.count} ${c.role}`).join(", ");
   };
 
+  // Map granular task-library phase codes → 6 display phases used in Gantt
+  const PHASE_DISPLAY: Record<string, string> = {
+    site_preparation: "Site Preparation",
+    foundation: "Foundation",
+    plinth: "Foundation",
+    superstructure: "Structure",
+    masonry: "Structure",
+    plumbing: "MEP",
+    electrical: "MEP",
+    special_systems: "MEP",
+    plastering: "Finishing",
+    waterproofing: "Finishing",
+    flooring: "Finishing",
+    doors_windows: "Finishing",
+    painting: "Finishing",
+    external_works: "Finishing",
+    approvals_handover: "Handover",
+  };
+
   const taskInserts = allTasks.map((t, index) => ({
     workspaceId,
     projectId,
@@ -445,7 +464,7 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     endDate: t.endDate,
     durationDays: t.finalDurationDays,
     contractor: t.contractorType,
-    phase: t.phase ?? null,
+    phase: t.phase ? (PHASE_DISPLAY[t.phase] ?? t.phase) : null,
     area: t.wingLabel
       ? `${t.wingLabel} — ${t.floorLabel ?? ""}`.trim()
       : (t.floorLabel ?? null),
