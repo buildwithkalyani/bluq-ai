@@ -131,34 +131,43 @@ function DailyUpdatesInner() {
     }
   }, [activeWorkspaceId, wsLoading, isDesignMode]);
 
-  // Reload data whenever selected project or milestone range changes
+  // Reload tasks/milestones whenever project, range, or workspace changes
   useEffect(() => {
     if (wsLoading) return;
     const days = ranges[milestoneRange];
 
     if (isDesignMode) {
-      // Design account — always mock
       getDoneYesterday(undefined).then(setDoneYesterday);
       getTodoToday(undefined).then(setTodoToday);
       getMilestones(undefined).then(setMilestones);
       getAIBriefing(null).then(setBriefing);
     } else if (activeWorkspaceId && selectedProjectId && isRealProject(selectedProjectId)) {
-      // Real backend — specific project selected
       fetchDoneYesterday(selectedProjectId, activeWorkspaceId).then(setDoneYesterday).catch(console.error);
       fetchTodoToday(selectedProjectId, activeWorkspaceId).then(setTodoToday).catch(console.error);
       fetchMilestones(selectedProjectId, activeWorkspaceId, days).then(setMilestones).catch(console.error);
-      fetchAIBriefing(selectedProjectId, activeWorkspaceId).then(setBriefing).catch(console.error);
     } else if (activeWorkspaceId && projects.length > 0) {
-      // All projects — fetch for each and merge
       Promise.all(projects.map(p => fetchDoneYesterday(p.id, activeWorkspaceId).catch(() => [] as DailyTask[])))
         .then(results => setDoneYesterday(results.flat()));
       Promise.all(projects.map(p => fetchTodoToday(p.id, activeWorkspaceId).catch(() => [] as DailyTodo[])))
         .then(results => setTodoToday(results.flat()));
       Promise.all(projects.map(p => fetchMilestones(p.id, activeWorkspaceId, days).catch(() => [] as Milestone[])))
         .then(results => setMilestones(results.flat()));
-      setBriefing(null);
     }
   }, [selectedProjectId, milestoneRange, activeWorkspaceId, wsLoading, projects.length, isDesignMode]);
+
+  // Briefing has its own effect — isolated from projects.length to prevent stale races
+  useEffect(() => {
+    if (wsLoading || isDesignMode) return;
+    if (!activeWorkspaceId || !selectedProjectId || !isRealProject(selectedProjectId)) {
+      setBriefing(null);
+      return;
+    }
+    let cancelled = false;
+    fetchAIBriefing(selectedProjectId, activeWorkspaceId)
+      .then(b => { if (!cancelled) setBriefing(b); })
+      .catch(console.error);
+    return () => { cancelled = true; };
+  }, [selectedProjectId, activeWorkspaceId, wsLoading, isDesignMode]);
 
   const filteredMilestones = activeWorkspaceId
     ? milestones

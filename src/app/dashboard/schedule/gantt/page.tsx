@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useMemo, Suspense } from 'react';
 import { useSearchParams } from "next/navigation";
 import { getScheduleTasks, getScheduleDeps, type ScheduleTask, type TaskDependency } from "@/lib/mock-data";
-import { fetchTasks, fetchTaskDependencies, createTaskDependency, deleteTaskDependency, fetchLatestScheduleVersion, isRealProject, type ScheduleVersion } from "@/lib/api-client";
+import { fetchTasks, fetchTaskDependencies, createTaskDependency, deleteTaskDependency, fetchLatestScheduleVersion, isRealProject, updateTask, type ScheduleVersion } from "@/lib/api-client";
 import { GapCheckPanel, type SuspectedGap } from "@/components/ui/GapCheckPanel";
 import { useWorkspace } from "@/context/workspace";
 import { useTaskSocket } from "@/hooks/useTaskSocket";
@@ -1027,8 +1027,14 @@ function GanttChartContent() {
   const todayOffsetDays = diffDays(chartStart, today);
   const todayX = todayOffsetDays * pixelsPerDay;
 
+  // Map frontend status keys → backend DB values
+  const toDbStatus = (s: string) => ({ notStarted: "not_started", inProgress: "in_progress", runningLate: "running_late", delayed: "delayed", completed: "completed" } as Record<string, string>)[s] ?? s;
+
   // Handlers
-  const handleUpdateDates = (id: string, start: string, end: string) => setTasks((p) => p.map((t) => (t.id === id ? { ...t, startDate: start, endDate: end, duration: `${diffDays(start, end)}d` } : t)));
+  const handleUpdateDates = (id: string, start: string, end: string) => {
+    setTasks((p) => p.map((t) => (t.id === id ? { ...t, startDate: start, endDate: end, duration: `${diffDays(start, end)}d` } : t)));
+    if (real) updateTask(id, { startDate: start, endDate: end }).catch(console.error);
+  };
   const handleWheel = (e: React.WheelEvent) => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); setZoomLevel(p => Math.max(0.1, Math.min(3, p - e.deltaY * 0.005))); } };
   const handleChangeDep = (idx: number, newType: string) => setDeps(p => p.map((d, i) => i === idx ? { ...d, type: newType as any } : d));
   
@@ -1073,6 +1079,19 @@ function GanttChartContent() {
       return [...filtered, ...newPreds.map((pr: any) => ({ from: pr.id, to: targetId, type: pr.type, label: pr.type }))];
     });
     if (real && workspaceId && targetId) {
+      // Persist task edits to backend
+      if (modalConfig.mode === "edit") {
+        updateTask(targetId, {
+          title: data.name,
+          status: toDbStatus(data.status),
+          startDate: data.startDate,
+          endDate: data.endDate,
+          percentComplete: data.pct ?? 0,
+          contractor: data.contractor || null,
+          area: data.space || null,
+          phase: data.phase || null,
+        }).catch(console.error);
+      }
       // delete old deps for this task, then create new ones
       const oldDeps = deps.filter(d => d.to === targetId);
       oldDeps.forEach(d => {
