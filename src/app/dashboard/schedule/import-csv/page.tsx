@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef, Suspense } from "react";
+import { CheckCircle, AlertTriangle, X, Loader, FileText, Sparkles, RefreshCw, Upload, ClipboardList, Table2, GitBranch, Layers, ArrowLeft, PenLine, Plus, Clock, Lock, Unlock, Bot, FolderOpen } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { parseCSVPreview, BLUQ_FIELDS } from "@/lib/mock-data";
 import { Card, SectionTitle, Btn } from "@/components/ui/bluq-ui";
@@ -13,32 +14,49 @@ import {
   deleteDocument,
   generateSchedule,
   pollScheduleStatus,
+  fetchScheduleVersions,
   type ScheduleStatusResult,
   type BackendDocument,
+  type ScheduleVersion,
 } from "@/lib/api-client";
 import { uploadFileToStorage } from "@/lib/supabase-storage";
+import { authClient } from "@/lib/auth-client";
 
 // ─── TYPES ──────────────────────────────────────────────────────────────────
 
-type MockStep = "upload" | "map" | "preview";
+type ImportMode = "excel" | "msp" | "primavera" | "ai" | "manual";
 
-type BaselineVersion = {
-  version: number;
-  fileName: string;
-  uploadedAt: string;
-  taskCount: number;
-  note: string;
-};
+type MockStep = "upload" | "map" | "preview" | "done";
 
-const MOCK_HISTORY: Record<number, BaselineVersion[]> = {
-  0: [{ version: 1, fileName: "Al_Nakheel_Baseline_v1.csv", uploadedAt: "2025-02-14 09:22", taskCount: 12, note: "Initial baseline — contract award" }],
-  1: [
-    { version: 2, fileName: "Marina_Heights_Rev2.csv", uploadedAt: "2025-03-01 11:05", taskCount: 9, note: "Revised after design change" },
-    { version: 1, fileName: "Marina_Heights_Baseline.csv", uploadedAt: "2025-01-20 14:30", taskCount: 8, note: "Initial baseline" },
-  ],
-  2: [],
-  3: [],
-};
+// Mock schedule versions shown in design/demo mode
+const MOCK_SCHEDULE_VERSIONS: ScheduleVersion[] = [
+  {
+    id: "mock-v2",
+    versionNumber: 2,
+    isBaseline: true,
+    isLocked: false,
+    generatedBy: "ai",
+    uploadedBy: null,
+    uploadedByName: "Demo User",
+    sourceFileName: null,
+    aiReasoning: "Generated from BOQ, architectural drawings and scope of work document",
+    createdAt: "2025-04-22T14:15:00Z",
+    scheduleJson: {},
+  },
+  {
+    id: "mock-v1",
+    versionNumber: 1,
+    isBaseline: false,
+    isLocked: true,
+    generatedBy: "import",
+    uploadedBy: null,
+    uploadedByName: "Demo User",
+    sourceFileName: "Baseline_Schedule_v1.xlsx",
+    aiReasoning: null,
+    createdAt: "2025-03-10T09:30:00Z",
+    scheduleJson: {},
+  },
+];
 
 type FileEntry = {
   file: File;
@@ -63,6 +81,587 @@ function fileExt(name: string) {
   return i === -1 ? "" : name.slice(i).toLowerCase();
 }
 
+// ─── METHOD PICKER ───────────────────────────────────────────────────────────
+
+const AI_COLOR   = "#4F46E5";
+const AI_BG      = "#EEF2FF";
+const AI_BORDER  = "#C7D2FE";
+
+const IMPORT_METHODS: Array<{
+  id: ImportMode;
+  label: string;
+  sub: string;
+  description: string;
+  accepts: string;
+  formats: string[];
+  icon: React.ReactNode;
+  color: string;
+  bg: string;
+  border: string;
+  badge?: string;
+  ai?: boolean;
+}> = [
+  {
+    id: "excel",
+    label: "I have an Excel or CSV schedule",
+    sub: "Most common",
+    description: "Your planner shared an Excel sheet with tasks, dates, and durations. Upload it and we'll bring it into Bluq instantly.",
+    accepts: ".xlsx,.xls,.csv",
+    formats: [".xlsx", ".xls", ".csv"],
+    icon: <Table2 size={22} />,
+    color: "#059669",
+    bg: "#ECFDF5",
+    border: "#A7F3D0",
+    badge: "Popular",
+  },
+  {
+    id: "msp",
+    label: "My planner uses MS Project",
+    sub: "Microsoft Project file",
+    description: "Your planner works in MS Project. Export the .mpp file and upload it. All tasks, links, and milestones come across cleanly.",
+    accepts: ".mpp",
+    formats: [".mpp"],
+    icon: <GitBranch size={22} />,
+    color: "#2563EB",
+    bg: "#EFF6FF",
+    border: "#93C5FD",
+  },
+  {
+    id: "primavera",
+    label: "My planner uses Primavera P6",
+    sub: "Oracle Primavera P6",
+    description: "Your planner works in Primavera P6. Ask them to export an .xer file and upload it here. Activities, WBS, and relationships all carry over.",
+    accepts: ".xer",
+    formats: [".xer"],
+    icon: <Layers size={22} />,
+    color: "#7C3AED",
+    bg: "#F5F3FF",
+    border: "#C4B5FD",
+  },
+  {
+    id: "ai",
+    label: "No existing schedule? Build one from my documents",
+    sub: "AI-powered · Ready in ~2 minutes",
+    description: "Upload your drawings, BOQ, or scope document and our AI reads them to build a complete project schedule. No manual entry required.",
+    accepts: ".pdf,.docx,.xlsx,.xls,.jpg,.jpeg,.png,.webp",
+    formats: ["PDF", "DOCX", "XLSX", "Images"],
+    icon: <Sparkles size={22} />,
+    color: AI_COLOR,
+    bg: AI_BG,
+    border: AI_BORDER,
+    badge: "Recommended",
+    ai: true,
+  },
+];
+
+const SHORT_MODE_LABEL: Partial<Record<ImportMode, string>> = {
+  excel: "Excel / CSV",
+  msp: "MS Project",
+  primavera: "Primavera P6",
+  ai: "AI Generated",
+  manual: "Manual",
+};
+
+// ─── AI METHODOLOGY PREP STEP ────────────────────────────────────────────────
+
+function AiMethodologyStep({
+  onSkip,
+  onContinue,
+}: {
+  onSkip: () => void;
+  onContinue: (files: File[]) => void;
+}) {
+  const [files, setFiles] = useState<File[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const addFiles = (incoming: FileList | null) => {
+    if (!incoming) return;
+    const arr = Array.from(incoming);
+    setFiles(prev => {
+      const names = new Set(prev.map(f => f.name));
+      return [...prev, ...arr.filter(f => !names.has(f.name))];
+    });
+  };
+
+  const removeFile = (name: string) => setFiles(prev => prev.filter(f => f.name !== name));
+
+  return (
+    <div className="p-6 space-y-5">
+      {/* Header */}
+      <div>
+        <div className="text-[17px] font-bold text-[#0F172A] mb-1">One optional step before we generate</div>
+        <div className="text-[13px] text-[#64748B] max-w-xl">
+          Upload methodology or specification documents to help the AI understand your project better. This produces a more accurate schedule. You can skip this if you don't have any.
+        </div>
+      </div>
+
+      {/* What to upload */}
+      <div className="grid grid-cols-3 gap-2">
+        {[
+          { label: "Construction Methodology", hint: "How the work will be sequenced" },
+          { label: "Project Specifications", hint: "Technical specs and standards" },
+          { label: "Master Programme", hint: "High-level milestone plan" },
+        ].map(item => (
+          <div key={item.label} className="px-3 py-2.5 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC]">
+            <div className="text-[12px] font-semibold text-[#0F172A] mb-0.5">{item.label}</div>
+            <div className="text-[11px] text-[#94A3B8]">{item.hint}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Drop zone */}
+      <div
+        onDragOver={e => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={e => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }}
+        onClick={() => inputRef.current?.click()}
+        className={`border-2 border-dashed rounded-xl px-6 py-8 flex flex-col items-center gap-2 cursor-pointer transition-all ${
+          dragging ? "border-[#4F46E5] bg-[#EEF2FF]" : "border-[#E2E8F0] bg-[#F8FAFC] hover:border-[#C7D2FE] hover:bg-[#EEF2FF]"
+        }`}
+      >
+        <div className="w-10 h-10 rounded-xl bg-white border border-[#E2E8F0] flex items-center justify-center">
+          <Upload size={18} className="text-[#94A3B8]" />
+        </div>
+        <div className="text-[13px] font-semibold text-[#475569]">Drop files here or click to browse</div>
+        <div className="text-[11px] text-[#94A3B8]">PDF, DOCX, XLSX accepted</div>
+        <input ref={inputRef} type="file" multiple accept=".pdf,.docx,.xlsx,.xls" className="hidden" onChange={e => addFiles(e.target.files)} />
+      </div>
+
+      {/* File list */}
+      {files.length > 0 && (
+        <div className="space-y-1.5">
+          {files.map(f => (
+            <div key={f.name} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white border border-[#E2E8F0]">
+              <FileText size={14} className="text-[#4F46E5] shrink-0" />
+              <span className="flex-1 text-[13px] text-[#0F172A] truncate">{f.name}</span>
+              <span className="text-[11px] text-[#94A3B8] shrink-0">{(f.size / 1024).toFixed(0)} KB</span>
+              <button onClick={() => removeFile(f.name)} className="text-[#CBD5E1] hover:text-red-400 transition-colors cursor-pointer">
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="flex items-center gap-3 pt-1">
+        <button
+          onClick={() => onContinue(files)}
+          disabled={files.length === 0}
+          className="px-6 py-2.5 rounded-xl text-[13px] font-bold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+          style={{ background: AI_COLOR }}
+        >
+          Continue with {files.length > 0 ? `${files.length} file${files.length > 1 ? "s" : ""}` : "documents"}
+        </button>
+        <button onClick={onSkip} className="px-5 py-2.5 rounded-xl text-[13px] font-medium text-[#475569] border border-[#E2E8F0] bg-white hover:bg-[#F8FAFC] transition-colors cursor-pointer">
+          Skip this step
+        </button>
+        <span className="text-[11px] text-[#94A3B8] ml-auto">You can always add more documents later</span>
+      </div>
+    </div>
+  );
+}
+
+function ImportMethodPicker({ projectName, onSelect, onBack }: { projectName: string; onSelect: (m: ImportMode, methodologyFiles?: File[]) => void; onBack?: () => void }) {
+  const [showAiPrep, setShowAiPrep] = useState(false);
+
+  if (showAiPrep) {
+    return (
+      <AiMethodologyStep
+        onSkip={() => onSelect("ai", [])}
+        onContinue={(files) => onSelect("ai", files)}
+      />
+    );
+  }
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* Back link */}
+      {onBack && (
+        <button onClick={onBack} className="flex items-center gap-1.5 text-[12px] font-medium text-[#64748B] hover:text-[#0F172A] transition-colors cursor-pointer">
+          <ArrowLeft size={14} /> Back
+        </button>
+      )}
+      {/* Header */}
+      <div>
+        <div className="text-[17px] font-bold text-[#0F172A] mb-1">How would you like to set up the schedule?</div>
+        <div className="text-[13px] text-[#64748B]">
+          For <span className="font-semibold text-[#0F172A]">{projectName}</span>. Pick whichever fits your situation.
+        </div>
+      </div>
+
+      {/* AI card — top, most prominent */}
+      {IMPORT_METHODS.filter(m => m.ai).map(method => (
+        <button
+          key={method.id}
+          onClick={() => setShowAiPrep(true)}
+          className="w-full text-left rounded-2xl border-2 hover:shadow-xl transition-all overflow-hidden"
+          style={{ borderColor: method.border, background: method.bg }}
+        >
+          <div className="flex items-stretch">
+            <div className="w-1.5 shrink-0 rounded-l-2xl" style={{ background: method.color }} />
+            <div className="flex items-start gap-4 p-5 flex-1">
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
+                style={{ background: "#FFFFFF", color: method.color, boxShadow: "0 2px 8px 0 rgba(79,70,229,0.12)" }}>
+                {method.icon}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <span className="text-[15px] font-bold text-[#0F172A]">{method.label}</span>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide"
+                    style={{ background: method.color, color: "#FFFFFF" }}>✦ {method.badge}</span>
+                </div>
+                <div className="text-[12px] font-semibold mb-2" style={{ color: method.color }}>{method.sub}</div>
+                <div className="text-[12px] text-[#475569] leading-relaxed mb-3">{method.description}</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {["Architectural Drawings", "BOQ", "Scope of Work", "DPR", "Site Photos", "Specifications"].map(f => (
+                    <span key={f} className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-white text-[#475569]"
+                      style={{ border: `1px solid ${AI_BORDER}` }}>{f}</span>
+                  ))}
+                </div>
+              </div>
+              <div className="shrink-0 self-center px-5 py-2.5 rounded-xl text-[13px] font-bold text-white whitespace-nowrap"
+                style={{ background: method.color }}>
+                Build my schedule
+              </div>
+            </div>
+          </div>
+        </button>
+      ))}
+
+      {/* Divider */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 h-px bg-[#E2E8F0]" />
+        <span className="text-[11px] font-semibold text-[#94A3B8]">Already have a schedule file?</span>
+        <div className="flex-1 h-px bg-[#E2E8F0]" />
+      </div>
+
+      {/* File import options — 3 cards in a row */}
+      <div className="grid grid-cols-3 gap-3">
+        {IMPORT_METHODS.filter(m => !m.ai).map(method => (
+          <button
+            key={method.id}
+            onClick={() => onSelect(method.id)}
+            className="text-left p-4 rounded-xl border-2 hover:shadow-md transition-all"
+            style={{ borderColor: "#E2E8F0", background: "#FFFFFF" }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = method.border; (e.currentTarget as HTMLElement).style.background = method.bg; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "#E2E8F0"; (e.currentTarget as HTMLElement).style.background = "#FFFFFF"; }}
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+                style={{ background: method.bg, color: method.color }}>
+                {method.icon}
+              </div>
+              {method.badge && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                  style={{ background: method.bg, color: method.color }}>{method.badge}</span>
+              )}
+            </div>
+            <div className="text-[13px] font-bold text-[#0F172A] mb-1 leading-snug">{method.label}</div>
+            <div className="text-[11px] text-[#64748B] leading-snug mb-3">{method.description}</div>
+            <div className="flex flex-wrap gap-1">
+              {method.formats.map(f => (
+                <span key={f} className="text-[10px] font-bold font-mono px-1.5 py-0.5 rounded"
+                  style={{ background: method.bg, color: method.color }}>{f}</span>
+              ))}
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {/* Manual / blank creation */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 h-px bg-[#E2E8F0]" />
+        <span className="text-[11px] font-semibold text-[#94A3B8]">Starting from scratch?</span>
+        <div className="flex-1 h-px bg-[#E2E8F0]" />
+      </div>
+
+      <button
+        onClick={() => onSelect("manual")}
+        className="w-full text-left p-4 rounded-xl border-2 border-dashed border-[#E2E8F0] bg-white hover:border-[#CBD5E1] hover:bg-[#F8FAFC] transition-all flex items-center gap-4"
+      >
+        <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 bg-[#F1F5F9]">
+          <PenLine size={18} className="text-[#64748B]" />
+        </div>
+        <div className="flex-1">
+          <div className="text-[13px] font-bold text-[#0F172A]">Create schedule manually</div>
+          <div className="text-[11px] text-[#64748B]">Start with a blank canvas and add tasks, durations, and dependencies by hand.</div>
+        </div>
+        <Plus size={16} className="text-[#94A3B8] shrink-0" />
+      </button>
+    </div>
+  );
+}
+
+// ─── SCHEDULE LANDING (always-first screen) ──────────────────────────────────
+
+function ScheduleLanding({
+  projectName,
+  versions,
+  loading,
+  onSetup,
+}: {
+  projectName: string;
+  versions: ScheduleVersion[];
+  loading: boolean;
+  onSetup: () => void;
+}) {
+  const router = useRouter();
+  const hasVersions = versions.length > 0;
+  const activeBaseline = versions.find(v => v.isBaseline) ?? (hasVersions ? versions[0] : null);
+
+  const genLabel = (g: string) =>
+    g === "ai" ? "AI Generated" : g === "import" ? "Imported" : "Manual";
+
+  const genIcon = (g: string) =>
+    g === "ai" ? <Bot size={13} /> : g === "import" ? <Upload size={13} /> : <PenLine size={13} />;
+
+  const formatDate = (iso: string | null) => {
+    if (!iso || iso === "—") return "—";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  };
+
+  return (
+    <div className="p-6 overflow-y-auto h-full bg-[#F8FAFC] space-y-5">
+      {/* Page header */}
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-[20px] font-bold text-[#0F172A] leading-tight">Import Schedule</h1>
+          <p className="text-[13px] text-[#64748B] mt-0.5">
+            {projectName}
+            {hasVersions && <> · {versions.length} version{versions.length !== 1 ? "s" : ""}</>}
+          </p>
+        </div>
+        {hasVersions && (
+          <button
+            onClick={onSetup}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-[12px] font-bold text-white bg-[#2563EB] hover:bg-[#1D4ED8] transition-colors cursor-pointer shrink-0"
+          >
+            <Plus size={14} /> New version
+          </button>
+        )}
+      </div>
+
+      {/* Loading skeleton */}
+      {loading && (
+        <div className="space-y-3 animate-pulse">
+          <div className="h-36 bg-white border border-[#E2E8F0] rounded-xl" />
+          <div className="h-24 bg-white border border-[#E2E8F0] rounded-xl" />
+        </div>
+      )}
+
+      {/* No baseline yet — empty state */}
+      {!loading && !hasVersions && (
+        <div className="flex flex-col items-center text-center py-16 bg-white border border-dashed border-[#E2E8F0] rounded-xl">
+          <div className="w-12 h-12 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex items-center justify-center mb-4">
+            <ClipboardList size={22} className="text-[#94A3B8]" />
+          </div>
+          <div className="text-[15px] font-bold text-[#0F172A] mb-1">No schedule baseline yet</div>
+          <p className="text-[13px] text-[#64748B] mb-5 max-w-xs">
+            Import your planner&apos;s file or let AI build a schedule from your project documents.
+          </p>
+          <button
+            onClick={onSetup}
+            className="flex items-center gap-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg px-5 py-2 text-[12px] font-bold transition-colors cursor-pointer"
+          >
+            <Plus size={14} /> Set up schedule
+          </button>
+        </div>
+      )}
+
+      {/* Active baseline card */}
+      {!loading && activeBaseline && (
+        <div className="bg-white border border-[#E2E8F0] rounded-xl shadow-sm p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-[#DCFCE7] text-[#16A34A] uppercase tracking-wide">Active baseline</span>
+              <span className="text-[13px] font-bold text-[#0F172A]">v{activeBaseline.versionNumber}</span>
+              {activeBaseline.isLocked && (
+                <span className="flex items-center gap-1 text-[11px] font-semibold text-[#64748B] border border-[#E2E8F0] px-2 py-0.5 rounded-full">
+                  <Lock size={10} /> Locked
+                </span>
+              )}
+            </div>
+            <div className="text-[12px] text-[#64748B]">{formatDate(activeBaseline.createdAt)}</div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+            <div>
+              <div className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.08em] mb-1">Method</div>
+              <div className="flex items-center gap-1.5 text-[13px] font-semibold text-[#0F172A]">
+                {genIcon(activeBaseline.generatedBy)} {genLabel(activeBaseline.generatedBy)}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.08em] mb-1">Uploaded by</div>
+              <div className="text-[13px] font-semibold text-[#0F172A] truncate">
+                {activeBaseline.uploadedByName ?? activeBaseline.uploadedBy ?? "—"}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.08em] mb-1">
+                {activeBaseline.generatedBy === "ai" ? "Source docs" : "Source file"}
+              </div>
+              {activeBaseline.generatedBy === "ai" ? (
+                <button
+                  onClick={() => router.push("/dashboard/documents?folder=Schedules")}
+                  className="text-[13px] font-semibold text-[#2563EB] hover:underline cursor-pointer text-left"
+                >
+                  View source documents
+                </button>
+              ) : (
+                <div className="text-[13px] font-semibold text-[#0F172A] truncate">
+                  {activeBaseline.sourceFileName ?? "—"}
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.08em] mb-1">Status</div>
+              <div className="text-[13px] font-semibold text-[#059669]">Active</div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-[#F1F5F9]">
+            <button
+              onClick={() => router.push(`/dashboard/schedule/gantt`)}
+              className="px-3 py-1.5 rounded-lg text-[12px] font-semibold text-[#2563EB] border border-[#E2E8F0] bg-white hover:bg-[#F8FAFC] transition-colors cursor-pointer"
+            >
+              View Gantt
+            </button>
+            <button
+              onClick={() => router.push(`/dashboard/schedule/baseline`)}
+              className="px-3 py-1.5 rounded-lg text-[12px] font-semibold text-[#475569] border border-[#E2E8F0] bg-white hover:bg-[#F8FAFC] transition-colors cursor-pointer"
+            >
+              Baseline vs Actual
+            </button>
+            <button
+              onClick={onSetup}
+              className="px-3 py-1.5 rounded-lg text-[12px] font-semibold text-[#475569] border border-[#E2E8F0] bg-white hover:bg-[#F8FAFC] transition-colors cursor-pointer ml-auto"
+            >
+              Upload new version
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Version history table */}
+      {!loading && versions.length > 0 && (
+        <div className="bg-white border border-[#E2E8F0] rounded-xl shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-[#E2E8F0] flex items-center justify-between">
+            <span className="text-[13px] font-bold text-[#0F172A]">Version history</span>
+            <span className="text-[11px] text-[#94A3B8]">{versions.length} version{versions.length !== 1 ? "s" : ""}</span>
+          </div>
+          <div className="grid grid-cols-[48px_1fr_1fr_1fr_1fr_90px] text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.08em] bg-[#F8FAFC] px-4 py-2 border-b border-[#E2E8F0]">
+            <div>Ver</div>
+            <div>Date</div>
+            <div>Method</div>
+            <div>Uploaded by</div>
+            <div>Source</div>
+            <div className="text-right">Status</div>
+          </div>
+          {versions.map((v, i) => (
+            <div
+              key={v.id}
+              className={`grid grid-cols-[48px_1fr_1fr_1fr_1fr_90px] items-center px-4 py-3 text-[12px] ${i < versions.length - 1 ? "border-b border-[#F1F5F9]" : ""} hover:bg-[#F8FAFC] transition-colors`}
+            >
+              <div className="font-bold text-[#2563EB]">v{v.versionNumber}</div>
+              <div className="text-[#475569]">{formatDate(v.createdAt)}</div>
+              <div className="flex items-center gap-1.5 text-[#475569]">
+                {genIcon(v.generatedBy)}
+                <span>{genLabel(v.generatedBy)}</span>
+              </div>
+              <div className="text-[#475569] truncate pr-2">{v.uploadedByName ?? v.uploadedBy ?? "—"}</div>
+              <div className="truncate pr-2">
+                {v.generatedBy === "ai" ? (
+                  <button
+                    onClick={() => router.push("/dashboard/documents?folder=Schedules")}
+                    className="text-[#2563EB] hover:underline font-medium cursor-pointer text-left text-[12px]"
+                  >
+                    View docs
+                  </button>
+                ) : (
+                  <span className="text-[#475569] text-[11px] font-mono">{v.sourceFileName ?? "—"}</span>
+                )}
+              </div>
+              <div className="text-right">
+                {v.isBaseline ? (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#DCFCE7] text-[#16A34A]">Baseline</span>
+                ) : v.isLocked ? (
+                  <span className="flex items-center gap-1 justify-end text-[10px] text-[#64748B]">
+                    <Lock size={10} /> Locked
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-[#94A3B8]">Draft</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Documents folder link */}
+      {!loading && hasVersions && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-white border border-[#E2E8F0] shadow-sm">
+          <FolderOpen size={14} className="text-[#64748B] shrink-0" />
+          <span className="text-[12px] text-[#475569]">Source files saved in</span>
+          <button
+            onClick={() => router.push("/dashboard/documents")}
+            className="text-[12px] font-semibold text-[#2563EB] hover:underline cursor-pointer"
+          >
+            Documents / Schedules
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── MANUAL SCHEDULE SETUP ───────────────────────────────────────────────────
+
+function ManualScheduleSetup({ projectId, projectName, onBack }: { projectId: string; projectName: string; onBack: () => void }) {
+  const router = useRouter();
+  return (
+    <div className="p-6 space-y-5">
+      <button onClick={onBack} className="flex items-center gap-1.5 text-[12px] font-medium text-[#64748B] hover:text-[#0F172A] transition-colors cursor-pointer">
+        <ArrowLeft size={14} /> Back to import options
+      </button>
+      <div className="max-w-lg">
+        <div className="text-[17px] font-bold text-[#0F172A] mb-1">Create your schedule manually</div>
+        <div className="text-[13px] text-[#64748B]">
+          A blank schedule will open for{" "}
+          <span className="font-semibold text-[#0F172A]">{projectName}</span>. Add tasks, durations, and dependencies at your own pace.
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          { label: "Add tasks one by one", hint: "Type activity names and set durations directly in the list view" },
+          { label: "Drag to reorder", hint: "Rearrange tasks and link predecessors with a simple interface" },
+          { label: "Gantt builds as you go", hint: "Dates auto-calculate as you connect tasks and set durations" },
+        ].map(item => (
+          <div key={item.label} className="px-3 py-3 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC]">
+            <div className="text-[12px] font-semibold text-[#0F172A] mb-0.5">{item.label}</div>
+            <div className="text-[11px] text-[#94A3B8]">{item.hint}</div>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-3 pt-2">
+        <button
+          onClick={() => router.push(`/dashboard/schedule/list-view?projectId=${projectId}`)}
+          className="px-6 py-2.5 rounded-xl text-[13px] font-bold text-white bg-[#0F172A] hover:bg-[#1E293B] transition-colors cursor-pointer"
+        >
+          Open blank schedule
+        </button>
+        <button onClick={onBack} className="px-5 py-2.5 rounded-xl text-[13px] font-medium text-[#475569] border border-[#E2E8F0] bg-white hover:bg-[#F8FAFC] transition-colors cursor-pointer">
+          Go back
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── REAL MODE COMPONENT ─────────────────────────────────────────────────────
 
 function RealImport({
@@ -72,6 +671,9 @@ function RealImport({
   initialStartDate,
   initialEndDate,
   initialBuildingType,
+  initialCity,
+  onBack,
+  methodologyFiles,
 }: {
   projectId: string;
   workspaceId: string;
@@ -79,6 +681,9 @@ function RealImport({
   initialStartDate?: string | null;
   initialEndDate?: string | null;
   initialBuildingType?: string | null;
+  initialCity?: string | null;
+  onBack?: () => void;
+  methodologyFiles?: File[];
 }) {
   const router = useRouter();
   const [step, setStep] = useState<RealStep>("idle");
@@ -87,7 +692,7 @@ function RealImport({
   const [startDate, setStartDate] = useState(initialStartDate ?? "");
   const [endDate, setEndDate] = useState(initialEndDate ?? "");
   const [buildingType, setBuildingType] = useState(initialBuildingType ?? "");
-  const [city, setCity] = useState("");
+  const [city, setCity] = useState(initialCity ?? "");
   const [jobStatus, setJobStatus] = useState<ScheduleStatusResult | null>(null);
   const [genResult, setGenResult] = useState<ScheduleStatusResult["result"] | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
@@ -158,7 +763,7 @@ function RealImport({
           fileUrl: url,
           fileType: fileExt(entry.file.name).slice(1),
           fileSize: entry.file.size,
-          folder: "schedule_inputs",
+          folder: "Schedules",
         });
 
         setFiles(prev => prev.map((f, idx) => idx === i ? { ...f, status: "done", progress: 100, url } : f));
@@ -229,23 +834,23 @@ function RealImport({
     return (
       <div className="p-5 space-y-4 max-w-2xl">
         <SectionTitle>Schedule Generated</SectionTitle>
-        <div className="bg-[#dafbe1] border border-[#4ac26b] rounded-xl p-6 flex flex-col items-center text-center gap-3">
-          <div className="text-4xl">✅</div>
-          <div className="text-[15px] font-bold text-[#1a7f37]">Schedule ready for {projectName}</div>
-          <div className="text-[13px] text-[#1a7f37]">
+        <div className="bg-[#ECFDF5] border border-[#4ac26b] rounded-xl p-6 flex flex-col items-center text-center gap-3">
+          <CheckCircle size={40} className="text-[#059669]" />
+          <div className="text-[15px] font-bold text-[#059669]">Schedule ready for {projectName}</div>
+          <div className="text-[13px] text-[#059669]">
             {genResult.taskCount} tasks · {genResult.durationDays} days total duration
           </div>
         </div>
         <div className="flex gap-3">
           <button
             onClick={() => router.push(`/dashboard/schedule/gantt?projectId=${projectId}&workspaceId=${workspaceId}`)}
-            className="px-5 py-2 bg-[#3A4EA2] text-white rounded-md text-[13px] font-semibold hover:bg-[#0353A4] transition-colors"
+            className="px-5 py-2 bg-[#2563EB] text-white rounded-md text-[13px] font-semibold hover:bg-[#1D4ED8] transition-colors"
           >
             View Gantt →
           </button>
           <button
             onClick={() => { setStep("idle"); setFiles([]); setJobStatus(null); setGenResult(null); }}
-            className="px-5 py-2 border border-[#D0D7DE] bg-white text-[#24292f] rounded-md text-[13px] font-semibold hover:bg-[#f6f8fa]"
+            className="px-5 py-2 border border-[#E2E8F0] bg-white text-[#0F172A] rounded-md text-[13px] font-semibold hover:bg-[#F8FAFC]"
           >
             Upload More Files
           </button>
@@ -275,19 +880,19 @@ function RealImport({
       <div className="p-5 space-y-4 max-w-2xl">
         <SectionTitle>Generating Schedule</SectionTitle>
         <Card className="space-y-5">
-          <div className="text-[13px] font-semibold text-[#24292f]">
-            AI is building your schedule for <span className="text-[#3A4EA2]">{projectName}</span>
+          <div className="text-[13px] font-semibold text-[#0F172A]">
+            AI is building your schedule for <span className="text-[#2563EB]">{projectName}</span>
           </div>
 
           {/* Big progress bar */}
           <div>
-            <div className="flex justify-between text-[11px] text-[#57606a] mb-1.5">
+            <div className="flex justify-between text-[11px] text-[#475569] mb-1.5">
               <span>{statusText}</span>
               <span className="font-mono">{pct}%</span>
             </div>
-            <div className="w-full h-3 bg-[#f0f1f3] rounded-full overflow-hidden">
+            <div className="w-full h-3 bg-[#F1F5F9] rounded-full overflow-hidden">
               <div
-                className="h-full bg-[#3A4EA2] rounded-full transition-all duration-500"
+                className="h-full bg-[#2563EB] rounded-full transition-all duration-500"
                 style={{ width: `${pct}%` }}
               />
             </div>
@@ -301,22 +906,22 @@ function RealImport({
               return (
                 <div key={i} className="flex items-center gap-2.5 text-[12px]">
                   <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold transition-colors ${
-                    done ? "bg-[#1a7f37] text-white" : active ? "bg-[#3A4EA2] text-white" : "bg-[#f0f1f3] text-[#8C959F]"
+                    done ? "bg-[#059669] text-white" : active ? "bg-[#2563EB] text-white" : "bg-[#F1F5F9] text-[#94A3B8]"
                   }`}>
                     {done ? "✓" : i + 1}
                   </div>
-                  <span className={done ? "text-[#1a7f37]" : active ? "text-[#24292f] font-semibold" : "text-[#8C959F]"}>
+                  <span className={done ? "text-[#059669]" : active ? "text-[#0F172A] font-semibold" : "text-[#94A3B8]"}>
                     {label}
                   </span>
                   {active && (
-                    <span className="text-[10px] text-[#3A4EA2] font-mono animate-pulse">processing…</span>
+                    <span className="text-[10px] text-[#2563EB] font-mono animate-pulse">processing…</span>
                   )}
                 </div>
               );
             })}
           </div>
 
-          <div className="text-[11px] text-[#8C959F]">This usually takes 30–90 seconds depending on document size.</div>
+          <div className="text-[11px] text-[#94A3B8]">This usually takes 30–90 seconds depending on document size.</div>
         </Card>
       </div>
     );
@@ -328,17 +933,17 @@ function RealImport({
       <div className="p-5 space-y-4 max-w-2xl">
         <SectionTitle>Generation Failed</SectionTitle>
         <Card className="space-y-3">
-          <div className="text-[13px] text-[#CF222E] font-semibold">⚠️ {errorMsg}</div>
+          <div className="text-[13px] text-[#DC2626] font-semibold flex items-center gap-1.5"><AlertTriangle size={13} /> {errorMsg}</div>
           <div className="flex gap-3">
             <button
               onClick={() => { setStep("ready"); setJobStatus(null); }}
-              className="px-4 py-2 bg-[#3A4EA2] text-white rounded-md text-[13px] font-semibold hover:bg-[#0353A4]"
+              className="px-4 py-2 bg-[#2563EB] text-white rounded-md text-[13px] font-semibold hover:bg-[#1D4ED8]"
             >
               Retry Generate
             </button>
             <button
               onClick={() => { setStep("idle"); setFiles([]); }}
-              className="px-4 py-2 border border-[#D0D7DE] bg-white text-[#24292f] rounded-md text-[13px] font-semibold hover:bg-[#f6f8fa]"
+              className="px-4 py-2 border border-[#E2E8F0] bg-white text-[#0F172A] rounded-md text-[13px] font-semibold hover:bg-[#F8FAFC]"
             >
               Start Over
             </button>
@@ -352,10 +957,20 @@ function RealImport({
   return (
     <div className="p-5 space-y-4">
       <div className="flex items-center justify-between">
-        <SectionTitle>Import Schedule</SectionTitle>
-        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#ddf4ff] rounded-md">
-          <span className="w-2 h-2 rounded-full bg-[#3A4EA2]" />
-          <span className="text-[12px] font-semibold text-[#3A4EA2]">{projectName}</span>
+        <div className="flex items-center gap-2">
+          {onBack && (
+            <>
+              <button onClick={onBack} className="flex items-center gap-1 text-[12px] text-[#64748B] hover:text-[#0F172A] font-semibold transition-colors">
+                <ArrowLeft size={14} /> Back
+              </button>
+              <span className="text-[#E2E8F0]">·</span>
+            </>
+          )}
+          <SectionTitle>AI Generate from Documents</SectionTitle>
+        </div>
+        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#EFF6FF] rounded-md">
+          <span className="w-2 h-2 rounded-full bg-[#2563EB]" />
+          <span className="text-[12px] font-semibold text-[#2563EB]">{projectName}</span>
         </div>
       </div>
 
@@ -367,33 +982,33 @@ function RealImport({
         ].map((s, i) => (
           <div key={i} className="flex items-center gap-2">
             <div className={`px-3 py-1 rounded-full text-xs font-semibold ${
-              s.done ? "bg-[#dafbe1] text-[#1A7F37]" : s.active ? "bg-[#3A4EA2] text-white" : "bg-[#f0f1f3] text-[#8C959F]"
+              s.done ? "bg-[#ECFDF5] text-[#059669]" : s.active ? "bg-[#2563EB] text-white" : "bg-[#F1F5F9] text-[#94A3B8]"
             }`}>{s.label}</div>
-            {i === 0 && <span className="text-[#D0D7DE] text-xs">→</span>}
+            {i === 0 && <span className="text-[#E2E8F0] text-xs">→</span>}
           </div>
         ))}
       </div>
 
       {/* ── Existing Documents ── */}
       {existingDocs.length > 0 && (
-        <div className="bg-white border border-[#D0D7DE] rounded-lg overflow-hidden">
-          <div className="px-4 py-2.5 bg-[#f6f8fa] border-b border-[#D0D7DE] flex items-center justify-between">
-            <span className="text-[12px] font-bold text-[#24292f]">Uploaded Documents</span>
-            <span className="text-[11px] text-[#8C959F]">{existingDocs.length} file{existingDocs.length !== 1 ? "s" : ""} · AI will use these for schedule generation</span>
+        <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-hidden">
+          <div className="px-4 py-2.5 bg-[#F8FAFC] border-b border-[#E2E8F0] flex items-center justify-between">
+            <span className="text-[12px] font-bold text-[#0F172A]">Uploaded Documents</span>
+            <span className="text-[11px] text-[#94A3B8]">{existingDocs.length} file{existingDocs.length !== 1 ? "s" : ""} · AI will use these for schedule generation</span>
           </div>
-          <div className="divide-y divide-[#f0f1f3]">
+          <div className="divide-y divide-[#F1F5F9]">
             {existingDocs.map(doc => (
               <div key={doc.id} className="px-4 py-2.5 flex items-center gap-3">
                 <span className="text-base shrink-0">📄</span>
                 <div className="flex-1 min-w-0">
-                  <div className="text-[12px] font-semibold text-[#24292f] truncate">{doc.fileName}</div>
-                  <div className="text-[11px] text-[#8C959F]">
+                  <div className="text-[12px] font-semibold text-[#0F172A] truncate">{doc.fileName}</div>
+                  <div className="text-[11px] text-[#94A3B8]">
                     {doc.fileType?.toUpperCase()} · {doc.fileSize ? `${(doc.fileSize / 1024 / 1024).toFixed(1)} MB` : "—"} · {new Date(doc.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
                   </div>
                 </div>
                 <button
                   onClick={() => handleDeleteDoc(doc)}
-                  className="text-[#CF222E] text-xs font-semibold hover:opacity-70 transition shrink-0"
+                  className="text-[#DC2626] text-xs font-semibold hover:opacity-70 transition shrink-0"
                   title="Remove document"
                 >
                   ✕
@@ -412,14 +1027,14 @@ function RealImport({
           onDragLeave={() => setDragging(false)}
           onDrop={handleDrop}
           className={`border-2 border-dashed rounded-lg p-10 text-center transition-colors ${
-            dragging ? "border-[#3A4EA2] bg-[#ddf4ff]" : "border-[#D0D7DE] hover:border-[#8C959F]"
+            dragging ? "border-[#2563EB] bg-[#EFF6FF]" : "border-[#E2E8F0] hover:border-[#94A3B8]"
           }`}
         >
           <div className="text-4xl mb-3">📂</div>
-          <div className="text-sm font-semibold text-[#24292f] mb-1">
+          <div className="text-sm font-semibold text-[#0F172A] mb-1">
             Drag & drop project documents here
           </div>
-          <div className="text-xs text-[#8C959F] mb-4">
+          <div className="text-xs text-[#94A3B8] mb-4">
             PDF drawings, BOQ, scope of work, XLSX schedules · Multiple files at once
           </div>
           <label>
@@ -430,7 +1045,7 @@ function RealImport({
               className="hidden"
               onChange={e => { if (e.target.files?.length) { addFiles(e.target.files); e.target.value = ""; } }}
             />
-            <span className="inline-block px-5 py-2 bg-[#3A4EA2] text-white rounded-md text-[13px] font-semibold cursor-pointer hover:bg-[#0757b5] transition-colors">
+            <span className="inline-block px-5 py-2 bg-[#2563EB] text-white rounded-md text-[13px] font-semibold cursor-pointer hover:bg-[#1D4ED8] transition-colors">
               Browse Files
             </span>
           </label>
@@ -440,27 +1055,27 @@ function RealImport({
         {files.length > 0 && (
           <div className="mt-4 space-y-2">
             {files.map((entry, i) => (
-              <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[#f6f8fa] border border-[#e1e4e8]">
+              <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0]">
                 <span className="text-lg shrink-0">
-                  {entry.status === "done" ? "✅" : entry.status === "error" ? "❌" : entry.status === "uploading" ? "⏳" : "📄"}
+                  {entry.status === "done" ? <CheckCircle size={18} className="text-[#059669]" /> : entry.status === "error" ? <X size={18} className="text-[#DC2626]" /> : entry.status === "uploading" ? <Loader size={18} className="animate-spin text-[#2563EB]" /> : <FileText size={18} className="text-[#94A3B8]" />}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <div className="text-[12px] font-semibold text-[#24292f] truncate">{entry.file.name}</div>
-                  <div className="text-[11px] text-[#8C959F]">{formatBytes(entry.file.size)}</div>
+                  <div className="text-[12px] font-semibold text-[#0F172A] truncate">{entry.file.name}</div>
+                  <div className="text-[11px] text-[#94A3B8]">{formatBytes(entry.file.size)}</div>
                   {entry.status === "uploading" && (
-                    <div className="mt-1 h-1 bg-[#D0D7DE] rounded-full overflow-hidden">
-                      <div className="h-full bg-[#3A4EA2] rounded-full transition-all" style={{ width: `${entry.progress}%` }} />
+                    <div className="mt-1 h-1 bg-[#E2E8F0] rounded-full overflow-hidden">
+                      <div className="h-full bg-[#2563EB] rounded-full transition-all" style={{ width: `${entry.progress}%` }} />
                     </div>
                   )}
                   {entry.status === "error" && (
-                    <div className="text-[11px] text-[#CF222E] mt-0.5">{entry.error}</div>
+                    <div className="text-[11px] text-[#DC2626] mt-0.5">{entry.error}</div>
                   )}
                 </div>
                 {entry.status === "pending" && (
-                  <button onClick={() => removeFile(i)} className="text-[#8C959F] hover:text-[#CF222E] text-sm shrink-0">✕</button>
+                  <button onClick={() => removeFile(i)} className="text-[#94A3B8] hover:text-[#DC2626] text-sm shrink-0">✕</button>
                 )}
                 {entry.status === "done" && (
-                  <span className="text-[10px] text-[#1a7f37] font-semibold shrink-0">Uploaded</span>
+                  <span className="text-[10px] text-[#059669] font-semibold shrink-0">Uploaded</span>
                 )}
               </div>
             ))}
@@ -472,16 +1087,16 @@ function RealImport({
           <div className="mt-4 flex gap-3 items-center">
             <button
               onClick={handleUpload}
-              className="px-5 py-2 bg-[#3A4EA2] text-white rounded-md text-[13px] font-semibold hover:bg-[#0353A4] transition-colors"
+              className="px-5 py-2 bg-[#2563EB] text-white rounded-md text-[13px] font-semibold hover:bg-[#1D4ED8] transition-colors"
             >
               Upload {files.filter(f => f.status === "pending").length} File{files.filter(f => f.status === "pending").length > 1 ? "s" : ""}
             </button>
-            <span className="text-[11px] text-[#8C959F]">Files are securely stored and used only for schedule generation</span>
+            <span className="text-[11px] text-[#94A3B8]">Files are securely stored and used only for schedule generation</span>
           </div>
         )}
 
         {step === "uploading" && (
-          <div className="mt-4 text-[13px] text-[#57606a] flex items-center gap-2">
+          <div className="mt-4 text-[13px] text-[#475569] flex items-center gap-2">
             <span className="animate-spin text-base">⏳</span> Uploading files…
           </div>
         )}
@@ -489,7 +1104,7 @@ function RealImport({
         {/* Upload summary */}
         {allDone && (
           <div className={`mt-4 px-3 py-2 rounded-md text-[12px] font-semibold ${
-            errorCount === 0 ? "bg-[#dafbe1] text-[#1a7f37]" : "bg-[#fff8c5] text-[#9a6700]"
+            errorCount === 0 ? "bg-[#ECFDF5] text-[#059669]" : "bg-[#FFFBEB] text-[#9a6700]"
           }`}>
             {doneCount} file{doneCount !== 1 ? "s" : ""} uploaded successfully
             {errorCount > 0 && ` · ${errorCount} failed`}
@@ -497,11 +1112,11 @@ function RealImport({
         )}
 
         {/* Expected formats */}
-        <div className="mt-4 p-3 bg-[#f6f8fa] rounded-md">
-          <div className="text-[11px] font-bold text-[#57606a] mb-2">ACCEPTED FILE TYPES</div>
+        <div className="mt-4 p-3 bg-[#F8FAFC] rounded-md">
+          <div className="text-[11px] font-bold text-[#475569] mb-2">ACCEPTED FILE TYPES</div>
           <div className="flex flex-wrap gap-1.5">
             {["PDF (drawings, scope)", "XLSX (BOQ, schedule)", "DOCX (specs)", "JPG/PNG (site photos)", "CSV (task list)"].map(f => (
-              <span key={f} className="px-2 py-0.5 bg-white border border-[#D0D7DE] rounded text-[11px] text-[#57606a]">{f}</span>
+              <span key={f} className="px-2 py-0.5 bg-white border border-[#E2E8F0] rounded text-[11px] text-[#475569]">{f}</span>
             ))}
           </div>
         </div>
@@ -511,28 +1126,28 @@ function RealImport({
       {step === "ready" && doneCount > 0 && (
         <Card className="space-y-4">
           <div>
-            <div className="text-[13px] font-bold text-[#24292f] mb-0.5">Generate Schedule</div>
-            <div className="text-[12px] text-[#57606a]">
-              AI will parse your documents and build a full Gantt schedule for <span className="font-semibold text-[#24292f]">{projectName}</span>.
+            <div className="text-[13px] font-bold text-[#0F172A] mb-0.5">Generate Schedule</div>
+            <div className="text-[12px] text-[#475569]">
+              AI will parse your documents and build a full Gantt schedule for <span className="font-semibold text-[#0F172A]">{projectName}</span>.
               Optionally provide project dates and type to improve accuracy.
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-bold text-[#57606a] mb-1">Start Date</label>
+              <label className="block text-[11px] font-bold text-[#475569] mb-1">Start Date</label>
               <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
-                className="w-full border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] focus:ring-1 focus:ring-[#3A4EA2] outline-none" />
+                className="w-full border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] focus:ring-1 focus:ring-[#2563EB] outline-none" />
             </div>
             <div>
-              <label className="block text-[11px] font-bold text-[#57606a] mb-1">End Date</label>
+              <label className="block text-[11px] font-bold text-[#475569] mb-1">End Date</label>
               <input type="date" value={endDate} min={startDate || undefined} onChange={e => setEndDate(startDate && e.target.value < startDate ? startDate : e.target.value)}
-                className="w-full border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] focus:ring-1 focus:ring-[#3A4EA2] outline-none" />
+                className="w-full border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] focus:ring-1 focus:ring-[#2563EB] outline-none" />
             </div>
             <div>
-              <label className="block text-[11px] font-bold text-[#57606a] mb-1">Building Type</label>
+              <label className="block text-[11px] font-bold text-[#475569] mb-1">Building Type</label>
               <select value={buildingType} onChange={e => setBuildingType(e.target.value)}
-                className="w-full border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] focus:ring-1 focus:ring-[#3A4EA2] outline-none bg-white">
+                className="w-full border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] focus:ring-1 focus:ring-[#2563EB] outline-none bg-white">
                 <option value="">Auto-detect</option>
                 {["residential", "commercial", "mixed-use", "industrial", "infrastructure"].map(t => (
                   <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
@@ -540,21 +1155,21 @@ function RealImport({
               </select>
             </div>
             <div>
-              <label className="block text-[11px] font-bold text-[#57606a] mb-1">City</label>
+              <label className="block text-[11px] font-bold text-[#475569] mb-1">City</label>
               <input type="text" value={city} onChange={e => setCity(e.target.value)}
                 placeholder="e.g. Mumbai, Dubai"
-                className="w-full border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] focus:ring-1 focus:ring-[#3A4EA2] outline-none" />
+                className="w-full border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] focus:ring-1 focus:ring-[#2563EB] outline-none" />
             </div>
           </div>
 
           <button
             onClick={handleGenerate}
-            className="w-full py-2.5 bg-[#3A4EA2] text-white rounded-md text-[13px] font-semibold hover:bg-[#0353A4] transition-colors"
+            className="w-full py-2.5 bg-[#2563EB] text-white rounded-md text-[13px] font-semibold hover:bg-[#1D4ED8] transition-colors"
           >
-            ✨ Generate Schedule with AI
+            <Sparkles size={14} className="inline mr-1" /> Generate Schedule with AI
           </button>
 
-          <div className="text-[11px] text-[#8C959F] flex items-center gap-1.5">
+          <div className="text-[11px] text-[#94A3B8] flex items-center gap-1.5">
             <span>💬</span>
             Progress updates come from WhatsApp via your contractors — the schedule tracks against those actuals.
           </div>
@@ -566,7 +1181,16 @@ function RealImport({
 
 // ─── MOCK MODE WIZARD ────────────────────────────────────────────────────────
 
-function MockImport({ projectId, projectName }: { projectId: number; projectName: string }) {
+function MockImport({
+  projectId, projectName, mode, onBack, currentVersionCount = 0, onComplete,
+}: {
+  projectId: number;
+  projectName: string;
+  mode: ImportMode;
+  onBack: () => void;
+  currentVersionCount?: number;
+  onComplete?: (info: { versionNumber: number; fileName: string; taskCount: number }) => void;
+}) {
   const router = useRouter();
   const [step, setStep] = useState<MockStep>("upload");
   const [fileName, setFileName] = useState("");
@@ -576,10 +1200,9 @@ function MockImport({ projectId, projectName }: { projectId: number; projectName
   const [mappings, setMappings] = useState<Record<string, string>>({});
   const [importing, setImporting] = useState(false);
   const [fileQueue, setFileQueue] = useState<{ file: File; status: "pending" | "done" }[]>([]);
-  const [uploadHistory, setUploadHistory] = useState<BaselineVersion[]>(MOCK_HISTORY[projectId] ?? []);
 
-  const isRebaseline = uploadHistory.length > 0;
-  const nextVersion = isRebaseline ? uploadHistory[0].version + 1 : 1;
+  const isRebaseline = currentVersionCount > 0;
+  const nextVersion = currentVersionCount + 1;
 
   const handleFile = useCallback(async (file: File) => {
     setFileName(file.name);
@@ -602,12 +1225,15 @@ function MockImport({ projectId, projectName }: { projectId: number; projectName
     setStep("map");
   }, []);
 
+  const modeMethod = IMPORT_METHODS.find(m => m.id === mode)!;
+  const acceptedExts = modeMethod.accepts.split(",");
+
   const handleFiles = useCallback((incoming: FileList | File[]) => {
-    const valid = Array.from(incoming).filter(f => f.name.endsWith(".csv") || f.name.endsWith(".xlsx") || f.name.endsWith(".xer") || f.name.endsWith(".mpp"));
+    const valid = Array.from(incoming).filter(f => acceptedExts.some(ext => f.name.toLowerCase().endsWith(ext)));
     if (!valid.length) return;
     setFileQueue(q => [...q, ...valid.map(f => ({ file: f, status: "pending" as const }))]);
     handleFile(valid[0]);
-  }, [handleFile]);
+  }, [handleFile, acceptedExts]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -619,85 +1245,66 @@ function MockImport({ projectId, projectName }: { projectId: number; projectName
     setImporting(true);
     setTimeout(() => {
       setImporting(false);
-      alert(`${isRebaseline ? "Re-baseline" : "Import"} complete! ${rows.length} tasks added to ${projectName} as Baseline v${nextVersion}.`);
-      const newEntry: BaselineVersion = {
-        version: nextVersion, fileName,
-        uploadedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
-        taskCount: rows.length,
-        note: isRebaseline ? `Re-baseline v${nextVersion}` : "Initial baseline",
-      };
-      setUploadHistory([newEntry, ...uploadHistory]);
-      setFileQueue(q => {
-        const remaining = q.filter(f => f.status === "pending").slice(1);
-        if (remaining.length > 0) handleFile(remaining[0].file);
-        else { setStep("upload"); setHeaders([]); setRows([]); setMappings({}); setFileName(""); }
-        return remaining;
-      });
+      setStep("done");
+      onComplete?.({ versionNumber: nextVersion, fileName, taskCount: rows.length });
     }, 1500);
   };
+
+  // ── Success screen ──────────────────────────────────────────────────────────
+  if (step === "done") {
+    return (
+      <div className="p-6 flex flex-col items-center justify-center min-h-[400px] text-center gap-5">
+        <div className="w-16 h-16 rounded-2xl bg-[#DCFCE7] flex items-center justify-center">
+          <CheckCircle size={32} className="text-[#16A34A]" />
+        </div>
+        <div>
+          <div className="text-[17px] font-bold text-[#0F172A] mb-1">
+            {isRebaseline ? `Baseline v${nextVersion} uploaded` : "Schedule imported"}
+          </div>
+          <div className="text-[13px] text-[#64748B]">
+            {rows.length} tasks imported from <span className="font-semibold text-[#0F172A]">{fileName}</span>
+            {isRebaseline && <> · Previous version kept in history</>}
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onBack}
+            className="px-5 py-2.5 rounded-xl text-[13px] font-bold text-white bg-[#0F172A] hover:bg-[#1E293B] transition-colors cursor-pointer"
+          >
+            View schedule history
+          </button>
+          <button
+            onClick={() => router.push(`/dashboard/schedule/gantt`)}
+            className="px-5 py-2.5 rounded-xl text-[13px] font-semibold text-[#475569] border border-[#E2E8F0] bg-white hover:bg-[#F8FAFC] transition-colors cursor-pointer"
+          >
+            Open Gantt
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-5 overflow-y-auto h-full space-y-4">
       <div className="flex items-center justify-between">
-        <SectionTitle>{isRebaseline ? "Re-baseline Schedule" : "Import Schedule"}</SectionTitle>
+        <div className="flex items-center gap-2">
+          <button onClick={onBack} className="flex items-center gap-1 text-[12px] text-[#64748B] hover:text-[#0F172A] font-semibold transition-colors">
+            <ArrowLeft size={14} /> Back
+          </button>
+          <span className="text-[#E2E8F0]">·</span>
+          <SectionTitle>{isRebaseline ? "Upload new version" : "Import schedule"} · {SHORT_MODE_LABEL[mode] ?? modeMethod.label}</SectionTitle>
+        </div>
         <div className="flex items-center gap-2">
           {isRebaseline && (
-            <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-[#fff8c5] text-[#9A6700]">v{nextVersion} next</span>
+            <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-[#FFFBEB] text-[#D97706]">v{nextVersion} next</span>
           )}
-          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#ddf4ff] rounded-md">
-            <span className="w-2 h-2 rounded-full bg-[#3A4EA2]" />
-            <span className="text-[12px] font-semibold text-[#3A4EA2]">{projectName}</span>
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#EFF6FF] rounded-md">
+            <span className="w-2 h-2 rounded-full bg-[#2563EB]" />
+            <span className="text-[12px] font-semibold text-[#2563EB]">{projectName}</span>
           </div>
         </div>
       </div>
 
-      {uploadHistory.length > 0 && (
-        <div className="bg-white border border-[#D0D7DE] rounded-lg overflow-hidden">
-          <div className="px-4 py-2.5 bg-[#f6f8fa] border-b border-[#D0D7DE] flex items-center justify-between">
-            <span className="text-[12px] font-bold text-[#24292f]">Baseline History</span>
-            <span className="text-[11px] text-[#8C959F]">{uploadHistory.length} version{uploadHistory.length > 1 ? "s" : ""}</span>
-          </div>
-          <div className="divide-y divide-[#f0f1f3]">
-            {uploadHistory.map(v => (
-              <div key={v.version} className="px-4 py-3 flex items-center gap-3">
-                <div className="w-7 h-7 rounded-full bg-[#ddf4ff] flex items-center justify-center shrink-0">
-                  <span className="text-[11px] font-bold text-[#3A4EA2]">v{v.version}</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[12px] font-semibold text-[#24292f] truncate">{v.fileName}</div>
-                  <div className="text-[11px] text-[#8C959F]">{v.note}</div>
-                </div>
-                <div className="text-right shrink-0">
-                  <div className="text-[11px] font-mono text-[#57606a]">{v.taskCount} tasks</div>
-                  <div className="text-[10px] text-[#8C959F] font-mono">{v.uploadedAt}</div>
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={() => router.push(`/dashboard/schedule/gantt?projectId=${projectId}`)} className="text-[11px] text-[#3A4EA2] hover:underline font-semibold">View Gantt</button>
-                  <span className="text-[#D0D7DE]">·</span>
-                  <button onClick={() => router.push(`/dashboard/schedule/baseline?projectId=${projectId}`)} className="text-[11px] text-[#3A4EA2] hover:underline font-semibold">Compare</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="flex items-center gap-2">
-        {[
-          { key: "upload", label: `1. ${isRebaseline ? "Upload New" : "Upload File"}` },
-          { key: "map", label: "2. Map Columns" },
-          { key: "preview", label: "3. Preview & Import" },
-        ].map((s, i) => (
-          <div key={s.key} className="flex items-center gap-2">
-            <div className={`px-3 py-1 rounded-full text-xs font-semibold ${
-              step === s.key ? "bg-[#3A4EA2] text-white"
-              : headers.length > 0 && (s.key === "upload" || (s.key === "map" && step === "preview")) ? "bg-[#dafbe1] text-[#1A7F37]"
-              : "bg-[#f0f1f3] text-[#8C959F]"
-            }`}>{s.label}</div>
-            {i < 2 && <span className="text-[#D0D7DE] text-xs">→</span>}
-          </div>
-        ))}
-      </div>
 
       {step === "upload" && (
         <Card>
@@ -705,39 +1312,31 @@ function MockImport({ projectId, projectName }: { projectId: number; projectName
             onDragOver={e => { e.preventDefault(); setDragging(true); }}
             onDragLeave={() => setDragging(false)}
             onDrop={handleDrop}
-            className={`border-2 border-dashed rounded-lg p-16 text-center cursor-pointer transition-colors ${dragging ? "border-[#3A4EA2] bg-[#ddf4ff]" : "border-[#D0D7DE] hover:border-[#8C959F]"}`}
+            className={`border-2 border-dashed rounded-lg p-16 text-center cursor-pointer transition-colors ${dragging ? "border-[#2563EB] bg-[#EFF6FF]" : "border-[#E2E8F0] hover:border-[#94A3B8]"}`}
           >
-            <div className="text-5xl mb-3">{isRebaseline ? "🔄" : "📤"}</div>
-            <div className="text-sm font-semibold text-[#24292f] mb-1">
+            <div className="mb-3">{isRebaseline ? <RefreshCw size={48} className="text-[#94A3B8] mx-auto" /> : <Upload size={48} className="text-[#94A3B8] mx-auto" />}</div>
+            <div className="text-sm font-semibold text-[#0F172A] mb-1">
               Upload Baseline v{nextVersion} for {projectName}
             </div>
-            <div className="text-xs text-[#8C959F] mb-1">
+            <div className="text-xs text-[#94A3B8] mb-1">
               {isRebaseline
                 ? "This will replace the active baseline — previous versions are kept in history above"
-                : <span>This will become the baseline schedule for <span className="font-semibold text-[#24292f]">{projectName}</span></span>
+                : <span>This will become the baseline schedule for <span className="font-semibold text-[#0F172A]">{projectName}</span></span>
               }
             </div>
-            <div className="text-xs text-[#8C959F] mb-4">Supports .csv, .xlsx, .xer, .mpp — select multiple files at once</div>
+            <div className="text-xs text-[#94A3B8] mb-4">Supports {modeMethod.formats.join(", ")} — select multiple files at once</div>
             <label>
-              <input type="file" accept=".csv,.xlsx,.xer,.mpp" multiple className="hidden"
+              <input type="file" accept={modeMethod.accepts} multiple className="hidden"
                 onChange={e => { if (e.target.files?.length) handleFiles(e.target.files); e.target.value = ""; }} />
-              <span className="inline-block px-5 py-2 bg-[#3A4EA2] text-white rounded-md text-[13px] font-semibold cursor-pointer hover:bg-[#0757b5] transition-colors">
+              <span className="inline-block px-5 py-2 bg-[#2563EB] text-white rounded-md text-[13px] font-semibold cursor-pointer hover:bg-[#1D4ED8] transition-colors">
                 Browse Files
               </span>
             </label>
             {fileQueue.length > 1 && (
-              <div className="mt-3 text-[11px] text-[#57606a]">
-                {fileQueue.length} files queued — processing <span className="font-semibold text-[#24292f]">{fileQueue[0]?.file.name}</span>
+              <div className="mt-3 text-[11px] text-[#475569]">
+                {fileQueue.length} files queued — processing <span className="font-semibold text-[#0F172A]">{fileQueue[0]?.file.name}</span>
               </div>
             )}
-          </div>
-          <div className="mt-4 p-3 bg-[#f6f8fa] rounded-md">
-            <div className="text-[11px] font-bold text-[#57606a] mb-2">EXPECTED COLUMNS</div>
-            <div className="flex flex-wrap gap-1.5">
-              {BLUQ_FIELDS.filter(f => f !== "— Skip Column —").map(f => (
-                <span key={f} className="px-2 py-0.5 bg-white border border-[#D0D7DE] rounded text-[11px] text-[#57606a]">{f}</span>
-              ))}
-            </div>
           </div>
         </Card>
       )}
@@ -746,8 +1345,8 @@ function MockImport({ projectId, projectName }: { projectId: number; projectName
         <Card>
           <div className="flex items-center justify-between mb-4">
             <div>
-              <div className="text-sm font-bold text-[#24292f]">Map Your Columns</div>
-              <div className="text-xs text-[#8C959F] mt-0.5">📎 {fileName} — {rows.length} rows detected</div>
+              <div className="text-sm font-bold text-[#0F172A]">Map Your Columns</div>
+              <div className="text-xs text-[#94A3B8] mt-0.5">📎 {fileName} — {rows.length} rows detected</div>
             </div>
             <div className="flex gap-2">
               <Btn small onClick={() => setStep("upload")}>← Back</Btn>
@@ -756,24 +1355,24 @@ function MockImport({ projectId, projectName }: { projectId: number; projectName
           </div>
           <div className="space-y-2">
             {headers.map(h => (
-              <div key={h} className="flex items-center gap-3 py-2 px-3 rounded-md bg-[#f6f8fa]">
-                <div className="w-48 text-xs font-semibold text-[#24292f] font-mono">{h}</div>
-                <span className="text-[#8C959F] text-sm">→</span>
+              <div key={h} className="flex items-center gap-3 py-2 px-3 rounded-md bg-[#F8FAFC]">
+                <div className="w-48 text-xs font-semibold text-[#0F172A] font-mono">{h}</div>
+                <span className="text-[#94A3B8] text-sm">→</span>
                 <select value={mappings[h] || ""} onChange={e => setMappings({ ...mappings, [h]: e.target.value })}
-                  className="flex-1 border border-[#D0D7DE] rounded-md px-3 py-1.5 text-xs bg-white text-[#24292f] focus:outline-none focus:ring-2 focus:ring-[#3A4EA2]">
+                  className="flex-1 border border-[#E2E8F0] rounded-md px-3 py-1.5 text-xs bg-white text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#2563EB]">
                   <option value="">Select field...</option>
                   {BLUQ_FIELDS.map(f => <option key={f} value={f}>{f}</option>)}
                 </select>
-                {mappings[h] && mappings[h] !== "— Skip Column —" && <span className="text-[#1A7F37] text-sm">✓</span>}
+                {mappings[h] && mappings[h] !== "— Skip Column —" && <span className="text-[#059669] text-sm">✓</span>}
               </div>
             ))}
           </div>
-          <div className="mt-4 border-t border-[#e1e4e8] pt-4">
-            <div className="text-[11px] font-bold text-[#57606a] mb-2">SAMPLE DATA (first 2 rows)</div>
+          <div className="mt-4 border-t border-[#E2E8F0] pt-4">
+            <div className="text-[11px] font-bold text-[#475569] mb-2">SAMPLE DATA (first 2 rows)</div>
             <div className="overflow-x-auto">
               <table className="w-full text-[11px] border-collapse">
-                <thead><tr className="bg-[#f6f8fa]">{headers.map(h => <th key={h} className="px-2 py-1.5 text-left font-bold text-[#57606a] border-b border-[#e1e4e8] whitespace-nowrap">{h}</th>)}</tr></thead>
-                <tbody>{rows.slice(0, 2).map((row, ri) => <tr key={ri} className="border-b border-[#f0f1f3]">{row.map((cell, ci) => <td key={ci} className="px-2 py-1.5 text-[#24292f] whitespace-nowrap font-mono">{cell}</td>)}</tr>)}</tbody>
+                <thead><tr className="bg-[#F8FAFC]">{headers.map(h => <th key={h} className="px-2 py-1.5 text-left font-bold text-[#475569] border-b border-[#E2E8F0] whitespace-nowrap">{h}</th>)}</tr></thead>
+                <tbody>{rows.slice(0, 2).map((row, ri) => <tr key={ri} className="border-b border-[#F1F5F9]">{row.map((cell, ci) => <td key={ci} className="px-2 py-1.5 text-[#0F172A] whitespace-nowrap font-mono">{cell}</td>)}</tr>)}</tbody>
               </table>
             </div>
           </div>
@@ -784,9 +1383,9 @@ function MockImport({ projectId, projectName }: { projectId: number; projectName
         <Card>
           <div className="flex items-center justify-between mb-4">
             <div>
-              <div className="text-sm font-bold text-[#24292f]">Review & Import</div>
-              <div className="text-xs text-[#8C959F] mt-0.5">
-                {rows.length} tasks will be imported as <span className="font-semibold text-[#24292f]">Baseline v{nextVersion}</span> into <span className="font-semibold text-[#24292f]">{projectName}</span>
+              <div className="text-sm font-bold text-[#0F172A]">Review & Import</div>
+              <div className="text-xs text-[#94A3B8] mt-0.5">
+                {rows.length} tasks will be imported as <span className="font-semibold text-[#0F172A]">Baseline v{nextVersion}</span> into <span className="font-semibold text-[#0F172A]">{projectName}</span>
               </div>
             </div>
             <div className="flex gap-2">
@@ -798,31 +1397,19 @@ function MockImport({ projectId, projectName }: { projectId: number; projectName
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-[11px] border-collapse">
-              <thead><tr className="bg-[#f6f8fa]">{headers.map(h => <th key={h} className="px-2 py-1.5 text-left border-b border-[#e1e4e8] whitespace-nowrap"><div className="font-bold text-[#3A4EA2]">{mappings[h] || "—"}</div><div className="font-normal text-[#8C959F]">{h}</div></th>)}</tr></thead>
-              <tbody>{rows.map((row, ri) => <tr key={ri} className="border-b border-[#f0f1f3] hover:bg-[#f6f8fa]">{row.map((cell, ci) => <td key={ci} className="px-2 py-1.5 text-[#24292f] whitespace-nowrap font-mono">{cell}</td>)}</tr>)}</tbody>
+              <thead><tr className="bg-[#F8FAFC]">{headers.map(h => <th key={h} className="px-2 py-1.5 text-left border-b border-[#E2E8F0] whitespace-nowrap"><div className="font-bold text-[#2563EB]">{mappings[h] || "—"}</div><div className="font-normal text-[#94A3B8]">{h}</div></th>)}</tr></thead>
+              <tbody>{rows.map((row, ri) => <tr key={ri} className="border-b border-[#F1F5F9] hover:bg-[#F8FAFC]">{row.map((cell, ci) => <td key={ci} className="px-2 py-1.5 text-[#0F172A] whitespace-nowrap font-mono">{cell}</td>)}</tr>)}</tbody>
             </table>
           </div>
-          <div className="mt-4 p-3 bg-[#dafbe1] rounded-md flex items-center gap-2">
-            <span className="text-[#1A7F37] font-bold text-sm">✓</span>
-            <span className="text-xs text-[#1A7F37] font-semibold">
+          <div className="mt-4 p-3 bg-[#ECFDF5] rounded-md flex items-center gap-2">
+            <span className="text-[#059669] font-bold text-sm">✓</span>
+            <span className="text-xs text-[#059669] font-semibold">
               {rows.length} tasks ready as Baseline v{nextVersion} for {projectName} · {Object.values(mappings).filter(v => v && v !== "— Skip Column —").length} columns mapped
             </span>
           </div>
         </Card>
       )}
 
-      <div className="p-4 bg-[#ddf4ff] border border-[#54aeff44] rounded-lg flex items-start gap-3">
-        <span className="text-sm mt-0.5">💬</span>
-        <div>
-          <div className="text-[12px] font-bold text-[#3A4EA2] mb-0.5">Actuals come from the field</div>
-          <div className="text-[12px] text-[#3A4EA2] leading-relaxed">
-            Progress updates are collected automatically via WhatsApp from your contractors. View them in the{" "}
-            <span className="underline cursor-pointer font-semibold" onClick={() => router.push(`/dashboard/whatsapp-feed?projectId=${projectId}`)}>
-              WhatsApp Feed
-            </span>.
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -834,13 +1421,19 @@ function ImportCSVContent() {
   const { workspaceId, isDesignMode, loading: wsLoading } = useWorkspace();
 
   const projectIdParam = searchParams.get("projectId") ?? "0";
-  const real = !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
+  const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
   const hasProject = projectIdParam !== "0" && projectIdParam !== "";
+  const [importMode, setImportMode] = useState<ImportMode | null>(null);
+  const [methodologyFiles, setMethodologyFiles] = useState<File[]>([]);
+  const [versions, setVersions] = useState<ScheduleVersion[] | null>(null);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [showNewBaselinePicker, setShowNewBaselinePicker] = useState(false);
 
   const [projectName, setProjectName] = useState("Select Project");
   const [projectStartDate, setProjectStartDate] = useState<string | null>(null);
   const [projectEndDate, setProjectEndDate] = useState<string | null>(null);
   const [projectCategory, setProjectCategory] = useState<string | null>(null);
+  const [projectCity, setProjectCity] = useState<string | null>(null);
 
   useEffect(() => {
     if (real && workspaceId) {
@@ -851,6 +1444,11 @@ function ImportCSVContent() {
           setProjectStartDate(match.startDate ?? null);
           setProjectEndDate(match.endDate ?? null);
           setProjectCategory(match.category ?? null);
+          // Extract city from address: "Dubai Marina, Dubai" → "Dubai"
+          if (match.address) {
+            const parts = match.address.split(",").map((s: string) => s.trim()).filter(Boolean);
+            setProjectCity(parts.length >= 2 ? parts[parts.length - 1] : parts[0] ?? null);
+          }
         }
       }).catch(() => {});
     } else if (!real && projectIdParam !== "0") {
@@ -864,8 +1462,24 @@ function ImportCSVContent() {
     }
   }, [projectIdParam, real, workspaceId]);
 
+  // Fetch existing schedule versions to decide landing state
+  useEffect(() => {
+    if (real && workspaceId && isRealProject(projectIdParam)) {
+      setVersionsLoading(true);
+      fetchScheduleVersions(projectIdParam, workspaceId)
+        .then(v => setVersions(v))
+        .catch(() => setVersions([]))
+        .finally(() => setVersionsLoading(false));
+    } else if (hasProject) {
+      // Design mode — use mock versions so the landing looks populated
+      setVersions(MOCK_SCHEDULE_VERSIONS);
+    } else {
+      setVersions([]);
+    }
+  }, [projectIdParam, real, workspaceId, hasProject]);
+
   if (wsLoading) {
-    return <div className="p-5 text-sm text-[#8C959F]">Loading...</div>;
+    return <div className="p-5 text-sm text-[#94A3B8]">Loading...</div>;
   }
 
   if (!hasProject) {
@@ -874,25 +1488,90 @@ function ImportCSVContent() {
         <SectionTitle>Import Schedule</SectionTitle>
         <Card className="mt-4">
           <div className="text-center py-12">
-            <div className="text-4xl mb-3">📋</div>
-            <div className="text-sm font-semibold text-[#24292f] mb-1">No project selected</div>
-            <div className="text-xs text-[#8C959F]">Select a project from the dropdown above, or create a new one.</div>
+            <ClipboardList size={40} className="mb-3 text-[#94A3B8] mx-auto" />
+            <div className="text-sm font-semibold text-[#0F172A] mb-1">No project selected</div>
+            <div className="text-xs text-[#94A3B8]">Select a project from the dropdown above, or create a new one.</div>
           </div>
         </Card>
       </div>
     );
   }
 
-  if (real) {
-    return <RealImport projectId={projectIdParam} workspaceId={workspaceId!} projectName={projectName} initialStartDate={projectStartDate} initialEndDate={projectEndDate} initialBuildingType={projectCategory} />;
+  const goBack = () => { setImportMode(null); setShowNewBaselinePicker(false); };
+
+  const pickMethod = (m: ImportMode, files?: File[]) => {
+    setMethodologyFiles(files ?? []);
+    setShowNewBaselinePicker(false);
+    setImportMode(m);
+  };
+
+  // ScheduleLanding is ALWAYS the home screen — shown until user actively picks a method
+  if (!importMode && !showNewBaselinePicker) {
+    return (
+      <ScheduleLanding
+        projectName={projectName}
+        versions={versions ?? []}
+        loading={versionsLoading}
+        onSetup={() => setShowNewBaselinePicker(true)}
+      />
+    );
   }
 
-  return <MockImport projectId={Number(projectIdParam)} projectName={projectName} />;
+  // Method picker — user clicked "Set up schedule" or "New version"
+  if (!importMode || showNewBaselinePicker) {
+    return (
+      <ImportMethodPicker
+        projectName={projectName}
+        onSelect={pickMethod}
+        onBack={goBack}
+      />
+    );
+  }
+
+  if (importMode === "manual") {
+    return <ManualScheduleSetup projectId={projectIdParam} projectName={projectName} onBack={goBack} />;
+  }
+
+  const handleImportComplete = (info: { versionNumber: number; fileName: string; taskCount: number }) => {
+    const newV: ScheduleVersion = {
+      id: `v-${Date.now()}`,
+      versionNumber: info.versionNumber,
+      isBaseline: true,
+      isLocked: false,
+      generatedBy: "import",
+      uploadedBy: null,
+      uploadedByName: "You",
+      sourceFileName: info.fileName,
+      aiReasoning: null,
+      createdAt: new Date().toISOString(),
+      scheduleJson: {},
+    };
+    // New version becomes baseline; demote previous ones
+    setVersions(prev => [newV, ...(prev ?? []).map(v => ({ ...v, isBaseline: false }))]);
+  };
+
+  const mockImportProps = {
+    projectId: Number(projectIdParam),
+    projectName,
+    mode: importMode,
+    onBack: goBack,
+    currentVersionCount: (versions ?? []).length,
+    onComplete: handleImportComplete,
+  };
+
+  if (real) {
+    if (importMode === "ai") {
+      return <RealImport projectId={projectIdParam} workspaceId={workspaceId!} projectName={projectName} initialStartDate={projectStartDate} initialEndDate={projectEndDate} initialBuildingType={projectCategory} initialCity={projectCity} onBack={goBack} methodologyFiles={methodologyFiles} />;
+    }
+    return <MockImport {...mockImportProps} />;
+  }
+
+  return <MockImport {...mockImportProps} />;
 }
 
 export default function ImportCSVPage() {
   return (
-    <Suspense fallback={<div className="p-5 text-sm text-[#8C959F]">Loading...</div>}>
+    <Suspense fallback={<div className="p-5 text-sm text-[#94A3B8]">Loading...</div>}>
       <ImportCSVContent />
     </Suspense>
   );

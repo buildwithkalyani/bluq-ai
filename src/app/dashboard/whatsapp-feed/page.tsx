@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import { ClipboardList, RefreshCw, User, Image, MessageSquare, Inbox } from "lucide-react";
 import {
   getWhatsAppConvos,
   getWhatsAppMessages,
@@ -13,12 +15,16 @@ import {
   GroupToggle,
 } from "@/components/ui/bluq-ui";
 import { useWorkspace } from "@/context/workspace";
-import { fetchProjects, fetchWaConvos, fetchWaMessages, type BackendProject, type WaConvo, type WaMessage } from "@/lib/api-client";
+import { fetchWaConvos, fetchWaMessages, isRealProject, type WaConvo, type WaMessage } from "@/lib/api-client";
 
-export default function WhatsAppFeedPage() {
-  const { workspaceId, isDesignMode } = useWorkspace();
-  const [projects, setProjects] = useState<BackendProject[]>([]);
-  const [selectedProject, setSelectedProject] = useState<BackendProject | null>(null);
+function WhatsAppFeedContent() {
+  const searchParams = useSearchParams();
+  const { workspaceId: ctxWorkspaceId, isDesignMode, loading: wsLoading } = useWorkspace();
+
+  const projectIdParam = searchParams.get("projectId") ?? "0";
+  const urlWs = searchParams.get("workspaceId");
+  const workspaceId = (urlWs && urlWs !== "null") ? urlWs : ctxWorkspaceId;
+  const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
 
   const [convos, setConvos] = useState<WhatsAppConvo[] | WaConvo[]>([]);
   const [messages, setMessages] = useState<WhatsAppMessage[] | WaMessage[]>([]);
@@ -30,63 +36,57 @@ export default function WhatsAppFeedPage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
 
-  // ── Load projects ───────────────────────────────────
+  // ── Load convos when project / workspace changes ──────
   useEffect(() => {
-    if (isDesignMode) {
-      // Design account — use mock convos (no real backend for WA history)
-      import("@/lib/mock-data-extended").then(m => {
-        m.getProjects().then(p => {
-          setProjects(p.map(x => ({ id: String(x.id), workspaceId: "", projectName: x.name, projectCode: null, address: null, stage: null, category: null, startDate: null, endDate: null, status: "active", clientName: null, percentComplete: null })));
-          setLoading(false);
-        });
-      });
-      return;
-    }
-    if (workspaceId) {
-      fetchProjects(workspaceId).then((p) => {
-        setProjects(p);
-        if (p.length > 0) setSelectedProject(p[0]);
-        else setLoading(false);
-      }).catch(() => setLoading(false));
-    }
-  }, [workspaceId]);
+    if (wsLoading) return;
 
-  // ── Load convos when project changes ────────────────
-  useEffect(() => {
-    if (!selectedProject) return;
     setLoading(true);
     setSelectedConvo(null);
     setSelectedPhone(null);
+
     if (isDesignMode) {
       import("@/lib/mock-data-extended").then(m => {
-        m.getWhatsAppConvos(Number(selectedProject.id) || 0).then(c => { setConvos(c); setLoading(false); });
+        m.getWhatsAppConvos(Number(projectIdParam) || 0)
+          .then(c => { setConvos(c); setLoading(false); });
       });
-    } else {
-      fetchWaConvos(selectedProject.id)
-        .then(c => { setConvos(c); setLoading(false); })
-        .catch(() => { setConvos([]); setLoading(false); });
+      return;
     }
-  }, [selectedProject, isDesignMode]);
+
+    if (!real) {
+      setConvos([]);
+      setLoading(false);
+      return;
+    }
+
+    fetchWaConvos(projectIdParam)
+      .then(c => { setConvos(c); setLoading(false); })
+      .catch(() => { setConvos([]); setLoading(false); });
+  }, [projectIdParam, workspaceId, wsLoading, isDesignMode, real]);
 
   // ── Load messages when a convo is selected ──────────
   useEffect(() => {
     if (selectedConvo === null) return;
     if (isDesignMode) {
       getWhatsAppMessages(selectedConvo as number).then(setMessages);
-    } else if (selectedProject && selectedPhone) {
-      fetchWaMessages(selectedProject.id, selectedPhone)
+    } else if (selectedPhone) {
+      fetchWaMessages(projectIdParam, selectedPhone)
         .then(({ messages: msgs, photoCount: pc }) => {
           setMessages(msgs);
           setPhotoCount(pc);
         })
         .catch(() => setMessages([]));
     }
-  }, [selectedConvo, isDesignMode, selectedProject, selectedPhone]);
+  }, [selectedConvo, isDesignMode, projectIdParam, selectedPhone]);
 
-  // ── Simulate live sync ──────────────────────────────
   const handleSync = () => {
     setSyncing(true);
-    setTimeout(() => setSyncing(false), 2000);
+    if (real) {
+      fetchWaConvos(projectIdParam)
+        .then(c => { setConvos(c); setSyncing(false); })
+        .catch(() => setSyncing(false));
+    } else {
+      setTimeout(() => setSyncing(false), 1200);
+    }
   };
 
   const filteredConvos =
@@ -99,13 +99,11 @@ export default function WhatsAppFeedPage() {
   // ─── LOADING STATE ─────────────────────────────────
   if (loading) {
     return (
-      <div className="p-5">
-        <div className="animate-pulse space-y-3">
-          <div className="h-6 w-48 bg-[#f0f1f3] rounded" />
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-24 bg-[#f0f1f3] rounded-lg" />
-          ))}
-        </div>
+      <div className="p-5 space-y-2.5">
+        <div className="h-5 w-52 bg-[#E2E8F0] rounded animate-pulse" />
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="h-20 bg-white border border-[#E2E8F0] rounded-xl animate-pulse" />
+        ))}
       </div>
     );
   }
@@ -119,56 +117,50 @@ export default function WhatsAppFeedPage() {
           <div className="mb-3">
             <div
               onClick={() => setSelectedConvo(null)}
-              className="inline-flex items-center gap-1.5 cursor-pointer text-[13px] text-[#3A4EA2] font-semibold hover:underline"
+              className="inline-flex items-center gap-1.5 cursor-pointer text-[13px] text-[#2563EB] font-semibold hover:underline"
             >
               ← Back to Feed
             </div>
           </div>
 
           <div className="flex items-center gap-2.5 mb-4">
-            <div className="w-10 h-10 rounded-full bg-[#f6f8fa] flex items-center justify-center text-base">
-              👷
+            <div className="w-10 h-10 rounded-full bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
+              <User size={18} className="text-[#2563EB]" />
             </div>
             <div>
               <div className="text-[15px] font-bold">{convo?.name}</div>
-              <div className="text-xs text-[#57606a]">
-                {convo?.type} Update • {convo?.time} •{" "}
-                <span
-                  className="font-bold"
-                  style={{ color: convo?.color }}
-                >
+              <div className="text-xs text-[#475569]">
+                {convo?.type} Update · {convo?.time} ·{" "}
+                <span className="font-bold" style={{ color: convo?.color }}>
                   {convo?.status}
                 </span>
               </div>
             </div>
           </div>
 
-          {/* Chat messages */}
           <div className="w-full space-y-3">
             {(messages as any[]).map((m, i) => (
               <div key={i}>
                 {"bot" in m ? (
-                  // Mock mode: show bot prompt + reply
                   <>
-                    <div className="bg-[#f6f8fa] rounded-xl rounded-bl-[4px] px-3 py-2 text-xs text-[#24292f] max-w-[85%] mb-1 border border-[#e1e4e8] whitespace-pre-line">
-                      <div className="text-[10px] text-[#3A4EA2] font-bold mb-1 font-mono">BLUQ BOT</div>
+                    <div className="bg-[#F8FAFC] rounded-xl rounded-bl-[4px] px-3 py-2 text-xs text-[#0F172A] max-w-[85%] mb-1 border border-[#E2E8F0] whitespace-pre-line">
+                      <div className="text-[10px] text-[#2563EB] font-bold mb-1 font-mono">BLUQ BOT</div>
                       {m.bot}
                     </div>
                     {m.reply && (
                       <div className="flex justify-end">
-                        <div className="bg-[#3A4EA2] text-white rounded-xl rounded-br-[4px] px-3 py-2 text-xs max-w-[70%] text-right">{m.reply}</div>
+                        <div className="bg-[#2563EB] text-white rounded-xl rounded-br-[4px] px-3 py-2 text-xs max-w-[70%] text-right">{m.reply}</div>
                       </div>
                     )}
                   </>
                 ) : (
-                  // Real mode: show contractor message + timestamp
                   <div className="flex justify-end">
                     <div className="flex flex-col items-end gap-0.5">
-                      <div className="bg-[#3A4EA2] text-white rounded-xl rounded-br-[4px] px-3 py-2 text-xs max-w-[70%] text-right whitespace-pre-line">
+                      <div className="bg-[#2563EB] text-white rounded-xl rounded-br-[4px] px-3 py-2 text-xs max-w-[70%] text-right whitespace-pre-line">
                         {m.rawMessage}
                       </div>
                       {m.receivedAt && (
-                        <div className="text-[10px] text-[#8C959F] font-mono">
+                        <div className="text-[10px] text-[#94A3B8] font-mono">
                           {new Date(m.receivedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
                         </div>
                       )}
@@ -179,14 +171,15 @@ export default function WhatsAppFeedPage() {
             ))}
           </div>
 
-          {/* Linked data card */}
-          <Card className="w-full mt-8 !bg-[#24292f] !border-none shadow-md">
-            <div className="text-xs font-bold mb-1.5 text-[#f0f1f3]">
-              Linked Data
-            </div>
+          <Card className="w-full mt-8 !bg-[#0F172A] !border-none shadow-md">
+            <div className="text-xs font-bold mb-1.5 text-[#F1F5F9]">Linked Data</div>
             <div className="flex gap-4 text-xs text-[#8c959f]">
-              <span>📋 Task: {convo?.task}</span>
-              <span>📸 Photos: {isDesignMode ? (convo?.photos || 0) : photoCount} Linked</span>
+              <span className="inline-flex items-center gap-1">
+                <ClipboardList size={12} /> Task: {convo?.task}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <Image size={12} /> Photos: {isDesignMode ? (convo?.photos || 0) : photoCount} linked
+              </span>
             </div>
           </Card>
         </div>
@@ -197,44 +190,17 @@ export default function WhatsAppFeedPage() {
   // ─── FEED LIST ─────────────────────────────────────
   return (
     <div className="p-5 overflow-y-auto h-full">
-      {/* Header */}
       <div className="flex justify-between items-center mb-3">
-        <div className="flex items-center gap-2.5">
-          <SectionTitle>WhatsApp Bot Feed</SectionTitle>
-
-          {/* Project Selector — driven by mock data */}
-          <div className="relative">
-            <select
-              value={selectedProject?.id ?? ""}
-              onChange={(e) => {
-                const proj = projects.find((p) => p.id === e.target.value);
-                if (proj) setSelectedProject(proj);
-              }}
-              className="appearance-none bg-white border border-[#D0D7DE] rounded-md py-1.5 pl-3 pr-8 text-[13px] font-semibold text-[#24292f] cursor-pointer outline-none focus:border-[#3A4EA2] focus:ring-1 focus:ring-[#3A4EA2]"
-            >
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.projectName}
-                </option>
-              ))}
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-[#57606a]">
-              <svg className="h-4 w-4 fill-current" viewBox="0 0 20 20">
-                <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" />
-              </svg>
-            </div>
-          </div>
-        </div>
+        <SectionTitle>WhatsApp Bot Feed</SectionTitle>
 
         <div className="flex gap-2 items-center">
-          {/* Sync button */}
           <button
             onClick={handleSync}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold border border-[#D0D7DE] bg-white cursor-pointer hover:bg-[#f6f8fa] transition-all ${
-              syncing ? "text-[#3A4EA2]" : "text-[#57606a]"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#E2E8F0] bg-white cursor-pointer hover:bg-[#F8FAFC] transition-all ${
+              syncing ? "text-[#2563EB]" : "text-[#475569]"
             }`}
           >
-            <span className={syncing ? "animate-spin" : ""}>🔄</span>
+            <RefreshCw size={12} className={syncing ? "animate-spin" : ""} />
             {syncing ? "Syncing..." : "Sync"}
           </button>
           <GroupToggle
@@ -245,97 +211,110 @@ export default function WhatsAppFeedPage() {
         </div>
       </div>
 
-      {/* Live sync indicator */}
       {syncing && (
-        <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-[#ddf4ff] rounded-md">
-          <span className="w-2 h-2 rounded-full bg-[#3A4EA2] animate-pulse" />
-          <span className="text-xs text-[#3A4EA2] font-semibold">
+        <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-[#EFF6FF] rounded-lg">
+          <span className="w-2 h-2 rounded-full bg-[#2563EB] animate-pulse" />
+          <span className="text-xs text-[#2563EB] font-semibold">
             Fetching latest messages from WhatsApp...
           </span>
         </div>
       )}
 
-      {/* Empty state */}
-      {filteredConvos.length === 0 && (
-        <div className="text-center py-16 text-[#8C959F]">
-          <div className="text-3xl mb-2">📭</div>
-          <div className="text-sm font-medium">No conversations found</div>
+      {filteredConvos.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-center text-[#94A3B8]">
+          <Inbox size={36} className="mb-3 text-[#CBD5E1]" />
+          <div className="text-sm font-semibold text-[#475569]">No conversations found</div>
           <div className="text-xs mt-1">
             {filter !== 0
-              ? 'Try switching to "All" to see everything.'
+              ? 'Switch to "All" to see everything.'
+              : !real
+              ? "Select a project to view WhatsApp updates."
               : "No WhatsApp updates for this project yet."}
           </div>
         </div>
-      )}
-
-      {/* Conversation cards */}
-      <div className="space-y-2">
-        {filteredConvos.map((c) => {
-          const hasMessages = (c as any).hasMessages !== false && c.messageCount > 0;
-          return (
-          <Card
-            key={c.id}
-            onClick={() => {
-              if (!hasMessages) return;
-              setSelectedConvo(c.id);
-              setSelectedPhone((c as any).senderPhone ?? null);
-            }}
-            className={`transition-shadow ${
-              hasMessages ? "cursor-pointer hover:shadow-sm" : "opacity-60 cursor-default"
-            } ${c.type === "Warning" ? "!border-l-4 !border-l-[#CF222E]" : ""}`}
-          >
-            <div className="flex justify-between items-start">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-full bg-[#f6f8fa] flex items-center justify-center text-sm flex-shrink-0">
-                  👷
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <div className="text-[13px] font-bold">{c.name}</div>
-                    {(c as any).trade && (
-                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-[#f0f1f3] text-[#57606a]">
-                        {(c as any).trade}
+      ) : (
+        <div className="space-y-2">
+          {filteredConvos.map((c) => {
+            const hasMessages = (c as any).hasMessages !== false && c.messageCount > 0;
+            return (
+              <Card
+                key={c.id}
+                onClick={() => {
+                  if (!hasMessages) return;
+                  setSelectedConvo(c.id);
+                  setSelectedPhone((c as any).senderPhone ?? null);
+                }}
+                className={`transition-shadow ${
+                  hasMessages ? "cursor-pointer hover:shadow-md" : "opacity-60 cursor-default"
+                } ${c.type === "Warning" ? "!border-l-4 !border-l-[#DC2626]" : ""}`}
+              >
+                <div className="flex justify-between items-start">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-full bg-[#EFF6FF] flex items-center justify-center flex-shrink-0">
+                      <User size={16} className="text-[#2563EB]" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-[13px] font-bold text-[#0F172A]">{c.name}</div>
+                        {(c as any).trade && (
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-[#F1F5F9] text-[#475569]">
+                            {(c as any).trade}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-[#475569]">{c.task}</div>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0 ml-3">
+                    {hasMessages ? (
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono ${
+                          c.type === "Warning"
+                            ? "bg-[#FEF2F2] text-[#DC2626]"
+                            : "bg-[#EFF6FF] text-[#2563EB]"
+                        }`}
+                      >
+                        {c.type}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded font-mono bg-[#F1F5F9] text-[#94A3B8]">
+                        LINKED
                       </span>
                     )}
+                    <div className="text-[11px] text-[#94A3B8] mt-1 font-mono">{c.time}</div>
                   </div>
-                  <div className="text-xs text-[#57606a]">{c.task}</div>
                 </div>
-              </div>
-              <div className="text-right">
-                {hasMessages ? (
-                  <span
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono ${
-                      c.type === "Warning"
-                        ? "bg-[#ffebe9] text-[#CF222E]"
-                        : "bg-[#ddf4ff] text-[#3A4EA2]"
-                    }`}
-                  >
-                    {c.type}
-                  </span>
-                ) : (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded font-mono bg-[#f0f1f3] text-[#8C959F]">
-                    LINKED
-                  </span>
-                )}
-                <div className="text-[11px] text-[#8C959F] mt-1 font-mono">
-                  {c.time}
+                <div className="flex gap-3 mt-2 text-[11px] text-[#475569]">
+                  <span style={{ color: c.color }} className="font-bold">{c.status}</span>
+                  {(c.photos ?? 0) > 0 && (
+                    <span className="inline-flex items-center gap-1">
+                      <Image size={11} /> {c.photos} photos
+                    </span>
+                  )}
+                  {c.messageCount > 1 && (
+                    <span className="inline-flex items-center gap-1">
+                      <MessageSquare size={11} /> {c.messageCount} messages
+                    </span>
+                  )}
                 </div>
-              </div>
-            </div>
-            <div className="flex gap-3 mt-2 text-[11px] text-[#57606a]">
-              <span style={{ color: c.color }} className="font-bold">
-                {c.status}
-              </span>
-              {(c.photos ?? 0) > 0 && <span>📸 {c.photos} photos</span>}
-              {c.messageCount > 1 && <span>💬 {c.messageCount} messages</span>}
-              {!hasMessages && (c as any).senderPhone && (
-                <span className="font-mono text-[#8C959F]">📱 {(c as any).senderPhone}</span>
-              )}
-            </div>
-          </Card>
-          );
-        })}
-      </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
     </div>
+  );
+}
+
+export default function WhatsAppFeedPage() {
+  return (
+    <Suspense fallback={
+      <div className="p-5 space-y-2.5">
+        <div className="h-5 w-52 bg-[#E2E8F0] rounded animate-pulse" />
+        {[1,2,3,4].map(i => <div key={i} className="h-20 bg-white border border-[#E2E8F0] rounded-xl animate-pulse" />)}
+      </div>
+    }>
+      <WhatsAppFeedContent />
+    </Suspense>
   );
 }

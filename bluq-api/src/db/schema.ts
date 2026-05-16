@@ -23,6 +23,26 @@ export const users = pgTable("users", {
 	unique("users_phone_key").on(table.phone),
 ]);
 
+// Permissions shape stored in the JSONB column:
+// { overview: "none"|"view"|"edit", schedule: "...", reports: "...",
+//   documents: "...", siteUpdates: "...", team: "...", settings: "..." }
+export const workspaceRoles = pgTable("workspace_roles", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	workspaceId: uuid("workspace_id").notNull(),
+	name: text().notNull(),
+	description: text(),
+	permissions: jsonb().notNull().default({}),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	index("idx_wr_workspace").using("btree", table.workspaceId.asc().nullsLast().op("uuid_ops")),
+	foreignKey({
+		columns: [table.workspaceId],
+		foreignColumns: [orgs.id],
+		name: "workspace_roles_workspace_id_fkey",
+	}).onDelete("cascade"),
+	unique("workspace_roles_workspace_id_name_key").on(table.workspaceId, table.name),
+]);
+
 export const workspaceMembers = pgTable("workspace_members", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	workspaceId: uuid("workspace_id").notNull(),
@@ -423,6 +443,8 @@ export const scheduleVersions = pgTable("schedule_versions", {
 	isBaseline: boolean("is_baseline").default(false),
 	isLocked: boolean("is_locked").default(false),
 	generatedBy: text("generated_by").default('ai').notNull(),
+	uploadedBy: text("uploaded_by"),
+	sourceFileName: text("source_file_name"),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 }, (table) => [
 	index("idx_sv_project").using("btree", table.projectId.asc().nullsLast().op("uuid_ops")),

@@ -51,7 +51,7 @@
 import { Server, Socket } from "socket.io";
 import { IncomingMessage, ServerResponse, Server as HttpServer } from "http";
 import { db } from "../db/client.js";
-import { projectMembers } from "../db/schema.js";
+import { projectMembers, workspaceMembers } from "../db/schema.js";
 import { eq, and, sql } from "drizzle-orm";
 
 // ---------------------------------------------------------------------------
@@ -232,6 +232,39 @@ export function initSocketServer(
         await socket.join(room);
         socket.emit("joined", { projectId });
         console.log(`👥 userId=${userId} joined room ${room}`);
+      } catch {
+        socket.emit("error", "Unauthorized");
+      }
+    });
+
+    // -----------------------------------------------------------------------
+    // "join:workspace" — workspace-level events (schedule:generated etc.)
+    // -----------------------------------------------------------------------
+    socket.on("join:workspace", async (workspaceId: unknown) => {
+      if (
+        typeof workspaceId !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(workspaceId)
+      ) {
+        socket.emit("error", "Unauthorized");
+        return;
+      }
+      try {
+        const [membership] = await db
+          .select({ id: workspaceMembers.id })
+          .from(workspaceMembers)
+          .where(
+            and(
+              eq(workspaceMembers.workspaceId, workspaceId),
+              eq(workspaceMembers.userId, userId),
+              eq(workspaceMembers.status, "active")
+            )
+          );
+        if (!membership) {
+          socket.emit("error", "Unauthorized");
+          return;
+        }
+        await socket.join(workspaceId);
+        socket.emit("joined:workspace", { workspaceId });
       } catch {
         socket.emit("error", "Unauthorized");
       }

@@ -89,6 +89,39 @@ async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   return res.json();
 }
 
+async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const token = await getAuthToken();
+  const res = await fetch(`${BACKEND_URL}${path}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`API PUT ${path} failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+async function apiDelete(path: string): Promise<void> {
+  const token = await getAuthToken();
+  const res = await fetch(`${BACKEND_URL}${path}`, {
+    method: "DELETE",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`API DELETE ${path} failed: ${res.status}`);
+  }
+}
+
+export async function deleteProject(id: string): Promise<void> {
+  return apiDelete(`/projects/${id}`);
+}
+
 // ---------------------------------------------------------------------------
 // STATUS MAPPING — backend snake_case → frontend camelCase
 // ---------------------------------------------------------------------------
@@ -525,6 +558,98 @@ export async function sendTeamInvite(email: string, name: string, role: string, 
   await apiPost<{ ok: boolean }>("/team/invite", { email, name, role, workspaceId });
 }
 
+export interface TeamMember {
+  id: string;
+  userId: string;
+  role: string;
+  status: string;
+  joinedAt: string | null;
+  invitedAt: string | null;
+  name: string;
+  email: string;
+  projectCount: number;
+}
+
+export async function fetchTeamMembers(workspaceId: string): Promise<TeamMember[]> {
+  return apiFetch(`/team/members?workspaceId=${encodeURIComponent(workspaceId)}`);
+}
+
+export async function removeTeamMember(memberId: string, workspaceId: string): Promise<void> {
+  return apiDelete(`/team/members/${memberId}?workspaceId=${encodeURIComponent(workspaceId)}`);
+}
+
+export async function updateMemberRole(memberId: string, role: string, workspaceId: string): Promise<void> {
+  await apiPatch(`/team/members/${memberId}/role`, { role, workspaceId });
+}
+
+export async function getTeamInviteLink(workspaceId: string): Promise<string> {
+  const res = await apiFetch<{ inviteUrl: string }>(`/team/invite-link?workspaceId=${encodeURIComponent(workspaceId)}`);
+  return res.inviteUrl;
+}
+
+export async function fetchMemberProjectAccess(userId: string, workspaceId: string): Promise<string[]> {
+  return apiFetch(`/team/members/${userId}/projects?workspaceId=${encodeURIComponent(workspaceId)}`);
+}
+
+export async function setMemberProjectAccess(userId: string, workspaceId: string, projectIds: string[]): Promise<void> {
+  await apiPut(`/team/members/${userId}/projects`, { workspaceId, projectIds });
+}
+
+// ── Role permissions ──────────────────────────────────────────
+export type PermLevel = "none" | "view" | "upload" | "edit";
+
+export interface RolePermissions {
+  overview: PermLevel;
+  schedule: PermLevel;
+  reports: PermLevel;
+  documents: PermLevel;
+  siteUpdates: PermLevel;
+  team: PermLevel;
+  settings: PermLevel;
+}
+
+export interface WorkspaceRole {
+  id: string;
+  workspaceId: string;
+  name: string;
+  description: string | null;
+  permissions: RolePermissions;
+  createdAt: string | null;
+}
+
+export interface MyPermissions {
+  role: string;
+  permissions: RolePermissions;
+}
+
+export async function fetchRoles(workspaceId: string): Promise<WorkspaceRole[]> {
+  return apiFetch(`/roles?workspaceId=${encodeURIComponent(workspaceId)}`);
+}
+
+export async function fetchMyPermissions(workspaceId: string): Promise<MyPermissions> {
+  return apiFetch(`/roles/mine?workspaceId=${encodeURIComponent(workspaceId)}`);
+}
+
+export async function createRole(data: {
+  workspaceId: string;
+  name: string;
+  description?: string;
+  permissions: RolePermissions;
+}): Promise<WorkspaceRole> {
+  return apiPost("/roles", data);
+}
+
+export async function updateRole(
+  id: string,
+  data: { workspaceId: string; name?: string; description?: string; permissions?: Partial<RolePermissions> }
+): Promise<WorkspaceRole> {
+  return apiPatch(`/roles/${id}`, data);
+}
+
+export async function deleteRole(id: string, workspaceId: string): Promise<void> {
+  return apiDelete(`/roles/${id}?workspaceId=${encodeURIComponent(workspaceId)}`);
+}
+
 export async function acceptTeamInvite(token: string): Promise<{ ok: boolean; workspaceId: string }> {
   return apiPost("/team/invite/accept", { token });
 }
@@ -597,6 +722,11 @@ export interface ScheduleVersion {
   versionNumber: number;
   isBaseline: boolean;
   isLocked: boolean;
+  generatedBy: string;
+  uploadedBy: string | null;
+  uploadedByName: string | null;
+  sourceFileName: string | null;
+  aiReasoning: string | null;
   createdAt: string;
   scheduleJson: {
     gapCheck?: {
@@ -704,6 +834,15 @@ export async function registerDocument(data: {
 // ---------------------------------------------------------------------------
 // SCHEDULE GENERATION
 // ---------------------------------------------------------------------------
+
+export async function fetchScheduleVersions(
+  projectId: string,
+  workspaceId: string
+): Promise<ScheduleVersion[]> {
+  return apiFetch<ScheduleVersion[]>(
+    `/schedule/versions?projectId=${projectId}&workspaceId=${workspaceId}`
+  );
+}
 
 export interface ScheduleGenerateResult {
   success: boolean;

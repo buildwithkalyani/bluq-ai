@@ -3,58 +3,19 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useWorkspace } from "@/context/workspace";
 import { authClient } from "@/lib/auth-client";
-import { fetchUserProfile, updateUserProfile, updateOrg, fetchOrgLogoUploadUrl } from "@/lib/api-client";
+import { fetchUserProfile, updateUserProfile } from "@/lib/api-client";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface AccountForm {
+interface ProfileForm {
   fullName: string;
   email: string;
   phone: string;
-  companyName: string;
 }
 
-// ─── Mock data for design accounts ───────────────────────────────────────────
-
-const MOCK_ACCOUNT: AccountForm = {
+const MOCK_PROFILE: ProfileForm = {
   fullName: "Aayush Patel",
   email: "aayush@pmcfirm.com",
   phone: "+971 50 987 6543",
-  companyName: "Bluq Engineering Consultants",
 };
-
-// ─── Shared UI ────────────────────────────────────────────────────────────────
-
-const Card = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
-  <div className={`bg-white border border-[#D0D7DE] rounded-lg p-5 ${className}`}>{children}</div>
-);
-
-const InputField = ({
-  label, value, onChange, type = "text", disabled = false,
-}: {
-  label: string; value: string; onChange: (val: string) => void; type?: string; disabled?: boolean;
-}) => (
-  <div>
-    <label className="block text-xs font-semibold text-[#57606a] mb-1">{label}</label>
-    <input
-      type={type}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      disabled={disabled}
-      className="w-full border border-[#D0D7DE] rounded-md px-3 py-2 text-sm text-[#24292f] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20 disabled:bg-[#f6f8fa] disabled:text-[#57606a] transition"
-    />
-  </div>
-);
-
-const SaveButton = ({ onClick, loading, dirty }: { onClick: () => void; loading: boolean; dirty: boolean }) => (
-  <button
-    onClick={onClick}
-    disabled={loading || !dirty}
-    className="bg-[#3A4EA2] text-white border-none rounded-md px-5 py-2 text-sm font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[#2d3d8a] active:scale-95 transition-all"
-  >
-    {loading ? "Saving…" : dirty ? "Save Changes" : "Saved"}
-  </button>
-);
 
 const Toast = ({ message, show }: { message: string; show: boolean }) => (
   <div
@@ -69,192 +30,179 @@ const Toast = ({ message, show }: { message: string; show: boolean }) => (
   </div>
 );
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+export default function MyProfilePage() {
+  const { workspaceId, isDesignMode, loading: wsLoading } = useWorkspace();
+  const { data: session, isPending: sessionPending } = authClient.useSession();
+  const useMock = isDesignMode || (!wsLoading && !sessionPending && !workspaceId);
 
-export default function AccountSettingsPage() {
-  const { workspaceId, orgName, isDesignMode } = useWorkspace();
-  const { data: session } = authClient.useSession();
-
-  const [saved, setSaved] = useState<AccountForm | null>(null);
-  const [form, setForm] = useState<AccountForm | null>(null);
+  const [saved, setSaved] = useState<ProfileForm | null>(null);
+  const [form, setForm] = useState<ProfileForm | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
   const [toast, setToast] = useState(false);
   const [error, setError] = useState("");
-  const [logoUrl, setLogoUrl] = useState<string | null>(null);
-  const [logoUploading, setLogoUploading] = useState(false);
-  const logoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (isDesignMode) {
-      setSaved(MOCK_ACCOUNT);
-      setForm(MOCK_ACCOUNT);
+    if (sessionPending) return;
+
+    if (session?.user) {
+      const fromSession: ProfileForm = {
+        fullName: session.user.name ?? "",
+        email: session.user.email ?? "",
+        phone: "",
+      };
+      setSaved(fromSession);
+      setForm(fromSession);
       setFetching(false);
+
+      if (!isDesignMode) {
+        fetchUserProfile()
+          .then((profile) => {
+            setSaved((prev) => prev ? { ...prev, phone: profile.phone } : prev);
+            setForm((prev) => prev ? { ...prev, phone: profile.phone } : prev);
+          })
+          .catch(() => {});
+      }
       return;
     }
 
-    if (!session?.user) return;
-
-    // Pre-fill from session immediately so it doesn't look blank
-    const fromSession: AccountForm = {
-      fullName: session.user.name ?? "",
-      email: session.user.email ?? "",
-      phone: "",
-      companyName: orgName ?? "",
-    };
-    setSaved(fromSession);
-    setForm(fromSession);
+    if (useMock) {
+      setSaved(MOCK_PROFILE);
+      setForm(MOCK_PROFILE);
+    }
     setFetching(false);
+  }, [session?.user?.id, sessionPending, useMock, isDesignMode]);
 
-    // Enrich with phone + logoUrl from backend
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
-    fetchUserProfile()
-      .then((profile) => {
-        setSaved((prev) => prev ? { ...prev, phone: profile.phone } : prev);
-        setForm((prev) => prev ? { ...prev, phone: profile.phone } : prev);
-      })
-      .catch(() => {});
+  const [photoUrl, setPhotoUrl] = useState<string | null>(() => {
+    try { return localStorage.getItem("bluq_profile_photo"); } catch { return null; }
+  });
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
-    authClient.getSession().then((s) => {
-      const token = s?.data?.session?.token ?? "";
-      fetch(`${backendUrl}/orgs/mine`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-        .then((r) => r.json())
-        .then((data: any[]) => { if (data?.[0]?.logoUrl) setLogoUrl(data[0].logoUrl); })
-        .catch(() => {});
-    });
-  }, [session?.user?.id, orgName, isDesignMode]);
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      setPhotoUrl(dataUrl);
+      try { localStorage.setItem("bluq_profile_photo", dataUrl); } catch {}
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const initials = (form?.fullName ?? "").split(" ").map((w) => w[0]?.toUpperCase()).join("").slice(0, 2) || "U";
 
   const dirty = form && saved ? JSON.stringify(form) !== JSON.stringify(saved) : false;
 
   const set = useCallback(
-    <K extends keyof AccountForm>(key: K) =>
+    <K extends keyof ProfileForm>(key: K) =>
       (val: string) => setForm((prev) => prev ? { ...prev, [key]: val } : prev),
     []
   );
-
-  const handleLogoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !workspaceId) return;
-    setLogoUploading(true);
-    setError("");
-    try {
-      const { signedUrl, publicUrl } = await fetchOrgLogoUploadUrl(workspaceId, file.name);
-      const uploadRes = await fetch(signedUrl, {
-        method: "PUT",
-        headers: { "Content-Type": file.type || "image/png" },
-        body: file,
-      });
-      if (!uploadRes.ok) throw new Error("Upload failed");
-      await updateOrg(workspaceId, { logoUrl: publicUrl });
-      setLogoUrl(publicUrl);
-    } catch (err: any) {
-      setError(err.message ?? "Logo upload failed");
-    } finally {
-      setLogoUploading(false);
-      if (logoInputRef.current) logoInputRef.current.value = "";
-    }
-  };
 
   const handleSave = async () => {
     if (!form) return;
     setLoading(true);
     setError("");
     try {
-      if (isDesignMode) {
-        await new Promise((r) => setTimeout(r, 400));
+      if (!useMock) {
+        await updateUserProfile({ name: form.fullName, phone: form.phone });
       } else {
-        await Promise.all([
-          updateUserProfile({ name: form.fullName, phone: form.phone }),
-          workspaceId ? updateOrg(workspaceId, { name: form.companyName }) : Promise.resolve(),
-        ]);
+        await new Promise((r) => setTimeout(r, 400));
       }
       setSaved(form);
       setToast(true);
       setTimeout(() => setToast(false), 2500);
-    } catch (err: any) {
+    } catch {
       setError("Failed to save. Please try again.");
-      console.error(err);
     } finally {
       setLoading(false);
     }
   };
 
-  const initials = (form?.companyName ?? "")
-    .split(" ")
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase() || "?";
-
   if (fetching || !form) {
     return (
       <div className="p-5 flex items-center justify-center h-full">
-        <div className="text-sm text-[#57606a]">Loading…</div>
+        <div className="text-sm text-[#475569]">Loading…</div>
       </div>
     );
   }
 
   return (
-    <div className="p-5 overflow-y-auto h-full">
-      <div className="text-[15px] font-bold mb-4">Account Settings</div>
+    <div className="px-6 py-5 overflow-y-auto h-full bg-[#F8FAFC]">
+      <div className="text-[20px] font-bold text-[#0F172A] mb-1">My Profile</div>
+      <div className="text-[13px] text-[#94A3B8] mb-5">Your personal account details.</div>
 
       {error && (
-        <div className="mb-4 text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-          {error}
-        </div>
+        <div className="mb-4 text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">{error}</div>
       )}
 
-      <div className="grid grid-cols-2 gap-5">
-        <Card>
-          <div className="text-xs font-bold text-[#24292f] mb-3.5">Personal Info</div>
-          <div className="flex flex-col gap-3.5">
-            <InputField label="Full Name" value={form.fullName} onChange={set("fullName")} />
-            <InputField label="Email" value={form.email} onChange={() => {}} disabled />
-            <InputField label="Phone" value={form.phone} onChange={set("phone")} type="tel" />
+      {/* ── Profile photo ── */}
+      <div className="bg-white border border-[#E2E8F0] rounded-xl shadow-sm overflow-hidden mb-4">
+        <div className="px-6 py-4 border-b border-[#F1F5F9]">
+          <div className="text-[14px] font-semibold text-[#0F172A]">Profile Photo</div>
+        </div>
+        <div className="px-6 py-5 flex items-center gap-5">
+          <div className="w-16 h-16 rounded-full bg-[#2563EB] flex items-center justify-center text-white text-xl font-bold overflow-hidden shrink-0 ring-4 ring-[#EFF6FF]">
+            {photoUrl ? <img src={photoUrl} alt="Profile" className="w-full h-full object-cover" /> : initials}
           </div>
-        </Card>
+          <div>
+            <input ref={photoInputRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={handlePhotoChange} />
+            <button
+              onClick={() => photoInputRef.current?.click()}
+              className="px-4 py-1.5 text-xs font-semibold border border-[#E2E8F0] rounded-md bg-white cursor-pointer hover:bg-[#F8FAFC] transition"
+            >
+              Change photo
+            </button>
+            <div className="text-[11px] text-[#94A3B8] mt-1.5">PNG or JPEG · max 2 MB</div>
+          </div>
+        </div>
+      </div>
 
-        <Card>
-          <div className="text-xs font-bold text-[#24292f] mb-3.5">Company Info</div>
-          <div className="flex flex-col gap-3.5">
-            <InputField label="Company Name" value={form.companyName} onChange={set("companyName")} />
-            <div>
-              <label className="block text-xs font-semibold text-[#57606a] mb-1">Company Logo</label>
-              <div className="flex items-center gap-2.5">
-                {logoUrl ? (
-                  <img src={logoUrl} alt="Company logo" className="w-12 h-12 rounded-lg object-cover border border-[#D0D7DE]" />
-                ) : (
-                  <div className="w-12 h-12 rounded-lg bg-[#ddf4ff] flex items-center justify-center text-lg font-extrabold text-[#3A4EA2]">
-                    {initials}
-                  </div>
-                )}
-                <input
-                  ref={logoInputRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  className="hidden"
-                  onChange={handleLogoChange}
-                />
-                <button
-                  onClick={() => logoInputRef.current?.click()}
-                  disabled={logoUploading || isDesignMode}
-                  className="px-3 py-1.5 text-xs font-semibold border border-[#D0D7DE] rounded-md bg-white cursor-pointer hover:bg-[#f6f8fa] transition disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {logoUploading ? "Uploading…" : "Change Logo"}
-                </button>
-              </div>
+      <div className="bg-white border border-[#E2E8F0] rounded-xl shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-[#F1F5F9]">
+          <div className="text-[14px] font-semibold text-[#0F172A]">Personal Info</div>
+        </div>
+        <div className="px-6 py-5 grid grid-cols-2 gap-x-5 gap-y-4">
+          <div className="col-span-2">
+            <label className="block text-xs font-semibold text-[#475569] mb-1">Full Name</label>
+            <input
+              type="text"
+              value={form.fullName}
+              onChange={(e) => set("fullName")(e.target.value)}
+              className="w-full border border-[#E2E8F0] rounded-md px-3 py-2 text-sm text-[#0F172A] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20 transition"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-[#475569] mb-1">Email</label>
+            <div className="flex items-center gap-2 h-[38px] px-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-md">
+              <span className="text-sm text-[#475569] truncate flex-1">{form.email}</span>
+              <span className="text-[10px] text-[#CBD5E1] shrink-0">read-only</span>
             </div>
           </div>
-        </Card>
+          <div>
+            <label className="block text-xs font-semibold text-[#475569] mb-1">Phone</label>
+            <input
+              type="tel"
+              value={form.phone}
+              onChange={(e) => set("phone")(e.target.value)}
+              className="w-full border border-[#E2E8F0] rounded-md px-3 py-2 text-sm text-[#0F172A] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20 transition"
+            />
+          </div>
+        </div>
+        <div className="px-6 py-3.5 bg-[#F8FAFC] border-t border-[#F1F5F9] flex items-center gap-3">
+          <button
+            onClick={handleSave}
+            disabled={loading || !dirty}
+            className="bg-[#2563EB] text-white border-none rounded-md px-5 py-2 text-sm font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[#2d3d8a] active:scale-95 transition-all"
+          >
+            {loading ? "Saving…" : dirty ? "Save Changes" : "Saved"}
+          </button>
+          {dirty && <span className="text-[12px] text-[#94A3B8]">Unsaved changes</span>}
+        </div>
       </div>
 
-      <div className="mt-5">
-        <SaveButton onClick={handleSave} loading={loading} dirty={!!dirty} />
-      </div>
-
-      <Toast message="Account settings saved!" show={toast} />
+      <Toast message="Profile saved!" show={toast} />
     </div>
   );
 }

@@ -1,44 +1,91 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, SectionTitle, Btn } from "@/components/ui/bluq-ui";
 import type { Project } from "@/lib/mock-data";
 import { useWorkspace } from "@/context/workspace";
-import { createProject } from "@/lib/api-client";
+import { createProject, updateProject } from "@/lib/api-client";
+
+function parseIsoDate(dateStr: string): string {
+  if (!dateStr) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+  const d = new Date(dateStr);
+  if (!isNaN(d.getTime())) return d.toISOString().split("T")[0];
+  return "";
+}
 
 interface Props {
   onClose: () => void;
   onCreate: (project: Project) => void;
+  editingProject?: Project;
+  onUpdate?: (project: Project) => void;
 }
 
-export default function CreateProjectModal({ onClose, onCreate }: Props) {
+export default function CreateProjectModal({ onClose, onCreate, editingProject, onUpdate }: Props) {
   const { workspaceId } = useWorkspace();
-  const [name, setName] = useState("");
-  const [address, setAddress] = useState("");
-  const [stage, setStage] = useState("Foundation");
+  const isEditing = !!editingProject;
+
+  const [name, setName] = useState(editingProject?.name ?? "");
+  const [address, setAddress] = useState(editingProject?.address ?? "");
+  const [stage, setStage] = useState(editingProject?.stage ?? "Foundation");
   const [type, setType] = useState("Residential");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [code, setCode] = useState("");
+  const [startDate, setStartDate] = useState(parseIsoDate(editingProject?.startDate ?? ""));
+  const [endDate, setEndDate] = useState(parseIsoDate(editingProject?.endDate ?? ""));
+  const [code, setCode] = useState(editingProject?.code ?? "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const handleCreate = async () => {
+  useEffect(() => {
+    if (isEditing) return;
+    if (name) {
+      const words = name.trim().split(/\s+/);
+      const initials = words.map((w) => w[0]?.toUpperCase()).join("").slice(0, 3);
+      if (!code) setCode(`${initials}-2026-${String(Math.floor(Math.random() * 900) + 100)}`);
+    }
+  }, [name]);
+
+  const fmt = (d: string) => {
+    const dt = new Date(d);
+    return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  };
+
+  const handleSubmit = async () => {
     if (!name.trim() || !address.trim() || !startDate || !endDate || !code.trim()) {
       setError("Please fill in all required fields.");
       return;
     }
-
     setSaving(true);
     setError("");
 
-    const fmt = (d: string) => {
-      const dt = new Date(d);
-      return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-    };
+    if (isEditing && editingProject && workspaceId) {
+      try {
+        await updateProject(String(editingProject.id), {
+          projectName: name.trim(),
+          address: address.trim(),
+          stage,
+          category: type,
+          startDate,
+          endDate,
+          projectCode: code.trim(),
+        });
+        onUpdate?.({
+          ...editingProject,
+          name: name.trim(),
+          address: address.trim(),
+          stage,
+          code: code.trim(),
+          startDate,
+          endDate,
+        });
+        return;
+      } catch (err: any) {
+        setError(err.message);
+        setSaving(false);
+        return;
+      }
+    }
 
     if (workspaceId) {
-      // Real backend
       try {
         const p = await createProject({
           workspaceId,
@@ -61,8 +108,8 @@ export default function CreateProjectModal({ onClose, onCreate }: Props) {
           workers: 0,
           issues: 0,
           stage,
-          startDate: fmt(startDate),
-          endDate: fmt(endDate),
+          startDate,
+          endDate,
           address: address.trim(),
         });
         onClose();
@@ -74,7 +121,7 @@ export default function CreateProjectModal({ onClose, onCreate }: Props) {
       }
     }
 
-    // Mock fallback — demo mode
+    // Mock fallback
     onCreate({
       id: Date.now(),
       name: name.trim(),
@@ -86,36 +133,36 @@ export default function CreateProjectModal({ onClose, onCreate }: Props) {
       workers: 0,
       issues: 0,
       stage,
-      startDate: fmt(startDate),
-      endDate: fmt(endDate),
+      startDate,
+      endDate,
       address: address.trim(),
     });
     onClose();
   };
 
   const inputClass =
-    "w-full bg-white border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] text-[#24292f] placeholder:text-[#8C959F] focus:outline-none focus:ring-2 focus:ring-[#3A4EA2] focus:border-transparent transition-all";
-  const labelClass = "block text-xs font-semibold text-[#57606a] mb-1";
+    "w-full bg-white border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] text-[#0F172A] placeholder:text-[#94A3B8] focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-[#2563EB] transition-all";
+  const labelClass = "block text-xs font-semibold text-[#475569] mb-1";
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#1b1f2380] backdrop-blur-[2px]">
       <Card className="w-[480px] !p-8 shadow-2xl bg-white relative animate-in fade-in zoom-in duration-200">
         <button
           onClick={onClose}
-          className="absolute right-6 top-6 text-[#8C959F] hover:text-[#24292f] transition-colors"
+          className="absolute right-6 top-6 text-[#94A3B8] hover:text-[#0F172A] transition-colors"
         >
           ✕
         </button>
 
-        <SectionTitle className="!mb-1">Add New Project</SectionTitle>
-        <p className="text-[13px] text-[#57606a] mb-6">
-          Enter basic project details. You can edit these later in settings.
+        <SectionTitle className="!mb-1">{isEditing ? "Edit Project" : "Add New Project"}</SectionTitle>
+        <p className="text-[13px] text-[#475569] mb-6">
+          {isEditing ? "Update the project details below." : "Enter basic project details. You can edit these later."}
         </p>
 
         <div className="space-y-4">
           <div>
             <label className={labelClass}>Project Name *</label>
-            <input className={inputClass} placeholder="Al Nakheel Tower" value={name} onChange={e => setName(e.target.value)} />
+            <input autoFocus className={inputClass} placeholder="Al Nakheel Tower" value={name} onChange={e => setName(e.target.value)} />
           </div>
 
           <div>
@@ -125,7 +172,7 @@ export default function CreateProjectModal({ onClose, onCreate }: Props) {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={labelClass}>Stage *</label>
+              <label className={labelClass}>Stage</label>
               <select className={inputClass} value={stage} onChange={e => setStage(e.target.value)}>
                 {["Foundation", "Structure", "MEP", "Finishing", "Handover"].map(o => (
                   <option key={o}>{o}</option>
@@ -133,7 +180,7 @@ export default function CreateProjectModal({ onClose, onCreate }: Props) {
               </select>
             </div>
             <div>
-              <label className={labelClass}>Type *</label>
+              <label className={labelClass}>Type</label>
               <select className={inputClass} value={type} onChange={e => setType(e.target.value)}>
                 {["Residential", "Commercial", "Mixed-Use", "Industrial"].map(o => (
                   <option key={o}>{o}</option>
@@ -160,13 +207,13 @@ export default function CreateProjectModal({ onClose, onCreate }: Props) {
         </div>
 
         {error && (
-          <p className="mt-3 text-[12px] text-[#CF222E] font-semibold">{error}</p>
+          <p className="mt-3 text-[12px] text-[#DC2626] font-semibold">{error}</p>
         )}
 
         <div className="flex justify-end gap-3 mt-8">
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn primary className="px-6" onClick={handleCreate} disabled={saving}>
-            {saving ? "Creating..." : "Create Project →"}
+          <Btn primary className="px-6" onClick={handleSubmit} disabled={saving}>
+            {saving ? (isEditing ? "Saving..." : "Creating...") : isEditing ? "Save Changes" : "Create Project →"}
           </Btn>
         </div>
       </Card>

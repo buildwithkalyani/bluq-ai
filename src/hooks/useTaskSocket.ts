@@ -64,14 +64,25 @@ interface TaskUpdatePayload {
 // Hook
 // ---------------------------------------------------------------------------
 
+interface ScheduleGeneratedPayload {
+  projectId: string;
+  versionNumber: number;
+  scheduleVersionId: string;
+  taskCount: number;
+}
+
 interface UseTaskSocketOptions {
   /** UUID of the project to subscribe to. Pass null/undefined to disable. */
   projectId: string | null | undefined;
+  /** UUID of the workspace — also joins workspace room for schedule:generated events. */
+  workspaceId?: string | null | undefined;
   /** React setState dispatch for the tasks array */
   setTasks: React.Dispatch<React.SetStateAction<ScheduleTask[]>>;
+  /** Called when a new schedule version is generated for this project */
+  onScheduleGenerated?: (payload: ScheduleGeneratedPayload) => void;
 }
 
-export function useTaskSocket({ projectId, setTasks }: UseTaskSocketOptions): void {
+export function useTaskSocket({ projectId, workspaceId, setTasks, onScheduleGenerated }: UseTaskSocketOptions): void {
   const socketRef = useRef<Socket | null>(null);
   const { data: session } = authClient.useSession();
 
@@ -90,7 +101,6 @@ export function useTaskSocket({ projectId, setTasks }: UseTaskSocketOptions): vo
     // Connect with Bearer token in handshake auth
     const socket: Socket = io(backendUrl, {
       auth: { token: `Bearer ${token}` },
-      // Don't auto-reconnect forever if server rejects (auth failure)
       reconnectionAttempts: 5,
       reconnectionDelay: 2000,
     });
@@ -98,41 +108,43 @@ export function useTaskSocket({ projectId, setTasks }: UseTaskSocketOptions): vo
     socketRef.current = socket;
 
     socket.on("connect", () => {
-      // Join the project room after connecting
       socket.emit("join:project", projectId);
+      if (workspaceId && UUID_REGEX.test(workspaceId)) {
+        socket.emit("join:workspace", workspaceId);
+      }
     });
 
     socket.on("joined", ({ projectId: joinedId }: { projectId: string }) => {
       console.log(`[useTaskSocket] Subscribed to project:${joinedId}`);
     });
 
+    socket.on("joined:workspace", ({ workspaceId: wid }: { workspaceId: string }) => {
+      console.log(`[useTaskSocket] Subscribed to workspace:${wid}`);
+    });
+
     socket.on("task:updated", (payload: TaskUpdatePayload) => {
       const mappedStatus = mapStatus(payload.status);
-
       setTasks((prev) =>
         prev.map((task) => {
           if (task.id !== payload.taskId) return task;
           return {
             ...task,
-            ...(payload.percentComplete !== null && {
-              pct: payload.percentComplete,
-            }),
-            ...(mappedStatus !== null && {
-              status: mappedStatus,
-            }),
-            ...(payload.area !== null && {
-              space: payload.area,
-            }),
-            ...(payload.contractor !== null && {
-              contractor: payload.contractor,
-            }),
+            ...(payload.percentComplete !== null && { pct: payload.percentComplete }),
+            ...(mappedStatus !== null && { status: mappedStatus }),
+            ...(payload.area !== null && { space: payload.area }),
+            ...(payload.contractor !== null && { contractor: payload.contractor }),
           };
         })
       );
     });
 
+    socket.on("schedule:generated", (payload: ScheduleGeneratedPayload) => {
+      if (payload.projectId === projectId) {
+        onScheduleGenerated?.(payload);
+      }
+    });
+
     socket.on("error", (msg: string) => {
-      // Server sends "Unauthorized" — don't log sensitive details
       console.warn("[useTaskSocket] Socket error:", msg);
       socket.disconnect();
     });
@@ -141,10 +153,9 @@ export function useTaskSocket({ projectId, setTasks }: UseTaskSocketOptions): vo
       console.log("[useTaskSocket] Disconnected:", reason);
     });
 
-    // Cleanup on unmount or when projectId / session changes
     return () => {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [projectId, session, setTasks]);
+  }, [projectId, workspaceId, session, setTasks, onScheduleGenerated]);
 }
