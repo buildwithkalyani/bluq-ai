@@ -538,7 +538,7 @@ const ROLE_STYLE: Record<TeamMember["role"], { bg: string; text: string }> = {
   Viewer: { bg: "#F1F5F9", text: "#475569" },
 };
 
-function _TeamTab({ project, isMock = false, onSettingsUpdated }: { project: BackendProject; isMock?: boolean; onSettingsUpdated?: (id: string, s: Record<string, unknown>) => void }) {
+function TeamTab({ project, isMock = false, onSettingsUpdated }: { project: BackendProject; isMock?: boolean; onSettingsUpdated?: (id: string, s: Record<string, unknown>) => void }) {
   const settings = (project as any).settingsJson ?? {};
   const [members, setMembers] = useState<TeamMember[]>(settings.team ?? []);
   const [saved, setSaved] = useState<TeamMember[]>(settings.team ?? []);
