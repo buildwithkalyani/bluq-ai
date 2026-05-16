@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useEffect, Suspense } from "react";
+import { useState, useCallback, useEffect, useRef, Suspense } from "react";
+import { CheckCircle, AlertTriangle, X, Loader, FileText, Sparkles, RefreshCw, Upload, ClipboardList, Table2, GitBranch, Layers, ArrowLeft, PenLine, Plus, Lock, Bot, FolderOpen } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { parseCSVPreview, BLUQ_FIELDS } from "@/lib/mock-data";
 import { Card, SectionTitle, Btn } from "@/components/ui/bluq-ui";
@@ -12,6 +13,8 @@ import {
   fetchDocuments,
   deleteDocument,
   generateSchedule,
+  pollScheduleStatus,
+  fetchScheduleVersions,
   type ScheduleStatusResult,
   type BackendDocument,
   type ScheduleVersion,

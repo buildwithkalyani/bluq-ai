@@ -656,9 +656,12 @@ function SchedulePollerMount() {
   return null;
 }
 
+type KPIData = { projectedEnd: string | null; plannedEnd: string | null; address: string | null };
+
 // ─── MAIN COMPONENTS ────────────────────────────────────────
-function TopNav() {
+function ProjectKPIStrip() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { workspaceId, isDesignMode, loading: wsLoading } = useWorkspace();
   const { data: session } = authClient.useSession();
   const sessionReady = session !== undefined;

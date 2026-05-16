@@ -7,6 +7,7 @@ import { getScheduleTasks } from "@/lib/mock-data";
 import { fetchTasks, isRealProject } from "@/lib/api-client";
 import type { ScheduleTask } from "@/lib/mock-data";
 import { useWorkspace } from "@/context/workspace";
+import { Card } from "@/components/ui/bluq-ui";
 
 const SVG_W = 560;
 const SVG_H = 260;
@@ -171,6 +172,7 @@ function SCurveContent() {
   const [startDate, setStartDate] = useState("2026-03-01");
   const [endDate, setEndDate] = useState("2026-04-15");
   const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadDone, setDownloadDone] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

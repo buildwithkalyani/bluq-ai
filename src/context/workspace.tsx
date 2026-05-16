@@ -153,7 +153,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const setWorkspace = (id: string, name: string) => {
     setWorkspaceId(id);
     setOrgName(name);
-    writeWorkspaceCache(id, name);
+    writeWorkspaceCache(id, name, session?.user?.id ?? "");
   };
 
   return (

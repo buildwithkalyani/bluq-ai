@@ -21,6 +21,13 @@ import CreateProjectModal from "./CreateProjectModal";
 import { useWorkspace } from "@/context/workspace";
 import { fetchProjects, deleteProject } from "@/lib/api-client";
 
+function fmtDate(iso: string): string {
+  if (!iso || iso === "TBD") return iso;
+  const d = new Date(iso + "T00:00:00");
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
 const PROJECTS_CACHE_KEY = "bluq_projects_cache";
 const STALE_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -63,7 +70,7 @@ function mapBackendProjects(rows: Awaited<ReturnType<typeof fetchProjects>>): Pr
   }));
 }
 
-export default function OverviewPage() {
+function OverviewContent() {
   const { workspaceId, loading: wsLoading, isDesignMode } = useWorkspace();
   const router = useRouter();
   const searchParams = useSearchParams();

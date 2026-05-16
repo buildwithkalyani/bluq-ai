@@ -774,6 +774,7 @@ type SidebarItem = "General" | "Contractors";
 
 function ProjectSettingsPageInner() {
   const { workspaceId, isDesignMode, loading: wsLoading } = useWorkspace();
+  const { isPending: sessionPending } = authClient.useSession();
   const searchParams = useSearchParams();
   const urlProjectId = searchParams.get("projectId");
 
