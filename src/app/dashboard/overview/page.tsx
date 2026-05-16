@@ -21,14 +21,49 @@ import CreateProjectModal from "./CreateProjectModal";
 import { useWorkspace } from "@/context/workspace";
 import { fetchProjects, deleteProject } from "@/lib/api-client";
 
-function fmtDate(iso: string): string {
-  if (!iso || iso === "TBD") return iso;
-  const d = new Date(iso + "T00:00:00");
-  if (isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+const PROJECTS_CACHE_KEY = "bluq_projects_cache";
+const STALE_MS = 5 * 60 * 1000; // 5 minutes
+
+type ProjectsCache = { data: Project[]; lastFetchedAt: number };
+
+function readProjectsCache(workspaceId: string): ProjectsCache | null {
+  try {
+    const raw = localStorage.getItem(`${PROJECTS_CACHE_KEY}_${workspaceId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
 }
 
-function OverviewContent() {
+function writeProjectsCache(workspaceId: string, projects: Project[]): void {
+  try {
+    const entry: ProjectsCache = { data: projects, lastFetchedAt: Date.now() };
+    localStorage.setItem(`${PROJECTS_CACHE_KEY}_${workspaceId}`, JSON.stringify(entry));
+  } catch {}
+}
+
+function isSameProjects(a: Project[], b: Project[]): boolean {
+  if (a.length !== b.length) return false;
+  return JSON.stringify(a.map(p => p.id).sort()) === JSON.stringify(b.map(p => p.id).sort());
+}
+
+function mapBackendProjects(rows: Awaited<ReturnType<typeof fetchProjects>>): Project[] {
+  return rows.map((p) => ({
+    id: p.id as any,
+    name: p.projectName,
+    code: p.projectCode ?? "",
+    pct: Number(p.percentComplete ?? 0),
+    status: "notStarted" as const,
+    tasks: 0,
+    tasksDone: 0,
+    workers: 0,
+    issues: 0,
+    stage: p.stage ?? "",
+    startDate: p.startDate ?? "",
+    endDate: p.endDate ?? "",
+    address: p.address ?? "",
+  }));
+}
+
+export default function OverviewPage() {
   const { workspaceId, loading: wsLoading, isDesignMode } = useWorkspace();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -36,8 +71,7 @@ function OverviewContent() {
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState("");
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [isOutdated, setIsOutdated] = useState(false);
   const [search, setSearch] = useState("");
 
   // Modal State
@@ -50,41 +84,27 @@ function OverviewContent() {
     if (wsLoading) return;
 
     if (workspaceId && !isDesignMode) {
-      setFetchError("");
+      // Show cached data immediately
+      const cached = readProjectsCache(workspaceId);
+      if (cached && cached.data.length > 0) {
+        setProjects(cached.data);
+        setLoading(false);
+      }
+
+      // Fetch fresh in background
       fetchProjects(workspaceId)
         .then((rows) => {
-          const statusMap: Record<string, import("@/lib/mock-data").ProjectStatus> = {
-            completed: "completed",
-            complete: "completed",
-            in_progress: "inProgress",
-            inprogress: "inProgress",
-            running_late: "runningLate",
-            runninglate: "runningLate",
-            delayed: "delayed",
-            not_started: "notStarted",
-            notstarted: "notStarted",
-          };
-          setProjects(
-            rows.map((p) => ({
-              id: p.id as any,
-              name: p.projectName,
-              code: p.projectCode ?? "",
-              pct: Number(p.percentComplete ?? 0),
-              status: statusMap[(p.status ?? "").toLowerCase().replace(/[-\s]/g, "_")] ?? "notStarted",
-              tasks: 0,
-              tasksDone: 0,
-              workers: 0,
-              issues: 0,
-              stage: p.stage ?? "",
-              startDate: p.startDate ?? "",
-              endDate: p.endDate ?? "",
-              address: p.address ?? "",
-            }))
-          );
+          const fresh = mapBackendProjects(rows);
+          writeProjectsCache(workspaceId, fresh);
+          setIsOutdated(false);
+          // Only re-render if data actually changed
+          setProjects(prev => isSameProjects(prev, fresh) ? prev : fresh);
         })
         .catch((err) => {
-          console.error(err);
-          setFetchError(err?.message ?? "Failed to load projects");
+          console.error("projects refresh:", err);
+          // Surface soft indicator only if cache is stale (> 5 min old)
+          const age = cached ? Date.now() - cached.lastFetchedAt : Infinity;
+          if (age > STALE_MS) setIsOutdated(true);
         })
         .finally(() => setLoading(false));
     } else if (isDesignMode) {
@@ -95,7 +115,7 @@ function OverviewContent() {
     } else {
       setLoading(false);
     }
-  }, [workspaceId, wsLoading, isDesignMode, refreshKey]);
+  }, [workspaceId, wsLoading, isDesignMode]);
 
   const filtered = projects.filter((p) =>
     p.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -124,21 +144,6 @@ function OverviewContent() {
     setMenuOpenProjectId(null);
   };
 
-  if (fetchError && !loading) {
-    return (
-      <div className="p-5">
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-600">
-          Failed to load projects: {fetchError}.{" "}
-          <span
-            className="underline cursor-pointer"
-            onClick={() => { setLoading(true); setFetchError(""); setRefreshKey(k => k + 1); }}
-          >
-            Retry
-          </span>
-        </div>
-      </div>
-    );
-  }
 
   if (loading) {
     return (
@@ -178,6 +183,14 @@ function OverviewContent() {
         )
       ) : (
         <>
+          {/* ── Soft outdated indicator ── */}
+          {isOutdated && (
+            <div className="mx-5 mt-4 px-3 py-1.5 bg-[#fff8c5] border border-[#d4a72c40] rounded-md text-[11px] text-[#9a6700] flex items-center gap-2">
+              <span>⚠️</span>
+              <span>Showing saved data · couldn't reach server</span>
+            </div>
+          )}
+
           {/* ── Header ── */}
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -384,7 +397,11 @@ function OverviewContent() {
         <CreateProjectModal
           onClose={() => setIsCreateModalOpen(false)}
           onCreate={(project) => {
-            setProjects(prev => [...prev, project]);
+            setProjects(prev => {
+              const updated = [...prev, project];
+              if (workspaceId) writeProjectsCache(workspaceId, updated);
+              return updated;
+            });
             setIsCreateModalOpen(false);
             selectProject(project.id);
           }}

@@ -774,7 +774,6 @@ type SidebarItem = "General" | "Contractors";
 
 function ProjectSettingsPageInner() {
   const { workspaceId, isDesignMode, loading: wsLoading } = useWorkspace();
-  const { isPending: sessionPending } = authClient.useSession();
   const searchParams = useSearchParams();
   const urlProjectId = searchParams.get("projectId");
 
@@ -810,13 +809,8 @@ function ProjectSettingsPageInner() {
       }).finally(() => setLoadingProjects(false));
       return;
     }
-
-    if (!workspaceId) {
-      // Workspace resolved but no ID — user has no org yet
-      setLoadingProjects(false);
-      return;
-    }
-
+    if (wsLoading) return; // workspace still resolving
+    if (!workspaceId) { setLoadingProjects(false); return; }
     setLoadingProjects(true);
     fetchProjects(workspaceId)
       .then((data) => {
@@ -828,7 +822,7 @@ function ProjectSettingsPageInner() {
       })
       .catch(console.error)
       .finally(() => setLoadingProjects(false));
-  }, [workspaceId, wsLoading, sessionPending, urlProjectId, useMock]);
+  }, [workspaceId, wsLoading, urlProjectId, isDesignMode]);
 
   const project = projects.find((p) => p.id === activeProjectId);
 

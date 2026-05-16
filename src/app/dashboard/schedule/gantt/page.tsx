@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useMemo, Suspense } from 'react';
 import { Search } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { getScheduleTasks, getScheduleDeps, type ScheduleTask, type TaskDependency } from "@/lib/mock-data";
-import { fetchTasks, fetchTaskDependencies, createTaskDependency, deleteTaskDependency, fetchLatestScheduleVersion, isRealProject, type ScheduleVersion } from "@/lib/api-client";
+import { fetchTasks, fetchTaskDependencies, createTaskDependency, deleteTaskDependency, fetchLatestScheduleVersion, isRealProject, updateTask, type ScheduleVersion } from "@/lib/api-client";
 import { GapCheckPanel, type SuspectedGap } from "@/components/ui/GapCheckPanel";
 import { useWorkspace } from "@/context/workspace";
 import { useActivityFeed } from "@/context/activity-feed";
@@ -52,6 +52,23 @@ const HEADER_H = 44;
 const SUB_ROW_H = 36;
 
 const PHASE_ORDER = ["Site Preparation", "Foundation", "Structure", "MEP", "Finishing", "Handover"];
+
+const PHASE_KEYWORDS: [string, string[]][] = [
+  ["Site Preparation", ["site survey","demarcation","layout","site clearing","clearing","grubbing","excavation","earthwork","dewatering","temporary fencing","temporary office","site office","mobilisation","mobilization","hoarding"]],
+  ["Foundation", ["pile","piling","bored pile","driven pile","footing","foundation","raft","plinth","grade beam","pile cap","underpinning","anti-termite","damp proof"]],
+  ["Structure", ["column","beam","slab","rcc","rc ","reinforced concrete","reinforcement","rebar","formwork","shuttering","shutter","centering","concrete","casting","concreting","pour","structural wall","core wall","shear wall","lift core","staircase","stair","lintel","sunshade","parapet"]],
+  ["MEP", ["plumbing","sanitary","drainage","sewage","water supply","fire fighting","fire sprinkler","electrical","wiring","conduit","cable","switchboard","panel","mep","hvac","air conditioning","duct","ductwork","ventilation","elevator","lift installation","escalator","bms"]],
+  ["Finishing", ["plaster","plastering","render","paint","painting","putty","tile","tiling","flooring","marble","granite","vitrified","false ceiling","gypsum","drywall","partition","interior","waterproof","waterproofing","cladding","facade","glazing","aluminium","aluminum","window","door","carpentry","woodwork","cabinet","railing","handrail","landscaping","finishing"]],
+  ["Handover", ["handover","commissioning","testing","snag","snagging","defect","punch list","inspection","noc","certificate","completion","final inspection","trial run"]],
+];
+
+function detectPhase(name: string): string {
+  const lower = name.toLowerCase();
+  for (const [phase, kws] of PHASE_KEYWORDS) {
+    if (kws.some(kw => lower.includes(kw))) return phase;
+  }
+  return "";
+}
 
 // ─────────────────────────────────────────────────────────────
 // Date Math Utilities
@@ -756,7 +773,8 @@ function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete,
   useEffect(() => {
     if (isOpen) {
       if (mode === "edit" && task) {
-        setFormData({ name: task.name, phase: task.phase || "", contractor: task.contractor || "", space: task.space || "", startDate: task.startDate, endDate: task.endDate, status: task.status || "notStarted", pct: task.pct ?? 0 });
+        const autoPhase = task.phase || detectPhase(task.name);
+        setFormData({ name: task.name, phase: autoPhase, contractor: task.contractor || "", space: task.space || "", startDate: task.startDate, endDate: task.endDate, status: task.status || "notStarted", pct: task.pct ?? 0 });
         setSelectedPreds(deps.filter((d: any) => d.to === task.id).map((d: any) => ({ id: d.from, type: d.type })));
       } else {
         setFormData({ ...emptyForm, phase: defaultPhase || "", space: defaultArea || "" });
@@ -931,6 +949,29 @@ function getActivePreset(zoom: number): string | null {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Gantt Cache (stale-while-revalidate)
+// ─────────────────────────────────────────────────────────────
+type GanttCache = {
+  tasks: ScheduleTask[];
+  deps: TaskDependency[];
+  depIds: Record<string, string>;
+  lastFetchedAt: number;
+};
+
+function readGanttCache(projectId: string): GanttCache | null {
+  try {
+    const raw = localStorage.getItem(`bluq_gantt_${projectId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function writeGanttCache(projectId: string, data: Omit<GanttCache, "lastFetchedAt">): void {
+  try {
+    localStorage.setItem(`bluq_gantt_${projectId}`, JSON.stringify({ ...data, lastFetchedAt: Date.now() }));
+  } catch {}
+}
+
+// ─────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────
 function GanttChartContent() {
@@ -961,14 +1002,30 @@ function GanttChartContent() {
 
   useEffect(() => {
     if (real) {
-      fetchTasks(projectIdParam, workspaceId!).then(setTasks);
-      fetchLatestScheduleVersion(projectIdParam, workspaceId!).then(setScheduleVersion);
-      fetchTaskDependencies(projectIdParam, workspaceId!).then(rows => {
-        setDeps(rows.map(r => ({ from: r.predecessorId, to: r.successorId, type: r.dependencyType, label: r.dependencyType })));
-        const ids: Record<string, string> = {};
-        rows.forEach(r => { ids[depIdKey(r.predecessorId, r.successorId)] = r.id; });
-        setDepIds(ids);
-      }).catch(() => setDeps([]));
+      // Show cached data instantly so chart isn't blank on navigate-back
+      const cached = readGanttCache(projectIdParam);
+      if (cached) {
+        setTasks(cached.tasks);
+        setDeps(cached.deps);
+        setDepIds(cached.depIds);
+      }
+
+      // Fetch fresh in background
+      Promise.all([
+        fetchTasks(projectIdParam, workspaceId!),
+        fetchTaskDependencies(projectIdParam, workspaceId!),
+        fetchLatestScheduleVersion(projectIdParam, workspaceId!),
+      ]).then(([freshTasks, depRows, version]) => {
+        const freshDeps = depRows.map(r => ({ from: r.predecessorId, to: r.successorId, type: r.dependencyType, label: r.dependencyType }));
+        const freshDepIds: Record<string, string> = {};
+        depRows.forEach(r => { freshDepIds[depIdKey(r.predecessorId, r.successorId)] = r.id; });
+
+        setTasks(freshTasks);
+        setDeps(freshDeps);
+        setDepIds(freshDepIds);
+        setScheduleVersion(version);
+        writeGanttCache(projectIdParam, { tasks: freshTasks, deps: freshDeps, depIds: freshDepIds });
+      }).catch(console.error);
     } else if (isDesignMode) {
       const numId = Number(projectIdParam);
       getScheduleTasks(numId).then(setTasks);
@@ -983,7 +1040,10 @@ function GanttChartContent() {
     scheduleVersion?.scheduleJson?.gapCheck?.suspectedGaps?.filter(g => !g.alreadyCovered) ?? [];
 
   const refreshTasks = () => {
-    if (real) fetchTasks(projectIdParam, workspaceId!).then(setTasks);
+    if (real) fetchTasks(projectIdParam, workspaceId!).then(fresh => {
+      setTasks(fresh);
+      writeGanttCache(projectIdParam, { tasks: fresh, deps, depIds });
+    }).catch(console.error);
   };
 
   useTaskSocket({ projectId: real ? projectIdParam : null, setTasks });
@@ -1185,7 +1245,14 @@ function GanttChartContent() {
   const todayOffsetDays = diffDays(chartStart, today);
   const todayX = todayOffsetDays * pixelsPerDay;
 
-  const handleUpdateDates = (id: string, start: string, end: string) => setTasks((p) => p.map((t) => (t.id === id ? { ...t, startDate: start, endDate: end, duration: `${diffDays(start, end)}d` } : t)));
+  // Map frontend status keys → backend DB values
+  const toDbStatus = (s: string) => ({ notStarted: "not_started", inProgress: "in_progress", runningLate: "running_late", delayed: "delayed", completed: "completed" } as Record<string, string>)[s] ?? s;
+
+  // Handlers
+  const handleUpdateDates = (id: string, start: string, end: string) => {
+    setTasks((p) => p.map((t) => (t.id === id ? { ...t, startDate: start, endDate: end, duration: `${diffDays(start, end)}d` } : t)));
+    if (real) updateTask(id, { startDate: start, endDate: end }).catch(console.error);
+  };
   const handleWheel = (e: React.WheelEvent) => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); setZoomLevel(p => Math.max(0.1, Math.min(3, p - e.deltaY * 0.005))); } };
   const handleChangeDep = (idx: number, newType: string) => setDeps(p => p.map((d, i) => i === idx ? { ...d, type: newType as any } : d));
 
@@ -1227,6 +1294,20 @@ const handleSaveModal = (data: any, newPreds: any) => {
       return [...filtered, ...newPreds.map((pr: any) => ({ from: pr.id, to: targetId, type: pr.type, label: pr.type }))];
     });
     if (real && workspaceId && targetId) {
+      // Persist task edits to backend
+      if (modalConfig.mode === "edit") {
+        updateTask(targetId, {
+          title: data.name,
+          status: toDbStatus(data.status),
+          startDate: data.startDate,
+          endDate: data.endDate,
+          percentComplete: data.pct ?? 0,
+          contractor: data.contractor || null,
+          area: data.space || null,
+          phase: data.phase || null,
+        }).catch(console.error);
+      }
+      // delete old deps for this task, then create new ones
       const oldDeps = deps.filter(d => d.to === targetId);
       oldDeps.forEach(d => {
         const bid = depIds[depIdKey(d.from, d.to)];
@@ -1926,29 +2007,13 @@ const handleSaveModal = (data: any, newPreds: any) => {
         </div>
       </div>
 
-      {/* Right-side panels: detail (when task selected) OR activity feed */}
-      {selectedTask ? (
-        <TaskDetailPanel
-          task={selectedTask} deps={deps} tasks={filteredTasks}
-          criticalPathTasks={criticalPathTasks} taskActivity={taskActivity}
-          onClose={() => setSelectedId(null)}
-          onEditClick={() => setModalConfig({ isOpen: true, mode: "edit", taskId: selectedTask.id, defaultPhase: "", defaultArea: "" })}
-          onDelete={handleDeleteTask}
-        />
-      ) : showActivityFeed ? (
-        <ActivityFeed
-          updates={activity}
-          onClose={() => setShowActivityFeed(false)}
-          onTaskFocus={(taskId) => setSelectedId(taskId)}
-        />
-      ) : null}
+      {/* Side Panel */}
+      {selectedTask && (
+        <TaskDetailPanel task={selectedTask} deps={deps} tasks={filteredTasks} criticalPathTasks={criticalPathTasks} onClose={() => setSelectedId(null)} onEditClick={() => { setSelectedId(null); setModalConfig({ isOpen: true, mode: "edit", taskId: selectedTask.id, defaultPhase: "", defaultArea: "" }); }} onDelete={handleDeleteTask} />
+      )}
 
-      <TaskModal isOpen={modalConfig.isOpen} mode={modalConfig.mode}
-        task={tasks.find(t => t.id === modalConfig.taskId)} tasks={filteredTasks} deps={deps}
-        defaultPhase={modalConfig.defaultPhase} defaultArea={modalConfig.defaultArea}
-        onClose={() => setModalConfig({ ...modalConfig, isOpen: false })}
-        onSave={handleSaveModal} onDelete={handleDeleteTask}
-      />
+      {/* Modal */}
+      <TaskModal isOpen={modalConfig.isOpen} mode={modalConfig.mode} task={tasks.find(t => t.id === modalConfig.taskId)} tasks={filteredTasks} deps={deps} defaultPhase={modalConfig.defaultPhase} defaultArea={modalConfig.defaultArea} onClose={() => setModalConfig({ ...modalConfig, isOpen: false })} onSave={handleSaveModal} onDelete={handleDeleteTask} />
     </div>
   );
 }

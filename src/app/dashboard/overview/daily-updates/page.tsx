@@ -75,7 +75,7 @@ function DailyUpdatesInner() {
     if (activeWorkspaceId) fetchProjects(activeWorkspaceId).then(setProjects).catch(console.error);
   }, [activeWorkspaceId, wsLoading, isDesignMode]);
 
-  // Load data
+  // Reload tasks/milestones whenever project, range, or workspace changes
   useEffect(() => {
     if (wsLoading) return;
     const days = ranges[milestoneRange];
@@ -86,20 +86,32 @@ function DailyUpdatesInner() {
       getMilestones(undefined).then(setMilestones);
       getAIBriefing(null).then(b => { setBriefing(b); setBriefingFetchedAt(new Date()); });
     } else if (activeWorkspaceId && selectedProjectId && isRealProject(selectedProjectId)) {
-      fetchDoneYesterday(selectedProjectId, activeWorkspaceId).then(setDoneYesterday).catch(() => {});
-      fetchTodoToday(selectedProjectId, activeWorkspaceId).then(setTodoToday).catch(() => {});
-      fetchMilestones(selectedProjectId, activeWorkspaceId, days).then(setMilestones).catch(() => {});
-      fetchAIBriefing(selectedProjectId, activeWorkspaceId).then(b => { setBriefing(b); setBriefingFetchedAt(new Date()); }).catch(() => {});
+      fetchDoneYesterday(selectedProjectId, activeWorkspaceId).then(setDoneYesterday).catch(console.error);
+      fetchTodoToday(selectedProjectId, activeWorkspaceId).then(setTodoToday).catch(console.error);
+      fetchMilestones(selectedProjectId, activeWorkspaceId, days).then(setMilestones).catch(console.error);
     } else if (activeWorkspaceId && projects.length > 0) {
       Promise.all(projects.map(p => fetchDoneYesterday(p.id, activeWorkspaceId).catch(() => [] as DailyTask[])))
         .then(r => setDoneYesterday(r.flat()));
       Promise.all(projects.map(p => fetchTodoToday(p.id, activeWorkspaceId).catch(() => [] as DailyTodo[])))
         .then(r => setTodoToday(r.flat()));
       Promise.all(projects.map(p => fetchMilestones(p.id, activeWorkspaceId, days).catch(() => [] as Milestone[])))
-        .then(r => setMilestones(r.flat()));
-      setBriefing(null);
+        .then(results => setMilestones(results.flat()));
     }
   }, [selectedProjectId, milestoneRange, activeWorkspaceId, wsLoading, projects.length, isDesignMode]);
+
+  // Briefing has its own effect — isolated from projects.length to prevent stale races
+  useEffect(() => {
+    if (wsLoading || isDesignMode) return;
+    if (!activeWorkspaceId || !selectedProjectId || !isRealProject(selectedProjectId)) {
+      setBriefing(null);
+      return;
+    }
+    let cancelled = false;
+    fetchAIBriefing(selectedProjectId, activeWorkspaceId)
+      .then(b => { if (!cancelled) setBriefing(b); })
+      .catch(console.error);
+    return () => { cancelled = true; };
+  }, [selectedProjectId, activeWorkspaceId, wsLoading, isDesignMode]);
 
   const filteredMilestones = activeWorkspaceId
     ? milestones

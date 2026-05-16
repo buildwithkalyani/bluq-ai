@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useMemo, Suspense } from "react";
+import { useState, useEffect, useMemo, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Download, CheckCircle, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { getScheduleTasks } from "@/lib/mock-data";
 import { fetchTasks, isRealProject } from "@/lib/api-client";
+import type { ScheduleTask } from "@/lib/mock-data";
 import { useWorkspace } from "@/context/workspace";
 
 const SVG_W = 560;
@@ -34,6 +35,130 @@ function buildPath(points: [number, number][]): string {
   return d;
 }
 
+// SVG canvas constants
+const X0 = 50, X1 = 480, Y0 = 195, Y1 = 10;
+const W = X1 - X0; // 430
+const H = Y0 - Y1; // 185
+
+// Pick sample count based on project duration — 1 pt per day up to 30d,
+// then weekly, capped at 100 pts so long projects still get proportional resolution.
+function sampleCount(durationMs: number): number {
+  const days = durationMs / 86400000;
+  if (days <= 30)  return Math.ceil(days);
+  if (days <= 90)  return Math.ceil(days / 2);
+  const weekly = Math.ceil(days / 7);
+  return Math.min(weekly, 100);
+}
+
+function toSvgX(frac: number) { return X0 + frac * W; }
+function toSvgY(pct: number)  { return Y0 - (pct / 100) * H; }
+
+// Build a smooth SVG path from an array of [x, y] SVG coords using cubic bezier
+function smoothPath(pts: [number, number][]): string {
+  if (pts.length < 2) return "";
+  let d = `M ${pts[0][0]} ${pts[0][1]}`;
+  for (let i = 1; i < pts.length; i++) {
+    const [px, py] = pts[i - 1];
+    const [cx, cy] = pts[i];
+    const cpx = px + (cx - px) * 0.5;
+    d += ` C ${cpx} ${py} ${cpx} ${cy} ${cx} ${cy}`;
+  }
+  return d;
+}
+
+interface CurveData {
+  plannedPts: [number, number][];
+  actualPts:  [number, number][];
+  xLabels:    { label: string; svgX: number }[];
+  plannedAtToday: number;
+  actualNow:  number;
+  todayFrac:  number;
+}
+
+function computeCurves(tasks: ScheduleTask[], rangeStart: string, rangeEnd: string): CurveData {
+  const parents = tasks.filter(t => !t.parentTaskId && t.startDate && t.endDate);
+
+  const rs = new Date(rangeStart).getTime();
+  const re = new Date(rangeEnd).getTime();
+  const totalRangeMs = re - rs;
+  const today = Date.now();
+  const todayFrac = totalRangeMs > 0 ? Math.min(1, Math.max(0, (today - rs) / totalRangeMs)) : 0;
+
+  if (parents.length === 0 || totalRangeMs <= 0) {
+    return { plannedPts: [], actualPts: [], xLabels: [], plannedAtToday: 0, actualNow: 0, todayFrac };
+  }
+
+  const N = sampleCount(totalRangeMs);
+
+  // Weight each task by its duration (days), min 1
+  const taskData = parents.map(t => {
+    const ts = new Date(t.startDate).getTime();
+    const te = new Date(t.endDate).getTime();
+    const dur = Math.max(1, te - ts);
+    return { ts, te, dur, pct: t.pct };
+  });
+  const totalWeight = taskData.reduce((s, t) => s + t.dur, 0);
+
+  // Sample N+1 evenly-spaced points across the range
+  const plannedPts: [number, number][] = [];
+  const actualPts:  [number, number][] = [];
+
+  for (let i = 0; i <= N; i++) {
+    const frac = i / N;
+    const t = rs + frac * totalRangeMs;
+    const svgX = toSvgX(frac);
+
+    // Planned: cumulative fraction of each task completed by time t (uniform daily spread)
+    let plannedPct = 0;
+    for (const task of taskData) {
+      const done = Math.min(1, Math.max(0, (t - task.ts) / task.dur));
+      plannedPct += done * (task.dur / totalWeight) * 100;
+    }
+    plannedPts.push([svgX, toSvgY(plannedPct)]);
+
+    // Actual: only plot up to today
+    if (t <= today + 86400000) {
+      let actualPct = 0;
+      for (const task of taskData) {
+        if (task.ts > t) continue; // task hasn't started yet at time t
+        // Spread completed work linearly from task.ts to min(today, task.te)
+        const effectiveEnd = Math.min(today, task.te);
+        const elapsed = Math.max(1, effectiveEnd - task.ts);
+        const progressHere = Math.min(1, (t - task.ts) / elapsed);
+        actualPct += progressHere * (task.pct / 100) * (task.dur / totalWeight) * 100;
+      }
+      actualPts.push([svgX, toSvgY(actualPct)]);
+    }
+  }
+
+  // Planned % at today (for gap calc)
+  const plannedAtToday = (() => {
+    let p = 0;
+    for (const task of taskData) {
+      const done = Math.min(1, Math.max(0, (today - task.ts) / task.dur));
+      p += done * (task.dur / totalWeight) * 100;
+    }
+    return Math.round(p);
+  })();
+
+  // Current actual overall % (weighted by duration)
+  const actualNow = Math.round(
+    taskData.reduce((s, t) => s + (t.pct / 100) * (t.dur / totalWeight) * 100, 0)
+  );
+
+  // X-axis labels at 7 evenly-spaced positions
+  const xLabels = Array.from({ length: 7 }, (_, i) => {
+    const frac = i / 6;
+    const d = new Date(rs + frac * totalRangeMs);
+    return {
+      label: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      svgX: toSvgX(frac),
+    };
+  });
+
+  return { plannedPts, actualPts, xLabels, plannedAtToday, actualNow, todayFrac };
+}
+
 function SCurveContent() {
   const searchParams = useSearchParams();
   const { isDesignMode, workspaceId: ctxWorkspaceId, loading: wsLoading } = useWorkspace();
@@ -42,11 +167,11 @@ function SCurveContent() {
   const workspaceId = (urlWs && urlWs !== "null") ? urlWs : ctxWorkspaceId;
   const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
 
-  const [startDate, setStartDate] = useState("2026-01-01");
-  const [endDate, setEndDate] = useState("2026-12-31");
-  const [actualProgress, setActualProgress] = useState(0);
+  const [tasks, setTasks] = useState<ScheduleTask[]>([]);
+  const [startDate, setStartDate] = useState("2026-03-01");
+  const [endDate, setEndDate] = useState("2026-04-15");
   const [isDownloading, setIsDownloading] = useState(false);
-  const [downloadDone, setDownloadDone] = useState(false);
+  const printRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const loader = real
@@ -54,67 +179,67 @@ function SCurveContent() {
       : isDesignMode
         ? getScheduleTasks(Number(projectIdParam))
         : Promise.resolve([]);
-    loader.then(tasks => {
-      const parents = tasks.filter(t => !t.parentTaskId);
-      if (parents.length === 0) return;
-      const starts = parents.map(t => t.startDate).filter(Boolean).sort();
-      const ends = parents.map(t => t.endDate).filter(Boolean).sort();
-      if (starts[0]) setStartDate(starts[0]);
-      if (ends[ends.length - 1]) setEndDate(ends[ends.length - 1]);
-      setActualProgress(Math.round(parents.reduce((s, t) => s + t.pct, 0) / parents.length));
+
+    loader.then(loaded => {
+      const parents = loaded.filter(t => !t.parentTaskId && t.startDate && t.endDate);
+      if (parents.length > 0) {
+        const starts = parents.map(t => t.startDate).sort();
+        const ends   = parents.map(t => t.endDate).sort();
+        if (starts[0]) setStartDate(starts[0]);
+        if (ends[ends.length - 1]) setEndDate(ends[ends.length - 1]);
+      }
+      setTasks(loaded);
     });
-  }, [projectIdParam, workspaceId, isDesignMode]);
+  }, [projectIdParam, workspaceId, real, isDesignMode]);
 
-  const startMs = new Date(startDate).getTime();
-  const endMs = new Date(endDate).getTime();
-  const totalMs = endMs - startMs;
-  const elapsedMs = Date.now() - startMs;
-  const todayRatio = totalMs > 0 ? Math.min(1, Math.max(0, elapsedMs / totalMs)) : 0.5;
-  const plannedProgress = Math.round(sigmoid(todayRatio) * 100);
-  const gap = actualProgress - plannedProgress;
+  const { plannedPts, actualPts, xLabels, plannedAtToday, actualNow, todayFrac } =
+    useMemo(() => computeCurves(tasks, startDate, endDate), [tasks, startDate, endDate]);
 
-  const N = 40;
-  const plannedPts = useMemo((): [number, number][] =>
-    Array.from({ length: N }, (_, i) => {
-      const t = i / (N - 1);
-      const x = PAD_L + t * CHART_W;
-      const y = PAD_T + CHART_H - sigmoid(t) * CHART_H;
-      return [x, y];
-    }), [startDate, endDate]);
+  const gap = actualNow - plannedAtToday;
 
-  const actualPts = useMemo((): [number, number][] => {
-    const M = Math.max(2, Math.round(N * todayRatio));
-    return Array.from({ length: M }, (_, i) => {
-      const t = (i / (M - 1)) * todayRatio;
-      const plannedAtT = sigmoid(t);
-      const scale = todayRatio > 0 ? (actualProgress / 100) / sigmoid(todayRatio) : 1;
-      const actualAtT = Math.min(1, plannedAtT * scale);
-      const x = PAD_L + t * CHART_W;
-      const y = PAD_T + CHART_H - actualAtT * CHART_H;
-      return [x, y];
-    });
-  }, [todayRatio, actualProgress]);
+  // Today vertical line
+  const todaySvgX = toSvgX(Math.min(1, Math.max(0, todayFrac)));
 
-  const todayX = PAD_L + todayRatio * CHART_W;
-  const plannedY = PAD_T + CHART_H - sigmoid(todayRatio) * CHART_H;
-  const actualY = actualPts.length > 0 ? actualPts[actualPts.length - 1][1] : plannedY;
+  // Gap annotation: compare planned vs actual at today's x position
+  const plannedYatToday = plannedPts.length > 0
+    ? toSvgY(plannedAtToday)
+    : toSvgY(0);
+  const actualYatToday = actualPts.length > 0
+    ? actualPts[actualPts.length - 1][1]
+    : toSvgY(0);
 
-  const fillPath = actualPts.length > 1
-    ? buildPath(actualPts) + ` L ${actualPts[actualPts.length - 1][0]} ${PAD_T + CHART_H} L ${PAD_L} ${PAD_T + CHART_H} Z`
+  const plannedPath = smoothPath(plannedPts);
+  const actualPath  = smoothPath(actualPts);
+
+  // Area fill under actual line (close back to x-axis)
+  const actualAreaPath = actualPts.length > 1
+    ? `${actualPath} L ${actualPts[actualPts.length - 1][0]} ${Y0} L ${X0} ${Y0} Z`
     : "";
 
-  const xLabels = useMemo(() => {
-    const s = startMs, e = endMs;
-    if (isNaN(s) || isNaN(e) || s >= e) return [];
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(s + (i / 6) * (e - s));
-      return { label: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }), x: PAD_L + (i / 6) * CHART_W };
-    });
-  }, [startDate, endDate]);
-
   const handleDownload = () => {
+    if (!printRef.current) return;
     setIsDownloading(true);
-    setTimeout(() => { setIsDownloading(false); setDownloadDone(true); setTimeout(() => setDownloadDone(false), 3000); }, 1500);
+    const content = printRef.current.innerHTML;
+    const win = window.open("", "_blank");
+    if (!win) { setIsDownloading(false); return; }
+    win.document.write(`
+      <html><head><title>S-Curve</title>
+      <style>
+        body { font-family: sans-serif; padding: 24px; }
+        svg { width: 100%; height: auto; }
+        .stats { display: flex; gap: 24px; margin-top: 16px; }
+        .stat { flex: 1; border: 1px solid #D0D7DE; border-radius: 8px; padding: 16px; text-align: center; }
+        .stat-label { font-size: 12px; color: #57606a; }
+        .stat-value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+        @media print { body { padding: 0; } }
+      </style></head>
+      <body><h2 style="color:#24292f;margin-bottom:16px;">S-Curve Report — ${startDate} to ${endDate}</h2>
+      ${content}
+      </body></html>
+    `);
+    win.document.close();
+    win.focus();
+    setTimeout(() => { win.print(); win.close(); setIsDownloading(false); }, 500);
   };
 
   const gapColor = gap >= 2 ? "#059669" : gap <= -2 ? "#DC2626" : "#94A3B8";
@@ -151,145 +276,120 @@ function SCurveContent() {
         </div>
       </div>
 
-      {/* Stat pills */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="bg-white border border-[#E2E8F0] rounded-xl p-4 shadow-sm flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[#EFF6FF] flex items-center justify-center shrink-0">
-            <TrendingUp size={18} className="text-[#2563EB]" />
+      <div ref={printRef}>
+      <Card className="!p-6 mb-4 shadow-sm">
+        {tasks.filter(t => !t.parentTaskId).length === 0 ? (
+          <div className="flex items-center justify-center h-[220px] text-[13px] text-[#8C959F]">
+            No tasks with dates found — add tasks to the schedule to see the S-Curve.
           </div>
-          <div>
-            <div className="text-[11px] font-bold text-[#94A3B8] uppercase tracking-[0.08em]">Actual</div>
-            <div className="text-[24px] font-bold text-[#2563EB] leading-none">{actualProgress}%</div>
-          </div>
-        </div>
-        <div className="bg-white border border-[#E2E8F0] rounded-xl p-4 shadow-sm flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[#F1F5F9] flex items-center justify-center shrink-0">
-            <Minus size={18} className="text-[#64748B]" />
-          </div>
-          <div>
-            <div className="text-[11px] font-bold text-[#94A3B8] uppercase tracking-[0.08em]">Planned</div>
-            <div className="text-[24px] font-bold text-[#64748B] leading-none">{plannedProgress}%</div>
-          </div>
-        </div>
-        <div className="bg-white border border-[#E2E8F0] rounded-xl p-4 shadow-sm flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-            style={{ background: gap >= 2 ? "#ECFDF5" : gap <= -2 ? "#FEF2F2" : "#F1F5F9" }}>
-            {gap >= 2
-              ? <TrendingUp size={18} className="text-[#059669]" />
-              : gap <= -2
-                ? <TrendingDown size={18} className="text-[#DC2626]" />
-                : <Minus size={18} className="text-[#94A3B8]" />
-            }
-          </div>
-          <div>
-            <div className="text-[11px] font-bold text-[#94A3B8] uppercase tracking-[0.08em]">Gap</div>
-            <div className="text-[24px] font-bold leading-none" style={{ color: gapColor }}>
-              {gap > 0 ? "+" : ""}{gap}%
-            </div>
-          </div>
-        </div>
-      </div>
+        ) : (
+          <svg viewBox="0 0 500 220" className="w-full" style={{ height: 220 }}>
+            <defs>
+              <linearGradient id="scg-actual" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#3A4EA2" stopOpacity="0.15" />
+                <stop offset="100%" stopColor="#3A4EA2" stopOpacity="0.01" />
+              </linearGradient>
+            </defs>
 
-      {/* Chart */}
-      <div className="bg-white border border-[#E2E8F0] rounded-xl shadow-sm overflow-hidden p-5">
-        <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="w-full" style={{ height: SVG_H }}>
-          <defs>
-            <linearGradient id="scFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#2563EB" stopOpacity="0.15" />
-              <stop offset="100%" stopColor="#2563EB" stopOpacity="0.02" />
-            </linearGradient>
-          </defs>
-
-          {/* Grid */}
-          {[0, 25, 50, 75, 100].map(v => {
-            const y = PAD_T + CHART_H - (v / 100) * CHART_H;
-            return (
+            {/* Grid lines */}
+            {[0, 20, 40, 60, 80, 100].map(v => (
               <g key={v}>
-                <line x1={PAD_L} y1={y} x2={PAD_L + CHART_W} y2={y} stroke="#F1F5F9" strokeWidth="1" />
-                <text x={PAD_L - 6} y={y + 4} fontSize="10" fill="#94A3B8" textAnchor="end" fontFamily="monospace">{v}%</text>
+                <line x1={X0} y1={toSvgY(v)} x2={X1} y2={toSvgY(v)} stroke="#f0f1f3" strokeWidth="1" />
+                <text x={X0 - 8} y={toSvgY(v) + 4} fontSize="9" fill="#8C959F" textAnchor="end" fontFamily="monospace">{v}%</text>
               </g>
-            );
-          })}
+            ))}
 
-          {/* X axis labels */}
-          {xLabels.map(({ label, x }, i) => (
-            <text key={i} x={x} y={PAD_T + CHART_H + 18} fontSize="10" fill="#94A3B8" textAnchor="middle" fontFamily="monospace">{label}</text>
-          ))}
+            {/* X-axis labels */}
+            {xLabels.map(({ label, svgX }, i) => (
+              <text key={i} x={svgX} y="210" fontSize="8" fill="#8C959F" textAnchor="middle" fontFamily="monospace">{label}</text>
+            ))}
 
-          {/* Planned line */}
-          <path d={buildPath(plannedPts)} fill="none" stroke="#CBD5E1" strokeWidth="2" strokeDasharray="7 4" />
+            {/* Today vertical line */}
+            {todayFrac > 0 && todayFrac < 1 && (
+              <>
+                <line x1={todaySvgX} y1={Y1} x2={todaySvgX} y2={Y0}
+                  stroke="#d4a017" strokeWidth="1" strokeDasharray="3 3" opacity="0.6" />
+                <text x={todaySvgX + 3} y={Y1 + 10} fontSize="8" fill="#d4a017" fontFamily="monospace">Today</text>
+              </>
+            )}
 
-          {/* Actual fill */}
-          {fillPath && <path d={fillPath} fill="url(#scFill)" />}
+            {/* Planned line (dashed) */}
+            {plannedPath && (
+              <path d={plannedPath} fill="none" stroke="#8C959F" strokeWidth="2" strokeDasharray="6 4" />
+            )}
 
-          {/* Actual line */}
-          {actualPts.length > 1 && (
-            <path d={buildPath(actualPts)} fill="none" stroke="#2563EB" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-          )}
+            {/* Actual area fill */}
+            {actualAreaPath && (
+              <path d={actualAreaPath} fill="url(#scg-actual)" />
+            )}
 
-          {/* Today marker */}
-          <line x1={todayX} y1={PAD_T} x2={todayX} y2={PAD_T + CHART_H} stroke="#E2E8F0" strokeWidth="1" strokeDasharray="4 3" />
+            {/* Actual line (solid) */}
+            {actualPath && (
+              <path d={actualPath} fill="none" stroke="#3A4EA2" strokeWidth="2.5" />
+            )}
 
-          {/* Gap annotation */}
-          {Math.abs(gap) >= 3 && (
-            <>
-              <line x1={todayX} y1={plannedY} x2={todayX} y2={actualY}
-                stroke={gapColor} strokeWidth="1.5" strokeDasharray="3 2" />
-              <rect x={todayX + 6} y={(plannedY + actualY) / 2 - 9} width="52" height="16" rx="4"
-                fill={gap >= 0 ? "#ECFDF5" : "#FEF2F2"} />
-              <text x={todayX + 32} y={(plannedY + actualY) / 2 + 4}
-                fontSize="10" fill={gapColor} fontWeight="700" fontFamily="monospace" textAnchor="middle">
-                {gap > 0 ? "+" : ""}{gap}%
-              </text>
-            </>
-          )}
+            {/* Endpoint dot on actual line */}
+            {actualPts.length > 0 && (
+              <circle
+                cx={actualPts[actualPts.length - 1][0]}
+                cy={actualPts[actualPts.length - 1][1]}
+                r="5" fill="#3A4EA2" stroke="#fff" strokeWidth="2" />
+            )}
 
-          {/* Endpoint dot */}
-          {actualPts.length > 0 && (
-            <circle cx={actualPts[actualPts.length - 1][0]} cy={actualPts[actualPts.length - 1][1]}
-              r="5" fill="#2563EB" stroke="#fff" strokeWidth="2" />
-          )}
+            {/* Gap annotation at today's x */}
+            {Math.abs(gap) >= 2 && todayFrac > 0 && todayFrac <= 1 && (
+              <>
+                <line x1={todaySvgX} y1={plannedYatToday} x2={todaySvgX} y2={actualYatToday}
+                  stroke="#CF222E" strokeWidth="1.5" strokeDasharray="3 2" />
+                <text x={todaySvgX + 6} y={(plannedYatToday + actualYatToday) / 2 + 3}
+                  fontSize="9" fill="#CF222E" fontWeight="700" fontFamily="monospace">
+                  {gap > 0 ? "+" : ""}{gap}% gap
+                </text>
+              </>
+            )}
 
-          {/* Legend */}
-          <line x1={PAD_L + 4} y1={12} x2={PAD_L + 24} y2={12} stroke="#CBD5E1" strokeWidth="2" strokeDasharray="5 3" />
-          <text x={PAD_L + 28} y={16} fontSize="11" fill="#64748B" fontFamily="system-ui">Planned</text>
-          <line x1={PAD_L + 90} y1={12} x2={PAD_L + 110} y2={12} stroke="#2563EB" strokeWidth="2.5" />
-          <text x={PAD_L + 114} y={16} fontSize="11" fill="#2563EB" fontFamily="system-ui">Actual</text>
-          <line x1={PAD_L + 165} y1={8} x2={PAD_L + 165} y2={18} stroke="#E2E8F0" strokeWidth="1" strokeDasharray="3 2" />
-          <text x={PAD_L + 170} y={16} fontSize="11" fill="#94A3B8" fontFamily="system-ui">Today</text>
-        </svg>
+            {/* Legend */}
+            <line x1="60" y1="10" x2="80" y2="10" stroke="#8C959F" strokeWidth="2" strokeDasharray="4 3" />
+            <text x="84" y="13" fontSize="9" fill="#8C959F" fontFamily="monospace">Planned</text>
+            <line x1="148" y1="10" x2="168" y2="10" stroke="#3A4EA2" strokeWidth="2.5" />
+            <text x="172" y="13" fontSize="9" fill="#3A4EA2" fontFamily="monospace">Actual</text>
+          </svg>
+        )}
+      </Card>
+
+      {/* Summary stats */}
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        {[
+          { label: "Planned Progress", value: `${plannedAtToday}%`, color: "#8C959F" },
+          { label: "Actual Progress",  value: `${actualNow}%`,      color: "#3A4EA2" },
+          { label: "Schedule Gap",     value: `${gap > 0 ? "+" : ""}${gap}%`, color: gap < -2 ? "#CF222E" : gap > 2 ? "#1a7f37" : "#8C959F" },
+        ].map(s => (
+          <Card key={s.label} className="!p-3 text-center shadow-sm">
+            <div className="text-[11px] text-[#8C959F] mb-1">{s.label}</div>
+            <div className="text-[20px] font-bold" style={{ color: s.color }}>{s.value}</div>
+          </Card>
+        ))}
       </div>
 
-      {/* AI Analysis — light card */}
-      <div className="bg-white border border-[#E2E8F0] rounded-xl shadow-sm overflow-hidden"
-        style={{ borderLeft: `4px solid ${gap <= -2 ? "#DC2626" : gap >= 2 ? "#059669" : "#94A3B8"}` }}>
-        <div className="px-5 py-4">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0"
-              style={{ background: gap <= -2 ? "#FEF2F2" : gap >= 2 ? "#ECFDF5" : "#F1F5F9" }}>
-              {gap <= -2
-                ? <TrendingDown size={13} className="text-[#DC2626]" />
-                : gap >= 2
-                  ? <TrendingUp size={13} className="text-[#059669]" />
-                  : <Minus size={13} className="text-[#94A3B8]" />
-              }
-            </div>
-            <span className="text-[12px] font-bold text-[#475569] uppercase tracking-[0.08em]">Schedule Intelligence</span>
-          </div>
-          <p className="text-[14px] text-[#334155] leading-relaxed">
-            {gap < -2 ? (
-              <>Project is <span className="font-bold text-[#DC2626]">{Math.abs(gap)}% behind</span> planned progress.
-              {" "}At current pace, the completion date is at risk of slipping.{" "}
-              <span className="font-semibold text-[#0F172A]">Review delayed tasks and accelerate critical path activities.</span></>
-            ) : gap > 2 ? (
-              <>Project is <span className="font-bold text-[#059669]">{gap}% ahead</span> of planned progress.{" "}
-              <span className="font-semibold text-[#0F172A]">Maintain current pace and monitor upcoming milestones.</span></>
-            ) : (
-              <>Project is <span className="font-bold text-[#475569]">on track</span> with planned progress at <span className="font-bold text-[#2563EB]">{actualProgress}%</span>.{" "}
-              <span className="font-semibold text-[#0F172A]">Continue momentum through upcoming phases.</span></>
-            )}
-          </p>
+      <Card className="!bg-[#0D1117] !text-[#c9d1d9] !border-[#30363d] shadow-lg">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="w-2 h-2 rounded-full bg-[#3FB950] animate-pulse" style={{ boxShadow: "0 0 6px #3FB950" }} />
+          <span className="text-xs font-bold text-[#3FB950] font-mono tracking-wide">AI S-CURVE ANALYSIS</span>
         </div>
+        <div className="text-[13px] leading-relaxed">
+          {gap < -2 ? (
+            <>Project is tracking <span className="text-[#ff8182] font-semibold">{Math.abs(gap)}% behind</span> planned progress.{" "}
+            If current pace continues, the project may slip beyond its target end date.{" "}
+            <span className="text-[#3FB950] font-semibold">Review delayed tasks and accelerate critical path activities.</span></>
+          ) : gap > 2 ? (
+            <>Project is <span className="text-[#3FB950] font-semibold">{gap}% ahead</span> of planned progress.{" "}
+            <span className="text-[#3FB950] font-semibold">Continue current pace and monitor upcoming milestones.</span></>
+          ) : (
+            <>Project is <span className="text-[#3FB950] font-semibold">on track</span> with planned progress at {actualNow}%.{" "}
+            <span className="text-[#3FB950] font-semibold">Maintain momentum through upcoming phases.</span></>
+          )}
+        </div>
+      </Card>
       </div>
     </div>
   );
@@ -297,7 +397,7 @@ function SCurveContent() {
 
 export default function SCurvePage() {
   return (
-    <Suspense fallback={<div className="p-6 text-[13px] text-[#94A3B8]">Loading...</div>}>
+    <Suspense fallback={<div className="p-6 text-sm text-[#8C959F]">Loading…</div>}>
       <SCurveContent />
     </Suspense>
   );

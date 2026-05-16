@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef, Suspense } from "react";
-import { CheckCircle, AlertTriangle, X, Loader, FileText, Sparkles, RefreshCw, Upload, ClipboardList, Table2, GitBranch, Layers, ArrowLeft, PenLine, Plus, Clock, Lock, Unlock, Bot, FolderOpen } from "lucide-react";
+import { useState, useCallback, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { parseCSVPreview, BLUQ_FIELDS } from "@/lib/mock-data";
 import { Card, SectionTitle, Btn } from "@/components/ui/bluq-ui";
@@ -13,14 +12,26 @@ import {
   fetchDocuments,
   deleteDocument,
   generateSchedule,
-  pollScheduleStatus,
-  fetchScheduleVersions,
   type ScheduleStatusResult,
   type BackendDocument,
   type ScheduleVersion,
 } from "@/lib/api-client";
+import { SCHEDULE_JOB_PREFIX, SCHEDULE_RESULT_PREFIX } from "@/hooks/useSchedulePoller";
 import { uploadFileToStorage } from "@/lib/supabase-storage";
 import { authClient } from "@/lib/auth-client";
+
+// ─── DOCS CACHE ─────────────────────────────────────────────────────────────
+function readDocsCache(projectId: string): BackendDocument[] | null {
+  try {
+    const raw = localStorage.getItem(`bluq_docs_${projectId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function writeDocsCache(projectId: string, docs: BackendDocument[]): void {
+  try {
+    localStorage.setItem(`bluq_docs_${projectId}`, JSON.stringify(docs));
+  } catch {}
+}
 
 // ─── TYPES ──────────────────────────────────────────────────────────────────
 
@@ -63,7 +74,8 @@ type FileEntry = {
   status: "pending" | "uploading" | "done" | "error";
   progress: number; // 0-100
   error?: string;
-  url?: string; // Supabase public URL after upload
+  url?: string;
+  docId?: string; // DB id after registerDocument — needed for deletion
 };
 
 type RealStep = "idle" | "uploading" | "ready" | "generating" | "done" | "error";
@@ -697,24 +709,92 @@ function RealImport({
   const [genResult, setGenResult] = useState<ScheduleStatusResult["result"] | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const [existingDocs, setExistingDocs] = useState<BackendDocument[]>([]);
-  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [deleteError, setDeleteError] = useState("");
 
-  // Cleanup polling on unmount
-  useEffect(() => () => { if (pollRef.current) clearTimeout(pollRef.current); }, []);
-
-  // Load existing documents for this project
+  // Load existing docs; restore UI state from localStorage
   useEffect(() => {
+    const savedResult = localStorage.getItem(`${SCHEDULE_RESULT_PREFIX}${projectId}`);
+    if (savedResult) {
+      try {
+        setGenResult(JSON.parse(savedResult));
+        setStep("done");
+        return;
+      } catch { localStorage.removeItem(`${SCHEDULE_RESULT_PREFIX}${projectId}`); }
+    }
+
+    const savedJobId = localStorage.getItem(`${SCHEDULE_JOB_PREFIX}${projectId}`);
+    if (savedJobId) setStep("generating");
+
+    // Show cached docs instantly so previously uploaded files appear immediately
+    const cachedDocs = readDocsCache(projectId);
+    if (cachedDocs && cachedDocs.length > 0) {
+      setExistingDocs(cachedDocs);
+      if (!savedJobId) setStep("ready");
+    }
+
+    // Fetch fresh from backend in background
     fetchDocuments(projectId, workspaceId)
-      .then(setExistingDocs)
-      .catch(() => {});
+      .then(docs => {
+        setExistingDocs(docs);
+        writeDocsCache(projectId, docs);
+        if (docs.length > 0 && !savedJobId) {
+          setStep(prev => prev === "idle" ? "ready" : prev);
+        } else if (docs.length === 0 && !savedJobId) {
+          setStep("idle");
+        }
+      })
+      .catch(err => console.error("fetchDocuments failed:", err));
   }, [projectId, workspaceId]);
 
-  const handleDeleteDoc = async (doc: BackendDocument) => {
+  // Warn on browser refresh/close when pending files exist
+  useEffect(() => {
+    const pending = files.some(f => f.status === "pending");
+    if (!pending) return;
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [files]);
+
+  // Listen to background poller events for live progress + completion
+  useEffect(() => {
+    const handleProgress = (e: Event) => {
+      const { projectId: pid, status } = (e as CustomEvent).detail;
+      if (pid !== projectId) return;
+      setJobStatus(status);
+    };
+
+    const handleDone = (e: Event) => {
+      const { projectId: pid, result, error } = (e as CustomEvent).detail;
+      if (pid !== projectId) return;
+      if (error) {
+        setErrorMsg(error);
+        setStep("error");
+      } else {
+        setGenResult(result ?? null);
+        setStep("done");
+      }
+    };
+
+    window.addEventListener("bluq_schedule_progress", handleProgress);
+    window.addEventListener("bluq_schedule_done", handleDone);
+    return () => {
+      window.removeEventListener("bluq_schedule_progress", handleProgress);
+      window.removeEventListener("bluq_schedule_done", handleDone);
+    };
+  }, [projectId]);
+
+  const handleDeleteDoc = async (docId: string) => {
+    setDeleteError("");
     try {
-      await deleteDocument(doc.id);
-      setExistingDocs(prev => prev.filter(d => d.id !== doc.id));
-    } catch (err) {
-      console.error("Failed to delete document:", err);
+      await deleteDocument(docId);
+      setExistingDocs(prev => {
+        const updated = prev.filter(d => d.id !== docId);
+        writeDocsCache(projectId, updated);
+        return updated;
+      });
+      setFiles(prev => prev.filter(f => f.docId !== docId));
+    } catch (err: any) {
+      setDeleteError(err.message ?? "Failed to delete file");
     }
   };
 
@@ -756,7 +836,7 @@ function RealImport({
           (pct) => setFiles(prev => prev.map((f, idx) => idx === i ? { ...f, progress: pct } : f))
         );
 
-        await registerDocument({
+        const doc = await registerDocument({
           workspaceId,
           projectId,
           fileName: entry.file.name,
@@ -766,15 +846,17 @@ function RealImport({
           folder: "Schedules",
         });
 
-        setFiles(prev => prev.map((f, idx) => idx === i ? { ...f, status: "done", progress: 100, url } : f));
+        setFiles(prev => prev.map((f, idx) => idx === i ? { ...f, status: "done", progress: 100, url, docId: doc.id } : f));
       } catch (err: any) {
         setFiles(prev => prev.map((f, idx) => idx === i ? { ...f, status: "error", error: err.message } : f));
       }
     }
 
     setStep("ready");
-    // Refresh existing docs list
-    fetchDocuments(projectId, workspaceId).then(setExistingDocs).catch(() => {});
+    // Refresh and cache existing docs list
+    fetchDocuments(projectId, workspaceId)
+      .then(docs => { setExistingDocs(docs); writeDocsCache(projectId, docs); })
+      .catch(err => console.error("fetchDocuments after upload:", err));
   };
 
   // Trigger schedule generation + start polling
@@ -792,37 +874,15 @@ function RealImport({
         city: city || undefined,
       });
 
-      startPolling(res.jobId);
+      localStorage.setItem(`${SCHEDULE_JOB_PREFIX}${projectId}`, res.jobId);
+      // Layout-level poller picks this up and polls in background
+      window.dispatchEvent(
+        new CustomEvent("bluq_schedule_started", { detail: { projectId, jobId: res.jobId } })
+      );
     } catch (err: any) {
       setErrorMsg(err.message ?? "Failed to start generation");
       setStep("error");
     }
-  };
-
-  const startPolling = (jobId: string) => {
-    const poll = async () => {
-      try {
-        const status = await pollScheduleStatus(jobId);
-        setJobStatus(status);
-
-        if (status.status === "completed") {
-          setGenResult(status.result ?? null);
-          setStep("done");
-          return;
-        }
-        if (status.status === "failed") {
-          setErrorMsg(status.error ?? status.message);
-          setStep("error");
-          return;
-        }
-
-        // Still running — poll again in 3s
-        pollRef.current = setTimeout(poll, 3000);
-      } catch {
-        pollRef.current = setTimeout(poll, 5000);
-      }
-    };
-    pollRef.current = setTimeout(poll, 3000);
   };
 
   const doneCount = files.filter(f => f.status === "done").length;
@@ -849,8 +909,11 @@ function RealImport({
             View Gantt →
           </button>
           <button
-            onClick={() => { setStep("idle"); setFiles([]); setJobStatus(null); setGenResult(null); }}
-            className="px-5 py-2 border border-[#E2E8F0] bg-white text-[#0F172A] rounded-md text-[13px] font-semibold hover:bg-[#F8FAFC]"
+            onClick={() => {
+              localStorage.removeItem(`${SCHEDULE_RESULT_PREFIX}${projectId}`);
+              setStep("idle"); setFiles([]); setJobStatus(null); setGenResult(null);
+            }}
+            className="px-5 py-2 border border-[#D0D7DE] bg-white text-[#24292f] rounded-md text-[13px] font-semibold hover:bg-[#f6f8fa]"
           >
             Upload More Files
           </button>
@@ -921,8 +984,45 @@ function RealImport({
             })}
           </div>
 
-          <div className="text-[11px] text-[#94A3B8]">This usually takes 30–90 seconds depending on document size.</div>
+          <div className="text-[11px] text-[#8C959F]">This usually takes 30–90 seconds depending on document size.</div>
+
+          <div className="pt-2 border-t border-[#f0f1f3]">
+            <button
+              onClick={() => {
+                localStorage.removeItem(`${SCHEDULE_JOB_PREFIX}${projectId}`);
+                setStep(existingDocs.length > 0 ? "ready" : "idle");
+                setJobStatus(null);
+              }}
+              className="text-[12px] text-[#8C959F] hover:text-[#CF222E] font-semibold transition-colors"
+            >
+              Cancel generation
+            </button>
+          </div>
         </Card>
+
+        {existingDocs.length > 0 && (
+          <div className="bg-white border border-[#D0D7DE] rounded-lg overflow-hidden">
+            <div className="px-4 py-2.5 bg-[#f6f8fa] border-b border-[#D0D7DE]">
+              <span className="text-[12px] font-bold text-[#24292f]">Files being used · {existingDocs.length} document{existingDocs.length !== 1 ? "s" : ""}</span>
+            </div>
+            <div className="divide-y divide-[#f0f1f3]">
+              {existingDocs.map(doc => (
+                <div key={doc.id} className="px-4 py-2.5 flex items-center gap-3">
+                  <span className="text-base shrink-0">📄</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[12px] font-semibold text-[#24292f] truncate">{doc.fileName}</div>
+                    <div className="text-[11px] text-[#8C959F]">{doc.fileType?.toUpperCase()} · {doc.fileSize ? `${(doc.fileSize / 1024 / 1024).toFixed(1)} MB` : "—"}</div>
+                  </div>
+                  <button
+                    onClick={() => handleDeleteDoc(doc.id)}
+                    className="text-[#CF222E] text-xs font-semibold hover:opacity-70 shrink-0"
+                    title="Remove document"
+                  >✕</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1007,8 +1107,8 @@ function RealImport({
                   </div>
                 </div>
                 <button
-                  onClick={() => handleDeleteDoc(doc)}
-                  className="text-[#DC2626] text-xs font-semibold hover:opacity-70 transition shrink-0"
+                  onClick={() => handleDeleteDoc(doc.id)}
+                  className="text-[#CF222E] text-xs font-semibold hover:opacity-70 transition shrink-0"
                   title="Remove document"
                 >
                   ✕
@@ -1071,11 +1171,16 @@ function RealImport({
                     <div className="text-[11px] text-[#DC2626] mt-0.5">{entry.error}</div>
                   )}
                 </div>
-                {entry.status === "pending" && (
-                  <button onClick={() => removeFile(i)} className="text-[#94A3B8] hover:text-[#DC2626] text-sm shrink-0">✕</button>
+                {(entry.status === "pending" || entry.status === "error") && (
+                  <button onClick={() => removeFile(i)} className="text-[#8C959F] hover:text-[#CF222E] text-sm shrink-0" title="Remove">✕</button>
                 )}
                 {entry.status === "done" && (
-                  <span className="text-[10px] text-[#059669] font-semibold shrink-0">Uploaded</span>
+                  <button
+                    onClick={() => entry.docId && handleDeleteDoc(entry.docId)}
+                    disabled={!entry.docId}
+                    className="text-[#8C959F] hover:text-[#CF222E] text-sm shrink-0 disabled:opacity-30"
+                    title="Delete file"
+                  >✕</button>
                 )}
               </div>
             ))}
@@ -1122,8 +1227,21 @@ function RealImport({
         </div>
       </Card>
 
+      {deleteError && (
+        <div className="px-3 py-2 bg-[#fff8c5] border border-[#d4a72c] rounded-md text-[12px] text-[#9a6700] font-semibold flex items-center justify-between">
+          <span>⚠️ {deleteError}</span>
+          <button onClick={() => setDeleteError("")} className="ml-3 hover:opacity-70">✕</button>
+        </div>
+      )}
+
+      {files.some(f => f.status === "pending") && (
+        <div className="px-3 py-2 bg-[#fff8c5] border border-[#d4a72c] rounded-md text-[12px] text-[#9a6700] font-semibold">
+          ⚠️ {files.filter(f => f.status === "pending").length} file{files.filter(f => f.status === "pending").length > 1 ? "s" : ""} not uploaded yet — will be lost if you navigate away
+        </div>
+      )}
+
       {/* ── STEP 2: Generate Schedule (shown after upload) ── */}
-      {step === "ready" && doneCount > 0 && (
+      {step === "ready" && (doneCount > 0 || existingDocs.length > 0) && (
         <Card className="space-y-4">
           <div>
             <div className="text-[13px] font-bold text-[#0F172A] mb-0.5">Generate Schedule</div>

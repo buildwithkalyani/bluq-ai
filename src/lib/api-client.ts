@@ -51,9 +51,7 @@ async function apiFetch<T>(path: string): Promise<T> {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
-  if (!res.ok) {
-    throw new Error(`API ${path} failed: ${res.status}`);
-  }
+  if (!res.ok) throw new Error(`API ${path} failed: ${res.status}`);
   return res.json();
 }
 
@@ -67,9 +65,7 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
     },
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    throw new Error(`API POST ${path} failed: ${res.status}`);
-  }
+  if (!res.ok) throw new Error(`API POST ${path} failed: ${res.status}`);
   return res.json();
 }
 
@@ -83,9 +79,7 @@ async function apiPatch<T>(path: string, body: unknown): Promise<T> {
     },
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    throw new Error(`API PATCH ${path} failed: ${res.status}`);
-  }
+  if (!res.ok) throw new Error(`API PATCH ${path} failed: ${res.status}`);
   return res.json();
 }
 
@@ -330,6 +324,7 @@ export interface BackendTask {
   percentComplete: string | null;
   contractor: string | null;
   area: string | null;
+  phase: string | null;
   isMilestone: boolean;
   parentTaskId: string | null;
   sortOrder: number;
@@ -359,7 +354,7 @@ function backendTaskToScheduleTask(t: BackendTask): ScheduleTask {
     contractor: t.contractor ?? "—",
     delay: isDelayed ? `${t.status === "delayed" ? "Delayed" : "Running late"}` : null,
     space: t.area ?? "",
-    phase: t.area ?? "",       // no separate phase in schema — use area
+    phase: t.phase ?? "",
     photos: [],
     milestone: t.isMilestone,
     parentTaskId: t.parentTaskId ?? undefined,
@@ -391,6 +386,7 @@ export async function createTask(data: {
   percentComplete?: number;
   contractor?: string;
   area?: string;
+  phase?: string;
   isMilestone?: boolean;
   parentTaskId?: string;
   priority?: string;
@@ -517,13 +513,13 @@ export async function fetchDPRHistory(
       day: "numeric",
       year: "numeric",
     }),
-    submittedBy: d.reportedBy ?? "WhatsApp",
+    submittedBy: d.source === "generated" ? "Generated PDF" : (d.reportedBy ?? "WhatsApp"),
     tasksSummary: d.workDone ?? "—",
     overallProgress: Number(d.percentComplete ?? 0),
     workersOnSite: d.labourCount ?? 0,
     issuesCount: d.delayReason ? 1 : 0,
     photosCount: 0,
-    status: "submitted" as const,
+    status: (d.source === "generated" ? "generated" : "submitted") as "generated" | "submitted",
   }));
 }
 

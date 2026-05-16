@@ -11,6 +11,7 @@ import { LiveActivityButton, LiveActivityPanel } from "@/components/LiveActivity
 import { PermissionsProvider, usePermissions } from "@/context/permissions";
 import { fetchProjects, fetchTasks, createProject, clearAuthTokenCache, isRealProject } from "@/lib/api-client";
 import { authClient } from "@/lib/auth-client";
+import { useSchedulePoller } from "@/hooks/useSchedulePoller";
 
 // ─── NAV CONFIGURATION ───────────────────────────────────────
 const NAV_ITEMS: { id: string; Icon: LucideIcon; label: string; href: string; subTabs: { label: string; href: string }[] }[] = [
@@ -582,7 +583,6 @@ function SidebarProfile({ collapsed }: { collapsed?: boolean }) {
   const handleLogout = async () => {
     setIsOpen(false);
     clearAuthTokenCache();
-    localStorage.removeItem("bluq_workspace");
     await authClient.signOut();
     router.push("/login");
   };
@@ -650,11 +650,14 @@ function SidebarProfile({ collapsed }: { collapsed?: boolean }) {
     </div>
   );
 }
-// ─── PROJECT KPI STRIP ───────────────────────────────────────
-type KPIData = { projectedEnd: string | null; plannedEnd: string | null; address: string | null };
+// ─── BACKGROUND SCHEDULE POLLER ─────────────────────────────
+function SchedulePollerMount() {
+  useSchedulePoller();
+  return null;
+}
 
-function ProjectKPIStrip() {
-  const searchParams = useSearchParams();
+// ─── MAIN COMPONENTS ────────────────────────────────────────
+function TopNav() {
   const pathname = usePathname();
   const { workspaceId, isDesignMode, loading: wsLoading } = useWorkspace();
   const { data: session } = authClient.useSession();
@@ -756,6 +759,33 @@ function TopNav() {
   );
 }
 
+function DashboardShell({ children }: { children: React.ReactNode }) {
+  const { loading } = useWorkspace();
+  if (loading) return (
+    <div className="h-screen bg-[#F6F8FA] flex items-center justify-center">
+      <div className="w-6 h-6 border-2 border-[#3A4EA2] border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+  return (
+    <div className="h-screen flex flex-col bg-[#F6F8FA] text-[#24292f]">
+      <Suspense fallback={null}>
+        <TopNav />
+      </Suspense>
+      <div className="flex-1 flex overflow-hidden">
+        <Suspense fallback={null}>
+          <Sidebar />
+        </Suspense>
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <Suspense fallback={null}>
+            <ProjectAwareSubTabs />
+          </Suspense>
+          <div className="flex-1 overflow-auto">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardLayout({
   children,
 }: {
@@ -763,26 +793,8 @@ export default function DashboardLayout({
 }) {
   return (
     <WorkspaceProvider>
-      <PermissionsProvider>
-      <ActivityFeedProvider>
-      <div className="h-screen flex flex-col bg-[#F1F5F9] text-[#0F172A]">
-        <Suspense fallback={null}>
-          <TopNav />
-        </Suspense>
-        <div className="flex-1 flex overflow-hidden">
-          <Suspense fallback={null}>
-            <Sidebar />
-          </Suspense>
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <Suspense fallback={null}>
-              <ProjectAwareSubTabs />
-            </Suspense>
-            <div className="flex-1 overflow-auto">{children}</div>
-          </div>
-        </div>
-      </div>
-      </ActivityFeedProvider>
-      </PermissionsProvider>
+      <SchedulePollerMount />
+      <DashboardShell>{children}</DashboardShell>
     </WorkspaceProvider>
   );
 }

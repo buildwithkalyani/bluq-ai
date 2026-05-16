@@ -334,6 +334,7 @@ export const tasks = pgTable("tasks", {
 	percentComplete: numeric("percent_complete", { precision: 5, scale: 2 }).default('0'),
 	contractor: text(),
 	area: text(),
+	phase: text(),
 	isMilestone: boolean("is_milestone").default(false),
 	parentTaskId: uuid("parent_task_id"),
 	sortOrder: integer("sort_order").default(0),
