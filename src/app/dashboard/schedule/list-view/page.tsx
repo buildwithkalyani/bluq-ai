@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef, Suspense } from 'react';
+import React, { useEffect, useState, useMemo, Suspense } from 'react';
+import { Search, Pencil, Trash2 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import {
   getScheduleTasks,
@@ -9,12 +10,23 @@ import {
   type ScheduleTask,
   type TaskDependency,
 } from "@/lib/mock-data";
-import { Card, StatusBadge, SectionTitle, Btn } from "@/components/ui/bluq-ui";
+import { Card, StatusBadge, Btn } from "@/components/ui/bluq-ui";
 import { fetchTasks, isRealProject, createTask, updateTask, deleteTask } from "@/lib/api-client";
 import { useWorkspace } from "@/context/workspace";
 
 const PHASE_ORDER = ["Site Preparation", "Foundation", "Structure", "MEP", "Finishing", "Handover"];
 type StatusKey = keyof typeof STATUS_CONFIG;
+type StatusFilter = StatusKey | "All";
+
+const effectiveStatus = (t: { status: string; pct: number; endDate?: string }): StatusKey => {
+  if (t.status === "completed") return "completed";
+  const today = new Date().toISOString().split("T")[0];
+  if (t.endDate && t.pct < 100 && t.endDate < today) return "delayed";
+  if (t.status === "notStarted" && t.pct > 0) return "inProgress";
+  return t.status as StatusKey;
+};
+
+const fmtD = (d: string) => new Date(d + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
 const avgPct = (ts: ScheduleTask[]) => {
   const parents = ts.filter(t => !t.parentTaskId);
@@ -37,6 +49,8 @@ function ListViewPageContent() {
     status: "notStarted" as StatusKey,
   });
   const [modalError, setModalError] = useState("");
+  const [menuOpenTaskId, setMenuOpenTaskId] = useState<string | null>(null);
+  const [filterStatus, setFilterStatus] = useState<StatusFilter>("All");
 
   const openAddModal = () => {
     setEditingTaskId(null);
@@ -66,6 +80,7 @@ function ListViewPageContent() {
   const selectedTaskData = tasks.find(t => t.id === selectedTask) ?? null;
 
   useEffect(() => {
+    if (wsLoading) return;
     setLoading(true);
     const taskLoader = real
       ? fetchTasks(projectIdParam, workspaceId!)
@@ -81,7 +96,7 @@ function ListViewPageContent() {
       setCollapsedAreas(new Set());
       setCollapsedTasks(new Set());
     });
-  }, [projectIdParam, workspaceId]);
+  }, [projectIdParam, workspaceId, wsLoading, isDesignMode]);
 
   const togglePhase = (p: string) =>
     setCollapsedPhases(prev => { const s = new Set(prev); s.has(p) ? s.delete(p) : s.add(p); return s; });
@@ -95,12 +110,16 @@ function ListViewPageContent() {
 
   const headerStats = useMemo(() => {
     const parents = tasks.filter(t => !t.parentTaskId);
-    const completed  = parents.filter(t => t.status === "completed").length;
-    const inProgress = parents.filter(t => t.status === "inProgress").length;
-    const atRisk     = parents.filter(t => t.status === "runningLate" || t.status === "delayed").length;
-    const total      = parents.length;
-    const overall    = total ? Math.round(parents.reduce((s, t) => s + t.pct, 0) / total) : 0;
-    return { completed, inProgress, atRisk, total, overall };
+    const completed   = parents.filter(t => effectiveStatus(t) === "completed").length;
+    const inProgress  = parents.filter(t => effectiveStatus(t) === "inProgress").length;
+    const runningLate = parents.filter(t => effectiveStatus(t) === "runningLate").length;
+    const delayed     = parents.filter(t => effectiveStatus(t) === "delayed").length;
+    const notStarted  = parents.filter(t => effectiveStatus(t) === "notStarted").length;
+    const total       = parents.length;
+    const overall     = total ? Math.round(parents.reduce((s, t) => s + t.pct, 0) / total) : 0;
+    const ends = parents.map(t => t.endDate).filter(Boolean).sort();
+    const projectedEnd = ends.length > 0 ? ends[ends.length - 1] : "2026-09-30";
+    return { completed, inProgress, runningLate, delayed, notStarted, total, overall, projectedEnd };
   }, [tasks]);
 
   const filteredTasks = useMemo(() => tasks.filter(t => {
@@ -109,8 +128,9 @@ function ListViewPageContent() {
     if (t.parentTaskId) return true;
     if (filterContractor !== "All" && t.contractor !== filterContractor) return false;
     if (filterSpace      !== "All" && t.space       !== filterSpace)      return false;
+    if (filterStatus !== "All" && effectiveStatus(t) !== filterStatus) return false;
     return true;
-  }), [tasks, search, filterContractor, filterSpace]);
+  }), [tasks, search, filterContractor, filterSpace, filterStatus]);
 
   // Phase → Area → Tasks
   const groupedData = useMemo(() => {
@@ -155,57 +175,71 @@ function ListViewPageContent() {
   if (loading) return (
     <div className="p-5">
       <div className="animate-pulse space-y-3">
-        <div className="h-6 w-36 bg-[#f0f1f3] rounded" />
-        <div className="h-[400px] bg-[#f0f1f3] rounded-lg" />
+        <div className="h-6 w-36 bg-[#E2E8F0] rounded" />
+        <div className="h-[400px] bg-white border border-[#E2E8F0] rounded-lg" />
       </div>
     </div>
   );
 
   return (
-    <div className="p-5 overflow-y-auto h-full bg-[#f6f8fa]">
-      {/* Toolbar */}
-      <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
-        <div className="flex items-center gap-5">
-          <SectionTitle>Task List</SectionTitle>
-          <div className="flex items-center gap-4 pl-4 border-l border-[#D0D7DE]">
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#22c55e] shrink-0" />
-              <span className="text-[12px] text-[#57606a] font-medium">{headerStats.completed} Completed</span>
+    <div className="overflow-y-auto h-full bg-[#F8FAFC] flex flex-col">
+      {/* Row 1: title + progress + handover */}
+      <div className="px-4 py-2.5 border-b border-[#E2E8F0] bg-white flex items-center justify-between flex-wrap gap-3">
+        <span className="text-[20px] font-bold text-[#0F172A]">List View</span>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-semibold text-[#94A3B8] uppercase tracking-wide">Progress</span>
+            <div className="w-[100px] h-1.5 bg-[#E2E8F0] rounded-full overflow-hidden">
+              <div className="h-full bg-[#2563EB] transition-all" style={{ width: `${headerStats.overall}%` }} />
             </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#3b82f6] shrink-0" />
-              <span className="text-[12px] text-[#57606a] font-medium">{headerStats.inProgress} In Progress</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#d97706] shrink-0" />
-              <span className="text-[12px] text-[#57606a] font-medium">{headerStats.atRisk} At Risk</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#94a3b8] shrink-0" />
-              <span className="text-[12px] text-[#57606a] font-medium">{headerStats.total} Total</span>
-            </div>
+            <span className="text-[13px] font-bold text-[#2563EB] tabular-nums">{headerStats.overall}%</span>
           </div>
-          <div className="flex items-center gap-2 pl-4 border-l border-[#D0D7DE]">
-            <span className="text-[12px] font-semibold text-[#3A4EA2]">Overall</span>
-            <div className="w-28 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-              <div className="h-full rounded-full bg-[#3A4EA2] transition-all" style={{ width: `${headerStats.overall}%` }} />
-            </div>
-            <span className="text-[13px] font-bold text-[#3A4EA2] tabular-nums">{headerStats.overall}%</span>
+          <div className="w-px h-4 bg-[#E2E8F0]" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-semibold text-[#94A3B8] uppercase tracking-wide">Projected Handover</span>
+            <span className="text-[13px] font-bold text-[#0F172A]">
+              {new Date(headerStats.projectedEnd).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}
+            </span>
           </div>
         </div>
+      </div>
+
+      {/* Row 2: filters + search + add */}
+      <div className="px-4 py-2 border-b border-[#E2E8F0] bg-white flex items-center justify-between gap-3">
+        <div className="flex items-center gap-1 flex-wrap">
+          {(Object.entries(STATUS_CONFIG) as [StatusKey, typeof STATUS_CONFIG[StatusKey]][]).map(([key, cfg]) => {
+            const countMap: Record<StatusKey, number> = {
+              completed: headerStats.completed, inProgress: headerStats.inProgress,
+              runningLate: headerStats.runningLate, delayed: headerStats.delayed, notStarted: headerStats.notStarted,
+            };
+            const active = filterStatus === key;
+            return (
+              <button key={key} onClick={() => setFilterStatus(filterStatus === key ? "All" : key)}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[13px] font-medium transition-all border ${active ? "border-current shadow-sm" : "border-transparent hover:border-[#E2E8F0]"}`}
+                style={{ color: cfg.color, background: active ? `${cfg.color}15` : "transparent" }}>
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: cfg.color }} />
+                <span className="font-semibold tabular-nums">{countMap[key]}</span>
+                <span>{cfg.label}</span>
+              </button>
+            );
+          })}
+          {filterStatus !== "All" && (
+            <button onClick={() => setFilterStatus("All")} className="ml-1 text-[10px] text-[#64748B] hover:text-[#1E293B] underline">Clear</button>
+          )}
+        </div>
         <div className="flex gap-3 items-center">
-          <div className="flex items-center gap-2 border border-[#D0D7DE] rounded-md px-2.5 py-1.5 bg-white shadow-sm focus-within:border-[#3A4EA2] transition-all">
-            <span className="text-[12px] text-[#8C959F]">🔍</span>
+          <div className="flex items-center gap-2 border border-[#E2E8F0] rounded-md px-2.5 py-1.5 bg-white shadow-sm focus-within:border-[#2563EB] transition-all">
+            <Search size={12} className="text-[#94A3B8] shrink-0" />
             <input type="text" placeholder="Search tasks..." value={search} onChange={e => setSearch(e.target.value)}
-              className="text-[13px] text-[#24292f] placeholder:text-[#8C959F] border-none outline-none bg-transparent w-40" />
+              className="text-[13px] text-[#0F172A] placeholder:text-[#94A3B8] border-none outline-none bg-transparent w-40" />
           </div>
           <select value={filterContractor} onChange={e => setFilterContractor(e.target.value)}
-            className="h-8 pl-2.5 pr-7 text-[12px] font-medium text-[#24292f] border border-[#D0D7DE] rounded-md bg-white shadow-sm appearance-none cursor-pointer outline-none"
+            className="h-8 pl-2.5 pr-7 text-[12px] font-medium text-[#0F172A] border border-[#E2E8F0] rounded-md bg-white shadow-sm appearance-none cursor-pointer outline-none"
             style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2357606a'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 6px center" }}>
             {contractorOptions.map(c => <option key={c} value={c}>{c === "All" ? "All Contractors" : c}</option>)}
           </select>
           <select value={filterSpace} onChange={e => setFilterSpace(e.target.value)}
-            className="h-8 pl-2.5 pr-7 text-[12px] font-medium text-[#24292f] border border-[#D0D7DE] rounded-md bg-white shadow-sm appearance-none cursor-pointer outline-none"
+            className="h-8 pl-2.5 pr-7 text-[12px] font-medium text-[#0F172A] border border-[#E2E8F0] rounded-md bg-white shadow-sm appearance-none cursor-pointer outline-none"
             style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2357606a'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 6px center" }}>
             {spaceOptions.map(s => <option key={s} value={s}>{s === "All" ? "All Spaces" : s}</option>)}
           </select>
@@ -213,43 +247,44 @@ function ListViewPageContent() {
         </div>
       </div>
 
+      <div className="p-5 flex-1 overflow-y-auto">
+
       {/* Table */}
-      <Card className="p-0 overflow-hidden shadow-sm border-[#D0D7DE]">
+      <Card className="p-0 overflow-hidden shadow-sm border-[#E2E8F0]">
         <table className="w-full border-collapse text-xs">
           <thead>
-            <tr className="bg-[#f6f8fa] border-b border-[#e1e4e8]">
+            <tr className="bg-[#F8FAFC] border-b border-[#E2E8F0]">
               {["#", "Task Name", "Contractor", "Space", "Start", "End", "%", "Status", ""].map((h, i) => (
-                <th key={i} className="px-4 py-2.5 text-left font-bold text-[#57606a] text-[11px] uppercase tracking-wider whitespace-nowrap">{h}</th>
+                <th key={i} className="px-4 py-3 text-left font-bold text-[#94A3B8] text-[11px] uppercase tracking-[0.08em] whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {groupedData.length === 0 && (
-              <tr><td colSpan={9} className="px-4 py-10 text-center text-[#57606a]">No tasks match your search criteria.</td></tr>
+              <tr><td colSpan={9} className="px-4 py-10 text-center text-[#475569]">No tasks match your search criteria.</td></tr>
             )}
             {groupedData.map(([phase, areas]) => {
               const phaseCollapsed = collapsedPhases.has(phase);
               const avg = avgPct(areas.flatMap(([, ts]) => ts));
 
               return (
-                <>
-                  {/* ── Phase row ── */}
-                  <tr key={`phase-${phase}`}
-                    className="bg-[#f0f1f3] border-b border-[#e1e4e8] cursor-pointer hover:bg-[#e8eaed] transition-colors"
+                <React.Fragment key={`phase-${phase}`}>
+                  <tr
+                    className="bg-[#F1F5F9] border-b border-[#E2E8F0] cursor-pointer hover:bg-[#e8eaed] transition-colors"
                     onClick={() => togglePhase(phase)}>
-                    <td className="px-4 py-2 text-[10px] text-[#8C959F]">
+                    <td className="px-4 py-2 text-[10px] text-[#94A3B8]">
                       {phaseCollapsed ? "▶" : "▼"}
                     </td>
-                    <td colSpan={5} className="px-4 py-2 font-semibold text-[#24292f] text-[12px]">
+                    <td colSpan={5} className="px-4 py-2 font-semibold text-[#0F172A] text-[13px]">
                       {phase}
-                      <span className="text-[#8C959F] font-normal ml-2 text-[11px]">— {avg}% avg</span>
+                      <span className="text-[#94A3B8] font-normal ml-2 text-[11px]">— {avg}% avg</span>
                     </td>
                     <td className="px-4 py-2">
                       <div className="flex items-center gap-2">
-                        <div className="w-20 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                          <div className="h-full rounded-full bg-[#3A4EA2]" style={{ width: `${avg}%` }} />
+                        <div className="w-20 h-1.5 bg-[#E2E8F0] rounded-full overflow-hidden">
+                          <div className="h-full rounded-full bg-[#2563EB]" style={{ width: `${avg}%` }} />
                         </div>
-                        <span className="text-[10px] font-bold text-[#3A4EA2] tabular-nums">{avg}%</span>
+                        <span className="text-[10px] font-bold text-[#2563EB] tabular-nums">{avg}%</span>
                       </div>
                     </td>
                     <td colSpan={2} />
@@ -261,23 +296,23 @@ function ListViewPageContent() {
                     const areaAvg = avgPct(ts);
 
                     return (
-                      <>
+                      <React.Fragment key={`area-${areaKey}`}>
                         {/* ── Area row ── */}
-                        <tr key={`area-${areaKey}`}
-                          className="bg-[#f8fafc] border-b border-[#e1e4e8] cursor-pointer hover:bg-[#f0f6fc] transition-colors"
+                        <tr
+                          className="bg-[#f8fafc] border-b border-[#E2E8F0] cursor-pointer hover:bg-[#f0f6fc] transition-colors"
                           onClick={() => toggleArea(areaKey)}>
-                          <td className="py-1.5 text-[9px] text-[#8C959F] pl-8">
+                          <td className="py-1.5 text-[9px] text-[#94A3B8] pl-8">
                             {areaCollapsed ? "▶" : "▼"}
                           </td>
-                          <td colSpan={5} className="px-4 py-1.5 text-[11px] font-semibold text-[#57606a]">
+                          <td colSpan={5} className="px-4 py-1.5 text-[12px] font-semibold text-[#475569]">
                             {area}
                           </td>
                           <td className="px-4 py-1.5">
                             <div className="flex items-center gap-1.5">
-                              <div className="w-14 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                                <div className="h-full rounded-full bg-[#3A4EA2]" style={{ width: `${areaAvg}%` }} />
+                              <div className="w-14 h-1.5 bg-[#E2E8F0] rounded-full overflow-hidden">
+                                <div className="h-full rounded-full bg-[#2563EB]" style={{ width: `${areaAvg}%` }} />
                               </div>
-                              <span className="text-[10px] font-bold text-[#3A4EA2] tabular-nums">{areaAvg}%</span>
+                              <span className="text-[10px] font-bold text-[#2563EB] tabular-nums">{areaAvg}%</span>
                             </div>
                           </td>
                           <td colSpan={2} />
@@ -293,39 +328,69 @@ function ListViewPageContent() {
                           rows.push(
                             <tr key={t.id}
                               onClick={() => setSelectedTask(selectedTask === t.id ? null : t.id)}
-                              className={`border-b border-[#f0f1f3] cursor-pointer transition-colors group ${selectedTask === t.id ? "bg-[#ddf4ff]" : "bg-white hover:bg-[#f6f8fa]"}`}>
+                              className={`border-b border-[#F1F5F9] cursor-pointer transition-colors group ${selectedTask === t.id ? "bg-[#EFF6FF]" : "bg-white hover:bg-[#F8FAFC]"}`}>
                               <td className="px-4 py-2.5 whitespace-nowrap">
                                 <div className="flex items-center gap-1">
-                                  <span className="text-[9px] text-[#8C959F] w-3 text-center cursor-pointer"
+                                  <span className="text-[9px] text-[#94A3B8] w-3 text-center cursor-pointer"
                                     onClick={e => { e.stopPropagation(); if (hasChildren) toggleTask(t.id); }}>
                                     {hasChildren ? (taskCollapsed ? "▶" : "▼") : ""}
                                   </span>
-                                  <span className="text-[10px] text-[#8C959F] font-mono">{wbsMap[t.id]}</span>
+                                  <span className="text-[10px] text-[#94A3B8] font-mono">{wbsMap[t.id]}</span>
                                 </div>
                               </td>
-                              <td className="px-4 py-2.5 font-semibold text-[#24292f] text-[12px]">
+                              <td className="px-4 py-2.5 font-semibold text-[#0F172A] text-[13px]">
                                 {t.name}
                                 {t.delay && (
                                   <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold font-mono"
-                                    style={{ background: t.status === "delayed" ? "#ffebe9" : "#fff8c5", color: t.status === "delayed" ? "#CF222E" : "#9A6700" }}>
+                                    style={{ background: t.status === "delayed" ? "#FEF2F2" : "#FFFBEB", color: t.status === "delayed" ? "#DC2626" : "#D97706" }}>
                                     {t.delay}
                                   </span>
                                 )}
                               </td>
-                              <td className="px-4 py-2.5 text-[#57606a] text-[11px]">{t.contractor}</td>
-                              <td className="px-4 py-2.5 text-[#57606a] text-[11px]">{t.space}</td>
-                              <td className="px-4 py-2.5 font-mono text-[11px] text-[#57606a]">{t.startDate}</td>
-                              <td className="px-4 py-2.5 font-mono text-[11px] text-[#57606a]">{t.endDate}</td>
+                              <td className="px-4 py-2.5 text-[#475569] text-[12px]">{t.contractor}</td>
+                              <td className="px-4 py-2.5 text-[#475569] text-[12px]">{t.space}</td>
+                              <td className="px-4 py-2.5 text-[12px] text-[#475569]">{fmtD(t.startDate)}</td>
+                              <td className="px-4 py-2.5 text-[12px] text-[#475569]">{fmtD(t.endDate)}</td>
                               <td className="px-4 py-2.5">
                                 <div className="flex items-center gap-2">
-                                  <div className="w-12 h-1.5 bg-[#e1e4e8] rounded-full overflow-hidden">
+                                  <div className="w-12 h-1.5 bg-[#E2E8F0] rounded-full overflow-hidden">
                                     <div className="h-full rounded-full" style={{ width: `${t.pct}%`, background: sc.color }} />
                                   </div>
                                   <span className="font-mono font-bold text-[11px]" style={{ color: sc.color }}>{t.pct}%</span>
                                 </div>
                               </td>
                               <td className="px-4 py-2.5"><StatusBadge status={t.status} /></td>
-                              <td className="px-4 py-2.5 text-[#8C959F] text-right group-hover:text-[#24292f]">⋮</td>
+                              <td className="px-4 py-2.5 text-right relative" onClick={e => e.stopPropagation()}>
+                                <button
+                                  onClick={() => setMenuOpenTaskId(menuOpenTaskId === t.id ? null : t.id)}
+                                  className="w-6 h-6 rounded flex items-center justify-center text-[#94A3B8] hover:text-[#0F172A] hover:bg-[#F1F5F9] transition-colors opacity-0 group-hover:opacity-100"
+                                >⋮</button>
+                                {menuOpenTaskId === t.id && (
+                                  <>
+                                    <div className="fixed inset-0 z-20" onClick={() => setMenuOpenTaskId(null)} />
+                                    <div className="absolute right-2 top-8 w-32 bg-white border border-[#E2E8F0] rounded-lg shadow-xl py-1 z-30">
+                                      <button
+                                        onClick={() => { openEditModal(t); setMenuOpenTaskId(null); }}
+                                        className="w-full text-left px-3 py-1.5 text-[12px] text-[#0F172A] hover:bg-[#F8FAFC] flex items-center gap-2 transition-colors"
+                                      >
+                                        <Pencil size={11} className="text-[#94A3B8]" /> Edit
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          if (real) deleteTask(t.id).catch(console.error);
+                                          setTasks(p => p.filter(x => x.id !== t.id));
+                                          setDeps(p => p.filter(d => d.from !== t.id && d.to !== t.id));
+                                          if (selectedTask === t.id) setSelectedTask(null);
+                                          setMenuOpenTaskId(null);
+                                        }}
+                                        className="w-full text-left px-3 py-1.5 text-[12px] text-[#DC2626] hover:bg-red-50 flex items-center gap-2 transition-colors"
+                                      >
+                                        <Trash2 size={11} /> Delete
+                                      </button>
+                                    </div>
+                                  </>
+                                )}
+                              </td>
                             </tr>
                           );
 
@@ -335,23 +400,23 @@ function ListViewPageContent() {
                               rows.push(
                                 <tr key={s.id}
                                   onClick={() => setSelectedTask(selectedTask === s.id ? null : s.id)}
-                                  className={`border-b border-[#f0f1f3] cursor-pointer transition-colors ${selectedTask === s.id ? "bg-[#ddf4ff]" : "bg-[#fafbfc] hover:bg-[#f0f1f3]"}`}>
+                                  className={`border-b border-[#F1F5F9] cursor-pointer transition-colors ${selectedTask === s.id ? "bg-[#EFF6FF]" : "bg-[#fafbfc] hover:bg-[#F1F5F9]"}`}>
                                   <td className="px-4 py-2 whitespace-nowrap">
                                     <div className="flex items-center gap-1 pl-5">
-                                      <span className="text-[10px] text-[#8C959F] font-mono">{wbsMap[s.id]}</span>
+                                      <span className="text-[10px] text-[#94A3B8] font-mono">{wbsMap[s.id]}</span>
                                     </div>
                                   </td>
                                   <td className="px-4 py-2 pl-8">
-                                    <span className="text-gray-300 mr-1.5 text-[11px]">└</span>
-                                    <span className="text-[#57606a] font-normal text-[11px]">{s.name}</span>
+                                    <span className="text-[#CBD5E1] mr-1.5 text-[12px]">└</span>
+                                    <span className="text-[#475569] font-normal text-[12px]">{s.name}</span>
                                   </td>
-                                  <td className="px-4 py-2 text-[#57606a] text-[11px]">{s.contractor}</td>
-                                  <td className="px-4 py-2 text-[#57606a] text-[11px]">{s.space}</td>
-                                  <td className="px-4 py-2 font-mono text-[11px] text-[#57606a]">{s.startDate}</td>
-                                  <td className="px-4 py-2 font-mono text-[11px] text-[#57606a]">{s.endDate}</td>
+                                  <td className="px-4 py-2 text-[#475569] text-[12px]">{s.contractor}</td>
+                                  <td className="px-4 py-2 text-[#475569] text-[12px]">{s.space}</td>
+                                  <td className="px-4 py-2 text-[12px] text-[#475569]">{fmtD(s.startDate)}</td>
+                                  <td className="px-4 py-2 text-[12px] text-[#475569]">{fmtD(s.endDate)}</td>
                                   <td className="px-4 py-2">
                                     <div className="flex items-center gap-2">
-                                      <div className="w-12 h-1.5 bg-[#e1e4e8] rounded-full overflow-hidden">
+                                      <div className="w-12 h-1.5 bg-[#E2E8F0] rounded-full overflow-hidden">
                                         <div className="h-full rounded-full" style={{ width: `${s.pct}%`, background: ss.color }} />
                                       </div>
                                       <span className="font-mono font-bold text-[11px]" style={{ color: ss.color }}>{s.pct}%</span>
@@ -365,10 +430,10 @@ function ListViewPageContent() {
                           }
                           return rows;
                         })}
-                      </>
+                      </React.Fragment>
                     );
                   })}
-                </>
+                </React.Fragment>
               );
             })}
           </tbody>
@@ -377,69 +442,69 @@ function ListViewPageContent() {
 
       {/* Side Panel */}
       {selectedTaskData && (
-        <div className="fixed right-0 top-0 h-full w-[320px] bg-white border-l border-[#D0D7DE] shadow-xl z-40 flex flex-col">
-          <div className="p-4 border-b border-[#D0D7DE] flex justify-between items-start">
+        <div className="fixed right-0 top-[57px] h-[calc(100%-57px)] w-[320px] bg-white border-l border-[#E2E8F0] shadow-xl z-40 flex flex-col">
+          <div className="p-4 border-b border-[#E2E8F0] flex justify-between items-start">
             <div>
-              <div className="text-[13px] font-semibold text-[#24292f]">{selectedTaskData.name}</div>
-              <div className="text-[11px] text-[#8C959F] mt-0.5">{selectedTaskData.phase} · {selectedTaskData.contractor} · {selectedTaskData.space}</div>
+              <div className="text-[13px] font-semibold text-[#0F172A]">{selectedTaskData.name}</div>
+              <div className="text-[11px] text-[#94A3B8] mt-0.5">{selectedTaskData.phase} · {selectedTaskData.contractor} · {selectedTaskData.space}</div>
             </div>
-            <button onClick={() => setSelectedTask(null)} className="text-[#8C959F] hover:text-[#24292f]">✕</button>
+            <button onClick={() => setSelectedTask(null)} className="text-[#94A3B8] hover:text-[#0F172A]">✕</button>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             <div>
-              <div className="text-[10px] font-bold text-[#8C959F] uppercase mb-1">Status</div>
+              <div className="text-[10px] font-bold text-[#94A3B8] uppercase mb-1">Status</div>
               <span className="inline-flex px-2 py-0.5 rounded text-[11px] font-semibold"
                 style={{ background: `${STATUS_CONFIG[selectedTaskData.status].color}18`, color: STATUS_CONFIG[selectedTaskData.status].color }}>
                 {STATUS_CONFIG[selectedTaskData.status].label}
               </span>
             </div>
             <div>
-              <div className="text-[10px] font-bold text-[#8C959F] uppercase mb-1">Progress</div>
+              <div className="text-[10px] font-bold text-[#94A3B8] uppercase mb-1">Progress</div>
               <div className="flex items-center gap-2">
-                <div className="flex-1 h-2 bg-[#e1e4e8] rounded-full overflow-hidden">
+                <div className="flex-1 h-2 bg-[#E2E8F0] rounded-full overflow-hidden">
                   <div className="h-full rounded-full" style={{ width: `${selectedTaskData.pct}%`, background: STATUS_CONFIG[selectedTaskData.status].color }} />
                 </div>
                 <span className="text-[12px] font-bold font-mono" style={{ color: STATUS_CONFIG[selectedTaskData.status].color }}>{selectedTaskData.pct}%</span>
               </div>
             </div>
             <div>
-              <div className="text-[10px] font-bold text-[#8C959F] uppercase mb-1">Schedule</div>
-              <div className="text-[12px] text-[#24292f]">{selectedTaskData.startDate} → {selectedTaskData.endDate}</div>
-              <div className="text-[11px] text-[#8C959F] mt-0.5">Duration: {selectedTaskData.duration}</div>
+              <div className="text-[10px] font-bold text-[#94A3B8] uppercase mb-1">Schedule</div>
+              <div className="text-[12px] text-[#0F172A]">{fmtD(selectedTaskData.startDate)} → {fmtD(selectedTaskData.endDate)}</div>
+              <div className="text-[11px] text-[#94A3B8] mt-0.5">Duration: {selectedTaskData.duration}</div>
               {selectedTaskData.delay && (
                 <span className="mt-1 inline-block px-1.5 py-0.5 rounded text-[10px] font-bold"
-                  style={{ background: "#ffebe9", color: "#CF222E" }}>{selectedTaskData.delay}</span>
+                  style={{ background: "#FEF2F2", color: "#DC2626" }}>{selectedTaskData.delay}</span>
               )}
             </div>
             {deps.filter(d => d.to === selectedTaskData.id).length > 0 && (
               <div>
-                <div className="text-[10px] font-bold text-[#8C959F] uppercase mb-1">Predecessors</div>
+                <div className="text-[10px] font-bold text-[#94A3B8] uppercase mb-1">Predecessors</div>
                 {deps.filter(d => d.to === selectedTaskData.id).map((d, i) => (
-                  <div key={i} className="flex justify-between text-[11px] py-1 border-b border-[#f0f1f3]">
-                    <span className="text-[#24292f]">{tasks.find(t => t.id === d.from)?.name}</span>
-                    <span className="text-[#8C959F] font-mono">({d.type})</span>
+                  <div key={i} className="flex justify-between text-[11px] py-1 border-b border-[#F1F5F9]">
+                    <span className="text-[#0F172A]">{tasks.find(t => t.id === d.from)?.name}</span>
+                    <span className="text-[#94A3B8] font-mono">({d.type})</span>
                   </div>
                 ))}
               </div>
             )}
             {deps.filter(d => d.from === selectedTaskData.id).length > 0 && (
               <div>
-                <div className="text-[10px] font-bold text-[#8C959F] uppercase mb-1">Successors</div>
+                <div className="text-[10px] font-bold text-[#94A3B8] uppercase mb-1">Successors</div>
                 {deps.filter(d => d.from === selectedTaskData.id).map((d, i) => (
-                  <div key={i} className="flex justify-between text-[11px] py-1 border-b border-[#f0f1f3]">
-                    <span className="text-[#24292f]">{tasks.find(t => t.id === d.to)?.name}</span>
-                    <span className="text-[#8C959F] font-mono">({d.type})</span>
+                  <div key={i} className="flex justify-between text-[11px] py-1 border-b border-[#F1F5F9]">
+                    <span className="text-[#0F172A]">{tasks.find(t => t.id === d.to)?.name}</span>
+                    <span className="text-[#94A3B8] font-mono">({d.type})</span>
                   </div>
                 ))}
               </div>
             )}
           </div>
-          <div className="p-4 border-t border-[#D0D7DE] flex gap-2">
-            <button onClick={() => openEditModal(selectedTaskData)} className="flex-1 py-1.5 text-[12px] font-semibold rounded-md bg-[#ddf4ff] border border-[#3A4EA2] text-[#3A4EA2] hover:bg-[#b6e3ff] transition-colors">Edit</button>
+          <div className="p-4 border-t border-[#E2E8F0] flex gap-2">
+            <button onClick={() => openEditModal(selectedTaskData)} className="flex-1 py-1.5 text-[12px] font-semibold rounded-md bg-[#EFF6FF] border border-[#2563EB] text-[#2563EB] hover:bg-[#b6e3ff] transition-colors">Edit</button>
             <button onClick={() => { if (window.confirm(`Delete "${selectedTaskData.name}"?`)) {
               if (real) deleteTask(selectedTaskData.id).catch(console.error);
               setTasks(p => p.filter(t => t.id !== selectedTaskData.id)); setDeps(p => p.filter(d => d.from !== selectedTaskData.id && d.to !== selectedTaskData.id)); setSelectedTask(null); }}}
-              className="flex-1 py-1.5 text-[12px] font-semibold rounded-md bg-[#ffebe9] border border-[#CF222E] text-[#CF222E] hover:bg-[#ffc1bd] transition-colors">Delete</button>
+              className="flex-1 py-1.5 text-[12px] font-semibold rounded-md bg-[#FEF2F2] border border-[#DC2626] text-[#DC2626] hover:bg-[#ffc1bd] transition-colors">Delete</button>
           </div>
         </div>
       )}
@@ -448,94 +513,94 @@ function ListViewPageContent() {
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#09090b]/40 backdrop-blur-sm">
           <div className="bg-white w-full max-w-lg rounded-xl shadow-2xl flex flex-col overflow-hidden">
-            <div className="flex justify-between items-center px-5 py-4 border-b border-[#e1e4e8]">
-              <h2 className="text-[15px] font-bold text-[#24292f]">{editingTaskId ? "Edit Task" : "Add New Task"}</h2>
-              <button onClick={() => { setIsModalOpen(false); setModalError(""); }} className="text-[#57606a] hover:text-[#24292f]">✕</button>
+            <div className="flex justify-between items-center px-5 py-4 border-b border-[#E2E8F0]">
+              <h2 className="text-[15px] font-bold text-[#0F172A]">{editingTaskId ? "Edit Task" : "Add New Task"}</h2>
+              <button onClick={() => { setIsModalOpen(false); setModalError(""); }} className="text-[#475569] hover:text-[#0F172A]">✕</button>
             </div>
 
             <div className="p-5 space-y-4 overflow-y-auto max-h-[70vh]">
               {/* Name */}
               <div>
-                <label className="block text-[11px] font-bold text-[#57606a] mb-1.5 uppercase tracking-wider">Task Name *</label>
+                <label className="block text-[11px] font-bold text-[#475569] mb-1.5 uppercase tracking-wider">Task Name *</label>
                 <input type="text" placeholder="e.g. Column Formwork Level 3"
                   value={newTask.name} onChange={e => setNewTask({ ...newTask, name: e.target.value })}
-                  className="w-full bg-white border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#3A4EA2]" />
+                  className="w-full bg-white border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#2563EB]" />
               </div>
 
               {/* Phase + Space */}
               <div className="flex gap-3">
                 <div className="flex-1">
-                  <label className="block text-[11px] font-bold text-[#57606a] mb-1.5 uppercase tracking-wider">Phase *</label>
+                  <label className="block text-[11px] font-bold text-[#475569] mb-1.5 uppercase tracking-wider">Phase *</label>
                   <select value={newTask.phase} onChange={e => setNewTask({ ...newTask, phase: e.target.value })}
-                    className="w-full bg-white border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#3A4EA2]">
+                    className="w-full bg-white border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#2563EB]">
                     <option value="">Select phase…</option>
                     {["Site Preparation","Foundation","Structure","MEP","Finishing","Handover"].map(p =>
                       <option key={p} value={p}>{p}</option>)}
                   </select>
                 </div>
                 <div className="flex-1">
-                  <label className="block text-[11px] font-bold text-[#57606a] mb-1.5 uppercase tracking-wider">Space / Zone</label>
+                  <label className="block text-[11px] font-bold text-[#475569] mb-1.5 uppercase tracking-wider">Space / Zone</label>
                   <input type="text" placeholder="e.g. Zone A — L3"
                     value={newTask.space} onChange={e => setNewTask({ ...newTask, space: e.target.value })}
-                    className="w-full bg-white border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#3A4EA2]" />
+                    className="w-full bg-white border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#2563EB]" />
                 </div>
               </div>
 
               {/* Contractor */}
               <div>
-                <label className="block text-[11px] font-bold text-[#57606a] mb-1.5 uppercase tracking-wider">Contractor</label>
+                <label className="block text-[11px] font-bold text-[#475569] mb-1.5 uppercase tracking-wider">Contractor</label>
                 <input type="text" placeholder="e.g. Rajesh Kumar"
                   value={newTask.contractor} onChange={e => setNewTask({ ...newTask, contractor: e.target.value })}
-                  className="w-full bg-white border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#3A4EA2]" />
+                  className="w-full bg-white border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#2563EB]" />
               </div>
 
               {/* Start + End */}
               <div className="flex gap-3">
                 <div className="flex-1">
-                  <label className="block text-[11px] font-bold text-[#57606a] mb-1.5 uppercase tracking-wider">Start Date *</label>
+                  <label className="block text-[11px] font-bold text-[#475569] mb-1.5 uppercase tracking-wider">Start Date *</label>
                   <input type="date" value={newTask.startDate} onChange={e => setNewTask({ ...newTask, startDate: e.target.value })}
-                    className="w-full bg-white border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#3A4EA2] text-[#24292f]" />
+                    className="w-full bg-white border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#2563EB] text-[#0F172A]" />
                 </div>
                 <div className="flex-1">
-                  <label className="block text-[11px] font-bold text-[#57606a] mb-1.5 uppercase tracking-wider">End Date *</label>
+                  <label className="block text-[11px] font-bold text-[#475569] mb-1.5 uppercase tracking-wider">End Date *</label>
                   <input type="date" value={newTask.endDate} onChange={e => setNewTask({ ...newTask, endDate: e.target.value })}
-                    className="w-full bg-white border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#3A4EA2] text-[#24292f]" />
+                    className="w-full bg-white border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#2563EB] text-[#0F172A]" />
                 </div>
               </div>
 
               {/* Status + % Complete */}
               <div className="flex gap-3">
                 <div className="flex-1">
-                  <label className="block text-[11px] font-bold text-[#57606a] mb-1.5 uppercase tracking-wider">Status</label>
+                  <label className="block text-[11px] font-bold text-[#475569] mb-1.5 uppercase tracking-wider">Status</label>
                   <select value={newTask.status} onChange={e => {
                     const s = e.target.value as StatusKey;
                     setNewTask({ ...newTask, status: s, pct: s === "completed" ? 100 : s === "notStarted" ? 0 : newTask.pct });
                   }}
-                    className="w-full bg-white border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#3A4EA2]">
+                    className="w-full bg-white border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#2563EB]">
                     {(Object.entries(STATUS_CONFIG) as [StatusKey, typeof STATUS_CONFIG[StatusKey]][]).map(([k, v]) =>
                       <option key={k} value={k}>{v.label}</option>)}
                   </select>
                 </div>
                 <div className="flex-1">
-                  <label className="block text-[11px] font-bold text-[#57606a] mb-1.5 uppercase tracking-wider">% Complete</label>
+                  <label className="block text-[11px] font-bold text-[#475569] mb-1.5 uppercase tracking-wider">% Complete</label>
                   <div className="flex items-center gap-2">
                     <input type="range" min={0} max={100} step={5}
                       value={newTask.pct} onChange={e => {
                         const p = Number(e.target.value);
                         setNewTask({ ...newTask, pct: p, status: p === 100 ? "completed" : p === 0 ? "notStarted" : newTask.status });
                       }}
-                      className="flex-1 accent-[#3A4EA2]" />
-                    <span className="text-[13px] font-bold font-mono text-[#3A4EA2] w-10 text-right">{newTask.pct}%</span>
+                      className="flex-1 accent-[#2563EB]" />
+                    <span className="text-[13px] font-bold font-mono text-[#2563EB] w-10 text-right">{newTask.pct}%</span>
                   </div>
                 </div>
               </div>
 
-              {modalError && <p className="text-[12px] text-[#CF222E] font-semibold">{modalError}</p>}
+              {modalError && <p className="text-[12px] text-[#DC2626] font-semibold">{modalError}</p>}
             </div>
 
-            <div className="px-5 py-4 border-t border-[#e1e4e8] bg-[#f6f8fa] flex justify-end gap-2.5">
+            <div className="px-5 py-4 border-t border-[#E2E8F0] bg-[#F8FAFC] flex justify-end gap-2.5">
               <button onClick={() => { setIsModalOpen(false); setModalError(""); }}
-                className="px-4 py-1.5 text-[13px] font-semibold text-[#24292f] bg-white border border-[#D0D7DE] rounded-md hover:bg-[#f6f8fa]">Cancel</button>
+                className="px-4 py-1.5 text-[13px] font-semibold text-[#0F172A] bg-white border border-[#E2E8F0] rounded-lg hover:bg-[#F8FAFC]">Cancel</button>
               <button
                 onClick={() => {
                   if (!newTask.name.trim()) return setModalError("Task name is required.");
@@ -556,7 +621,7 @@ function ListViewPageContent() {
                         percentComplete: String(newTask.pct),
                         contractor: newTask.contractor || null,
                         area: newTask.space || null,
-                      }).then(updated => {
+                      }).then(() => {
                         setTasks(prev => prev.map(t => t.id === editingTaskId ? {
                           ...t, name: newTask.name.trim(), phase: newTask.phase, space: newTask.space || "General",
                           contractor: newTask.contractor || "—", startDate: newTask.startDate, endDate: newTask.endDate,
@@ -608,20 +673,21 @@ function ListViewPageContent() {
                   setEditingTaskId(null);
                   setNewTask({ name: "", phase: "", space: "", contractor: "", startDate: "", endDate: "", pct: 0, status: "notStarted" });
                 }}
-                className="px-4 py-1.5 text-[13px] font-semibold text-white bg-[#3A4EA2] rounded-md hover:bg-[#0353A4] shadow-sm">
+                className="px-4 py-1.5 text-[13px] font-semibold text-white bg-[#2563EB] rounded-lg hover:bg-[#1D4ED8] shadow-sm">
                 {editingTaskId ? "Save Changes" : "Add Task"}
               </button>
             </div>
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
 
 export default function ListViewPage() {
   return (
-    <Suspense fallback={<div className="p-6 text-sm text-[#8C959F]">Loading...</div>}>
+    <Suspense fallback={<div className="p-6 text-sm text-[#94A3B8]">Loading...</div>}>
       <ListViewPageContent />
     </Suspense>
   );

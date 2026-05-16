@@ -22,7 +22,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 
 // Accounts that always see mock/design data instead of real backend data
-const DESIGN_ACCOUNTS = ["aishna.tijaria@gmail.com"];
+const DESIGN_ACCOUNTS = ["aishna.tijaria@gmail.com", "aishnakalyani@gmail.com"];
 
 interface WorkspaceContextType {
   workspaceId: string | null;
@@ -153,6 +153,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const setWorkspace = (id: string, name: string) => {
     setWorkspaceId(id);
     setOrgName(name);
+    writeWorkspaceCache(id, name);
   };
 
   return (

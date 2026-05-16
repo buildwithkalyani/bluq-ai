@@ -31,7 +31,7 @@ function Toast({ message, type, show }: { message: string; type: "success" | "er
   const bg =
     type === "success" ? "bg-[#2da44e]"
     : type === "error" ? "bg-[#CF222E]"
-    : "bg-[#57606a]";
+    : "bg-[#475569]";
   return (
     <div
       className={`fixed bottom-5 right-5 ${bg} text-white text-sm font-medium px-4 py-2.5 rounded-lg shadow-lg flex items-center gap-2 transition-all duration-300 z-50 ${
@@ -61,7 +61,7 @@ function ConfidenceBadge({ level }: { level: "high" | "medium" | "low" }) {
   const styles = {
     high:   "bg-[#ffebe9] text-[#CF222E] border border-[#ffc1ba]",
     medium: "bg-[#fff8c5] text-[#9A6700] border border-[#f0d44e]",
-    low:    "bg-[#f0f1f3] text-[#57606a] border border-[#d0d7de]",
+    low:    "bg-[#F1F5F9] text-[#475569] border border-[#E2E8F0]",
   };
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${styles[level]}`}>
@@ -135,20 +135,20 @@ function GapCard({
   if (dismissed) return null;
 
   return (
-    <div className="flex items-start justify-between gap-4 p-3 bg-white border border-[#D0D7DE] rounded-lg shadow-sm">
+    <div className="flex items-start justify-between gap-4 p-3 bg-white border border-[#E2E8F0] rounded-lg shadow-sm">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap mb-1">
-          <span className="text-[13px] font-semibold text-[#24292f] truncate">{gap.taskName}</span>
+          <span className="text-[13px] font-semibold text-[#0F172A] truncate">{gap.taskName}</span>
           <ConfidenceBadge level={gap.confidence} />
         </div>
-        <div className="text-[11px] text-[#3A4EA2] font-medium mb-1 uppercase tracking-wide">{gap.phase.replace(/_/g, " ")}</div>
-        <div className="text-[12px] text-[#57606a] leading-relaxed">{gap.reason}</div>
+        <div className="text-[11px] text-[#2563EB] font-medium mb-1 uppercase tracking-wide">{gap.phase.replace(/_/g, " ")}</div>
+        <div className="text-[12px] text-[#475569] leading-relaxed">{gap.reason}</div>
       </div>
       <div className="flex items-center gap-2 shrink-0 mt-0.5">
         <button
           onClick={handleAdd}
           disabled={addLoading}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold text-white bg-[#3A4EA2] hover:bg-[#2d3d8a] disabled:opacity-60 disabled:cursor-not-allowed rounded-md transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-60 disabled:cursor-not-allowed rounded-md transition-colors"
         >
           {addLoading ? (
             <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
@@ -164,7 +164,7 @@ function GapCard({
         </button>
         <button
           onClick={handleDismiss}
-          className="px-3 py-1.5 text-[12px] font-medium text-[#57606a] hover:text-[#24292f] hover:bg-gray-100 rounded-md transition-colors border border-[#D0D7DE]"
+          className="px-3 py-1.5 text-[12px] font-medium text-[#475569] hover:text-[#0F172A] hover:bg-[#F1F5F9] rounded-md transition-colors border border-[#E2E8F0]"
         >
           Dismiss
         </button>

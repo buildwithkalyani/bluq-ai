@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Search, Building2, Users, CalendarDays, MoreVertical, Pencil, Trash2, MapPin, AlertTriangle, CheckCircle2, ClipboardList, FileText } from "lucide-react";
 import {
   getProjects,
   STATUS_CONFIG,
@@ -17,7 +19,7 @@ import {
 import ProjectDetailView from "./ProjectDetailView";
 import CreateProjectModal from "./CreateProjectModal";
 import { useWorkspace } from "@/context/workspace";
-import { fetchProjects } from "@/lib/api-client";
+import { fetchProjects, deleteProject } from "@/lib/api-client";
 
 const PROJECTS_CACHE_KEY = "bluq_projects_cache";
 const STALE_MS = 5 * 60 * 1000; // 5 minutes
@@ -63,14 +65,20 @@ function mapBackendProjects(rows: Awaited<ReturnType<typeof fetchProjects>>): Pr
 
 export default function OverviewPage() {
   const { workspaceId, loading: wsLoading, isDesignMode } = useWorkspace();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const selectedProjectId = searchParams.get("projectId");
+
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [isOutdated, setIsOutdated] = useState(false);
   const [search, setSearch] = useState("");
-  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
 
   // Modal State
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [menuOpenProjectId, setMenuOpenProjectId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
     if (wsLoading) return;
@@ -100,13 +108,11 @@ export default function OverviewPage() {
         })
         .finally(() => setLoading(false));
     } else if (isDesignMode) {
-      // Design account — always mock
       getProjects().then((data) => {
         setProjects(data);
         setLoading(false);
       });
     } else {
-      // No workspace and not design mode — nothing to load
       setLoading(false);
     }
   }, [workspaceId, wsLoading, isDesignMode]);
@@ -116,25 +122,42 @@ export default function OverviewPage() {
     p.address.toLowerCase().includes(search.toLowerCase())
   );
 
-  const selectedProject =
-    selectedProjectId === null
-      ? null
-      : projects.find((p) => p.id === selectedProjectId) ?? null;
+  const selectedProject = selectedProjectId
+    ? projects.find((p) => String(p.id) === selectedProjectId) ?? null
+    : null;
+
+  const selectProject = (id: string | number) => {
+    router.push(`/dashboard/overview?projectId=${id}`);
+  };
+
+  const goBack = () => {
+    router.push("/dashboard/overview");
+  };
+
+  const handleDeleteProject = async (p: Project) => {
+    if (workspaceId && typeof p.id === "string") {
+      try { await deleteProject(p.id); } catch (e) { console.error(e); }
+    }
+    setProjects(prev => prev.filter(x => x.id !== p.id));
+    if (String(p.id) === selectedProjectId) goBack();
+    setConfirmDeleteId(null);
+    setMenuOpenProjectId(null);
+  };
 
 
   if (loading) {
     return (
       <div className="p-5">
         <div className="animate-pulse space-y-4">
-          <div className="h-6 w-48 bg-[#f0f1f3] rounded" />
+          <div className="h-6 w-48 bg-[#E2E8F0] rounded" />
           <div className="flex gap-3">
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="flex-1 h-20 bg-[#f0f1f3] rounded-lg" />
+              <div key={i} className="flex-1 h-20 bg-[#E2E8F0] rounded-lg" />
             ))}
           </div>
           <div className="grid grid-cols-2 gap-3.5">
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-48 bg-[#f0f1f3] rounded-lg" />
+              <div key={i} className="h-48 bg-[#E2E8F0] rounded-lg" />
             ))}
           </div>
         </div>
@@ -143,17 +166,19 @@ export default function OverviewPage() {
   }
 
   return (
-    <div className="p-5 overflow-y-auto h-full relative">
+    <div className="p-6 overflow-y-auto h-full relative">
       {selectedProjectId !== null ? (
         selectedProject ? (
           <ProjectDetailView
             project={selectedProject}
-            onBack={() => setSelectedProjectId(null)}
+            onBack={goBack}
             wrapperClassName="max-w-7xl mx-auto"
           />
         ) : (
+          // projectId in URL but not found in loaded list — redirect back to list
           <div className="p-10 text-center">
-            <h2 className="text-xl font-bold">Loading...</h2>
+            <div className="text-[14px] text-[#64748B] mb-3">Project not found.</div>
+            <button onClick={goBack} className="text-[13px] text-[#2563EB] font-semibold hover:underline cursor-pointer">← Back to all projects</button>
           </div>
         )
       ) : (
@@ -167,123 +192,207 @@ export default function OverviewPage() {
           )}
 
           {/* ── Header ── */}
-          <div className="flex items-center justify-between mb-4">
-            <SectionTitle>Projects Dashboard</SectionTitle>
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <SectionTitle>Projects</SectionTitle>
+              <p className="text-[13px] text-[#94A3B8] mt-0.5">{projects.length} active project{projects.length !== 1 ? "s" : ""}</p>
+            </div>
 
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 border border-[#D0D7DE] rounded-md px-2.5 py-1.5 bg-white min-w-[180px]">
-                <span className="text-[13px]">🔍</span>
+            <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2 border border-[#E2E8F0] rounded-lg px-3 py-2 bg-white min-w-[200px] focus-within:border-[#2563EB] focus-within:ring-2 focus-within:ring-[#2563EB]/10 transition-all shadow-sm">
+                <Search size={13} className="text-[#94A3B8] shrink-0" />
                 <input
                   type="text"
                   placeholder="Search projects..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="text-xs text-[#24292f] placeholder:text-[#8C959F] border-none outline-none bg-transparent w-full"
+                  className="text-[13px] text-[#0F172A] placeholder:text-[#CBD5E1] border-none outline-none bg-transparent w-full"
                 />
               </div>
-              <Btn primary small onClick={() => setIsCreateModalOpen(true)}>
+              <Btn primary onClick={() => setIsCreateModalOpen(true)}>
                 + New Project
               </Btn>
             </div>
           </div>
 
           {/* ── Summary Metrics ── */}
-          <div className="flex gap-3 mb-4">
-            <MetricCard label="Total Projects" value={projects.length} />
+          <div className="flex gap-4 mb-6">
+            <MetricCard label="Total Projects" value={projects.length} color="#0F172A" />
             <MetricCard
               label="On Track"
               value={projects.filter((p) => p.status === "inProgress").length}
-              color="#1A7F37"
+              color="#059669"
             />
             <MetricCard
               label="At Risk"
               value={projects.filter((p) => p.status === "runningLate").length}
-              color="#9A6700"
+              color="#D97706"
             />
             <MetricCard
               label="Delayed"
               value={projects.filter((p) => p.status === "delayed").length}
-              color="#CF222E"
+              color="#DC2626"
             />
           </div>
 
           {/* ── Project Grid ── */}
           {filtered.length === 0 ? (
-            <Card>
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <div className="text-5xl mb-4">🏗️</div>
-                <div className="text-sm font-bold text-[#24292f] mb-1">
+            <Card className="!py-16">
+              <div className="flex flex-col items-center justify-center text-center">
+                <Building2 size={40} className="mb-4 text-[#CBD5E1]" />
+                <div className="text-[15px] font-semibold text-[#0F172A] mb-1.5">
                   {search ? "No projects match your search" : "No projects yet"}
                 </div>
+                <p className="text-[13px] text-[#94A3B8] mb-5">Get started by creating your first project.</p>
                 {!search && (
                   <Btn primary onClick={() => setIsCreateModalOpen(true)}>
-                    + Create Your First Project
+                    + Create Project
                   </Btn>
                 )}
               </div>
             </Card>
           ) : (
-            <div className="grid grid-cols-2 gap-3.5">
+            <>
+            {menuOpenProjectId && (
+              <div className="fixed inset-0 z-20" onClick={() => { setMenuOpenProjectId(null); setConfirmDeleteId(null); }} />
+            )}
+            <div className="grid grid-cols-2 gap-4">
               {filtered.map((p) => (
-                <Card
+                <div
                   key={p.id}
-                  onClick={() => setSelectedProjectId(p.id)}
-                  className="cursor-pointer hover:shadow-md transition-all relative overflow-hidden group"
+                  onClick={() => selectProject(p.id)}
+                  className="bg-white border border-[#E2E8F0] rounded-xl shadow-sm cursor-pointer hover:shadow-md hover:border-[#CBD5E1] transition-all relative overflow-visible group flex flex-col"
                 >
-                  <div
-                    className="absolute top-0 left-0 right-0 h-[3.5px]"
-                    style={{ background: STATUS_CONFIG[p.status].color }}
-                  />
+                  {/* Status accent */}
+                  <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-xl" style={{ background: STATUS_CONFIG[p.status].color }} />
 
-                  <div className="flex justify-between items-start mb-2.5 mt-1">
-                    <div>
-                      <div className="text-[15px] font-bold text-[#24292f] leading-tight group-hover:text-[#3A4EA2] transition-colors">
+                  {/* Header */}
+                  <div className="flex justify-between items-start px-5 pt-5 pb-0 mt-1">
+                    <div className="flex-1 min-w-0 pr-2">
+                      <div className="text-[15px] font-semibold text-[#0F172A] leading-snug group-hover:text-[#2563EB] transition-colors truncate">
                         {p.name}
                       </div>
-                      <div className="text-[11px] text-[#8C959F] font-mono mt-0.5">
-                        {p.code} • {p.startDate} → {p.endDate}
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                        <span className="text-[11px] text-[#94A3B8] font-mono">{p.code}</span>
+                        {p.stage && (
+                          <span className="text-[10px] font-semibold text-[#64748B] bg-[#F1F5F9] px-1.5 py-0.5 rounded">{p.stage}</span>
+                        )}
                       </div>
                     </div>
-                    <StatusBadge status={p.status} />
+                    <div className="flex items-center gap-2 shrink-0">
+                      <StatusBadge status={p.status} />
+                      {/* ⋮ menu */}
+                      <div className="relative" onClick={e => e.stopPropagation()}>
+                        <button
+                          onClick={() => { setConfirmDeleteId(null); setMenuOpenProjectId(menuOpenProjectId === String(p.id) ? null : String(p.id)); }}
+                          className="w-7 h-7 rounded-md flex items-center justify-center text-[#94A3B8] hover:text-[#0F172A] hover:bg-[#E2E8F0] transition-colors opacity-0 group-hover:opacity-100"
+                        >
+                          <MoreVertical size={14} />
+                        </button>
+                        {menuOpenProjectId === String(p.id) && (
+                          <div className="absolute right-0 top-8 w-44 bg-white border border-[#E2E8F0] rounded-xl shadow-2xl py-1.5 z-30 animate-in fade-in slide-in-from-top-1 duration-100">
+                            {confirmDeleteId === String(p.id) ? (
+                              <div className="px-3 py-2.5">
+                                <div className="text-[11px] text-[#475569] font-semibold mb-2">Delete "{p.name}"?</div>
+                                <div className="flex gap-1.5">
+                                  <button onClick={() => handleDeleteProject(p)} className="flex-1 py-1.5 text-[11px] font-bold bg-[#DC2626] text-white rounded-md hover:bg-[#B91C1C] transition-colors">Delete</button>
+                                  <button onClick={() => setConfirmDeleteId(null)} className="flex-1 py-1.5 text-[11px] font-bold bg-[#E2E8F0] text-[#475569] rounded-md transition-colors">Cancel</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <button onClick={() => { setEditingProject(p); setMenuOpenProjectId(null); }} className="w-full text-left px-3 py-2 text-[12px] text-[#0F172A] hover:bg-[#F8FAFC] flex items-center gap-2.5 transition-colors">
+                                  <Pencil size={12} className="text-[#94A3B8]" /> Edit Project
+                                </button>
+                                <div className="my-1 border-t border-[#F1F5F9]" />
+                                <button onClick={() => setConfirmDeleteId(String(p.id))} className="w-full text-left px-3 py-2 text-[12px] text-[#DC2626] hover:bg-red-50 flex items-center gap-2.5 transition-colors">
+                                  <Trash2 size={12} /> Delete Project
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-2 mb-3">
-                    <ProgressBar pct={p.pct} status={p.status} />
-                    <span
-                      className="text-[13px] font-bold font-mono min-w-[36px] text-right"
-                      style={{ color: STATUS_CONFIG[p.status].color }}
-                    >
-                      {p.pct}%
-                    </span>
+                  {/* Location */}
+                  {p.address && (
+                    <div className="px-5 mt-2 flex items-center gap-1.5">
+                      <MapPin size={11} className="text-[#94A3B8] shrink-0" />
+                      <span className="text-[12px] text-[#64748B] truncate">{p.address}</span>
+                    </div>
+                  )}
+
+                  {/* Timeline + days remaining */}
+                  <div className="px-5 mt-2 flex items-center gap-3 flex-wrap">
+                    {p.startDate && p.endDate && (
+                      <div className="flex items-center gap-1.5">
+                        <CalendarDays size={11} className="text-[#94A3B8]" />
+                        <span className="text-[11px] text-[#64748B] font-mono tabular-nums">{fmtDate(p.startDate)} → {fmtDate(p.endDate)}</span>
+                      </div>
+                    )}
+                    {p.endDate && (() => {
+                      const rem = Math.max(0, Math.round((new Date(p.endDate).getTime() - Date.now()) / 86_400_000));
+                      const color = rem > 30 ? "#059669" : rem > 7 ? "#D97706" : "#DC2626";
+                      return <span className="text-[11px] font-bold tabular-nums" style={{ color }}>{rem}d left</span>;
+                    })()}
                   </div>
 
-                  <div className="flex gap-1.5 flex-wrap">
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#f6f8fa] text-[11px] text-[#57606a] border border-[#e1e4e8]">
-                      👷 <span className="font-semibold text-[#24292f]">{p.workers}</span> on-site
-                    </span>
+                  {/* Progress */}
+                  <div className="px-5 mt-4">
+                    <div className="flex justify-between items-center mb-1.5">
+                      <span className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.06em]">Progress</span>
+                      <span className="text-[13px] font-bold tabular-nums" style={{ color: STATUS_CONFIG[p.status].color }}>{p.pct}%</span>
+                    </div>
+                    <ProgressBar pct={p.pct} status={p.status} height={6} />
+                  </div>
 
+                  {/* Chips: workers + issues */}
+                  <div className="px-5 mt-3 flex items-center gap-2 flex-wrap">
+                    {p.workers > 0 && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#F8FAFC] text-[11px] text-[#475569] border border-[#E2E8F0]">
+                        <Users size={10} className="text-[#94A3B8]" /> {p.workers} on-site
+                      </span>
+                    )}
                     {p.issues > 0 ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#fff8c5] text-[11px] text-[#9A6700] font-semibold border border-[#d4a72c30]">
-                        🔔 {p.issues} unresolved
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#FEF2F2] text-[11px] text-[#DC2626] font-semibold border border-[#FECACA]">
+                        <AlertTriangle size={10} /> {p.issues} issues
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#dafbe1] text-[11px] text-[#1A7F37] font-semibold border border-[#1a7f3720]">
-                        ✓ No issues
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#ECFDF5] text-[11px] text-[#059669] font-semibold border border-[#A7F3D0]">
+                        <CheckCircle2 size={10} /> No issues
                       </span>
                     )}
                   </div>
 
-                  <div className="text-[11px] text-[#8C959F] mt-3 flex items-center gap-1 border-t border-[#f0f1f3] pt-2">
-                    📍 {p.address}
+                  {/* Footer quick actions — stopPropagation so card click doesn't fire */}
+                  <div className="mt-auto px-4 py-2.5 border-t border-[#F1F5F9] mt-4 flex items-center gap-0.5" onClick={e => e.stopPropagation()}>
+                    {[
+                      { icon: <CalendarDays size={12} />, label: "Schedule",      href: `/dashboard/schedule/gantt` },
+                      { icon: <ClipboardList size={12} />, label: "Daily Updates", href: `/dashboard/overview/daily-updates` },
+                      { icon: <FileText size={12} />,      label: "DPR",           href: `/dashboard/dpr` },
+                    ].map(({ icon, label, href }) => (
+                      <button
+                        key={label}
+                        onClick={() => {
+                          const params = workspaceId ? `?projectId=${p.id}&workspaceId=${workspaceId}` : `?projectId=${p.id}`;
+                          router.push(`${href}${params}`);
+                        }}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 text-[12px] font-medium text-[#64748B] hover:text-[#2563EB] hover:bg-[#EFF6FF] rounded-lg transition-colors"
+                      >
+                        {icon}{label}
+                      </button>
+                    ))}
                   </div>
-                </Card>
+                </div>
               ))}
             </div>
+            </>
           )}
         </>
       )}
 
-      {/* Modal Trigger */}
       {isCreateModalOpen && (
         <CreateProjectModal
           onClose={() => setIsCreateModalOpen(false)}
@@ -294,9 +403,43 @@ export default function OverviewPage() {
               return updated;
             });
             setIsCreateModalOpen(false);
+            selectProject(project.id);
+          }}
+        />
+      )}
+      {editingProject && (
+        <CreateProjectModal
+          editingProject={editingProject}
+          onClose={() => setEditingProject(null)}
+          onCreate={() => {}}
+          onUpdate={(updated) => {
+            setProjects(prev => prev.map(p => p.id === updated.id ? updated : p));
+            setEditingProject(null);
           }}
         />
       )}
     </div>
+  );
+}
+
+function OverviewSkeleton() {
+  return (
+    <div className="p-5 animate-pulse space-y-4">
+      <div className="h-6 w-48 bg-[#E2E8F0] rounded" />
+      <div className="flex gap-3">
+        {[1, 2, 3, 4].map((i) => <div key={i} className="flex-1 h-20 bg-[#E2E8F0] rounded-lg" />)}
+      </div>
+      <div className="grid grid-cols-2 gap-3.5">
+        {[1, 2, 3, 4].map((i) => <div key={i} className="h-48 bg-[#E2E8F0] rounded-lg" />)}
+      </div>
+    </div>
+  );
+}
+
+export default function OverviewPage() {
+  return (
+    <Suspense fallback={<OverviewSkeleton />}>
+      <OverviewContent />
+    </Suspense>
   );
 }

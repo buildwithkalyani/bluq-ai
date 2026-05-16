@@ -2,14 +2,38 @@
 
 import { useState, useEffect, useMemo, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import { Download, CheckCircle, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { getScheduleTasks } from "@/lib/mock-data";
 import { fetchTasks, isRealProject } from "@/lib/api-client";
 import type { ScheduleTask } from "@/lib/mock-data";
 import { useWorkspace } from "@/context/workspace";
 
-const Card = ({ children, className = "", style }: { children: React.ReactNode; className?: string; style?: React.CSSProperties }) => (
-  <div className={`bg-white border border-[#D0D7DE] rounded-lg p-4 ${className}`} style={style}>{children}</div>
-);
+const SVG_W = 560;
+const SVG_H = 260;
+const PAD_L = 48;
+const PAD_R = 16;
+const PAD_T = 20;
+const PAD_B = 30;
+const CHART_W = SVG_W - PAD_L - PAD_R;
+const CHART_H = SVG_H - PAD_T - PAD_B;
+
+function sigmoid(t: number): number {
+  const k = 6.5;
+  const s = (x: number) => 1 / (1 + Math.exp(-k * (x - 0.5)));
+  return (s(t) - s(0)) / (s(1) - s(0));
+}
+
+function buildPath(points: [number, number][]): string {
+  if (points.length < 2) return "";
+  let d = `M ${points[0][0]} ${points[0][1]}`;
+  for (let i = 1; i < points.length; i++) {
+    const [px, py] = points[i - 1];
+    const [cx, cy] = points[i];
+    const cpx = (px + cx) / 2;
+    d += ` C ${cpx} ${py} ${cpx} ${cy} ${cx} ${cy}`;
+  }
+  return d;
+}
 
 // SVG canvas constants
 const X0 = 50, X1 = 480, Y0 = 195, Y1 = 10;
@@ -218,23 +242,36 @@ function SCurveContent() {
     setTimeout(() => { win.print(); win.close(); setIsDownloading(false); }, 500);
   };
 
+  const gapColor = gap >= 2 ? "#059669" : gap <= -2 ? "#DC2626" : "#94A3B8";
+
   return (
-    <div className="p-5 overflow-y-auto h-full bg-[#f6f8fa]">
-      <div className="flex justify-between items-center mb-4">
-        <div className="text-[15px] font-bold text-[#24292f]">S-Curve</div>
-        <div className="flex gap-3 items-center">
-          <div className="flex items-center bg-white border border-[#D0D7DE] rounded-md overflow-hidden shadow-sm">
+    <div className="p-6 overflow-y-auto h-full bg-[#F8FAFC] space-y-5">
+      {downloadDone && (
+        <div className="fixed top-4 right-4 z-50 bg-[#059669] text-white px-4 py-2 rounded-xl shadow-lg text-[13px] font-semibold flex items-center gap-2">
+          <CheckCircle size={14} /> PDF downloaded
+        </div>
+      )}
+
+      {/* Header */}
+      <div className="flex justify-between items-start flex-wrap gap-3">
+        <div>
+          <h1 className="text-[20px] font-bold text-[#0F172A] leading-tight">S-Curve</h1>
+          <p className="text-[13px] text-[#64748B] mt-0.5">Planned vs actual progress over time</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center bg-white border border-[#E2E8F0] rounded-lg overflow-hidden shadow-sm">
             <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
-              className="px-2.5 py-1.5 text-[12px] text-[#24292f] font-mono outline-none focus:bg-[#ddf4ff]" />
-            <span className="text-[#8C959F] text-[12px] bg-[#f0f1f3] px-2 py-1.5 border-x border-[#D0D7DE]">→</span>
+              className="px-3 py-2 text-[13px] text-[#0F172A] font-mono outline-none focus:bg-[#EFF6FF] bg-transparent" />
+            <span className="text-[#94A3B8] text-[12px] bg-[#F8FAFC] px-2 py-2 border-x border-[#E2E8F0]">→</span>
             <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
-              className="px-2.5 py-1.5 text-[12px] text-[#24292f] font-mono outline-none focus:bg-[#ddf4ff]" />
+              className="px-3 py-2 text-[13px] text-[#0F172A] font-mono outline-none focus:bg-[#EFF6FF] bg-transparent" />
           </div>
           <button onClick={handleDownload} disabled={isDownloading}
-            className={`px-3 py-1.5 text-[12px] font-semibold rounded-md flex items-center gap-1.5 transition-colors shadow-sm ${
-              isDownloading ? "bg-[#8C959F] text-white cursor-not-allowed" : "bg-[#3A4EA2] text-white hover:bg-[#0353A4]"
+            className={`px-4 py-2 text-[13px] font-semibold rounded-lg flex items-center gap-1.5 shadow-sm transition-colors ${
+              isDownloading ? "bg-[#94A3B8] text-white cursor-not-allowed" : "bg-[#2563EB] text-white hover:bg-[#1D4ED8]"
             }`}>
-            {isDownloading ? "⏳ Generating..." : "📄 Download PDF"}
+            <Download size={14} strokeWidth={1.8} />
+            {isDownloading ? "Generating..." : "Export PDF"}
           </button>
         </div>
       </div>

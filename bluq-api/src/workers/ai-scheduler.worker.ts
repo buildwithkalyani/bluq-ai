@@ -132,7 +132,7 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
   taskCount: number;
   durationDays: number;
 }> {
-  const { projectId, workspaceId } = job.data;
+  const { projectId, workspaceId, userId } = job.data;
   const apiKey = process.env.ANTHROPIC_API_KEY;
 
   if (!apiKey) {
@@ -425,6 +425,7 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
       isBaseline: false,    // PM needs to review and lock as baseline
       isLocked: false,
       generatedBy: "ai",
+      uploadedBy: userId !== "system" ? userId : null,
     })
     .returning();
 

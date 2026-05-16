@@ -16,7 +16,7 @@
 
 import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
-import { scheduleVersions, documents, tasks, gapCheckFeedback } from "../db/schema.js";
+import { scheduleVersions, documents, tasks, gapCheckFeedback, users } from "../db/schema.js";
 import { eq, and, desc } from "drizzle-orm";
 import { aiSchedulerQueue } from "../lib/queues.js";
 import type { ScheduleJobData } from "../workers/ai-scheduler.worker.js";
@@ -222,18 +222,22 @@ export async function scheduleRoute(app: FastifyInstance) {
         return reply.status(400).send({ error: "projectId and workspaceId must be valid UUIDs" });
       }
 
-      const versions = await db
+      const rows = await db
         .select({
           id: scheduleVersions.id,
           versionNumber: scheduleVersions.versionNumber,
           isBaseline: scheduleVersions.isBaseline,
           isLocked: scheduleVersions.isLocked,
           generatedBy: scheduleVersions.generatedBy,
+          uploadedBy: scheduleVersions.uploadedBy,
+          uploadedByName: users.name,
+          sourceFileName: scheduleVersions.sourceFileName,
           aiReasoning: scheduleVersions.aiReasoning,
           aiRisks: scheduleVersions.aiRisks,
           createdAt: scheduleVersions.createdAt,
         })
         .from(scheduleVersions)
+        .leftJoin(users, eq(users.id, scheduleVersions.uploadedBy))
         .where(
           and(
             eq(scheduleVersions.projectId, projectId),
@@ -242,7 +246,7 @@ export async function scheduleRoute(app: FastifyInstance) {
         )
         .orderBy(desc(scheduleVersions.versionNumber));
 
-      return versions;
+      return rows;
     } catch (err: any) {
       console.error("GET /schedule/versions error:", err.message);
       return reply.status(500).send({ error: "Failed to fetch schedule versions" });
