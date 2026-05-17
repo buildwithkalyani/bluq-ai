@@ -796,6 +796,7 @@ function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete,
     if (k === "status" && v === "notStarted") next.pct = 0;
     if (k === "pct" && v === 100) next.status = "completed";
     if (k === "pct" && v === 0) next.status = "notStarted";
+    if (k === "pct" && v > 0 && v < 100) next.status = "inProgress";
     return next;
   });
 
@@ -859,7 +860,7 @@ function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete,
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Start date *</label>
-              <input type="date" value={f.startDate} onChange={e => set("startDate", e.target.value)} className={inputCls + " text-[#0F172A]"} />
+              <input type="date" value={f.startDate} max={f.endDate || undefined} onChange={e => set("startDate", e.target.value)} className={inputCls + " text-[#0F172A]"} />
             </div>
             <div>
               <label className={labelCls}>End date *</label>
@@ -1197,8 +1198,9 @@ function GanttChartContent() {
         areas.forEach(([area, ts]) => {
           areaIdx++;
           const areaKey = `${phase}__${area}`;
-          y += AREA_H;
-          if (!collapsedAreas.has(areaKey)) {
+          const showAreaRow = area !== "General" || areas.length > 1;
+          if (showAreaRow) y += AREA_H;
+          if (!showAreaRow || !collapsedAreas.has(areaKey)) {
             let taskIdx = 0;
             ts.filter(t => !t.parentTaskId).forEach((t) => {
               taskIdx++;
@@ -1728,8 +1730,10 @@ const handleSaveModal = (data: any, newPreds: any) => {
                     {!collapsed && areas.map(([area, ts]) => {
                       const areaKey = `${phase}__${area}`;
                       const areaCollapsed = collapsedAreas.has(areaKey);
+                      const showAreaRow = area !== "General" || areas.length > 1;
                       return (
                         <div key={`col-${phase}-${area}`}>
+                          {showAreaRow && (
                           <div className="flex items-center border-b bg-[#F8FAFC] cursor-pointer hover:bg-slate-100 transition-colors" style={{ height: AREA_H }} onClick={() => toggleArea(areaKey)}>
                             <div className="flex items-center gap-1.5 min-w-0 flex-1 pl-5 h-full">
                               <span className="text-[9px] text-[#94A3B8] shrink-0">{areaCollapsed ? "▶" : "▼"}</span>
@@ -1741,7 +1745,8 @@ const handleSaveModal = (data: any, newPreds: any) => {
                                 className="w-5 h-5 flex items-center justify-center rounded text-[#94A3B8] hover:bg-blue-100 hover:text-blue-600 text-[14px] font-bold leading-none" title={`Add task to ${area}`}>+</button>
                             </div>
                           </div>
-                          {!areaCollapsed && ts.filter(t => !t.parentTaskId).flatMap((t) => {
+                          )}
+                          {(!showAreaRow || !areaCollapsed) && ts.filter(t => !t.parentTaskId).flatMap((t) => {
                             const taskCollapsed = collapsedTasks.has(t.id);
                             const hasChildren = ts.some(s => s.parentTaskId === t.id);
                             const rows = [];
@@ -1856,6 +1861,7 @@ const handleSaveModal = (data: any, newPreds: any) => {
                     {!collapsed && areas.map(([area, ts]) => {
                       const areaKey = `${phase}__${area}`;
                       const areaCollapsed = collapsedAreas.has(areaKey);
+                      const showAreaRow = area !== "General" || areas.length > 1;
                       const areaColor = rollupColor(ts);
                       const areaSpan = spanOf(ts);
                       const areaLeftPx  = areaSpan ? diffDays(chartStart, areaSpan.start) * pixelsPerDay : 0;
@@ -1864,7 +1870,7 @@ const handleSaveModal = (data: any, newPreds: any) => {
                       const areaBarOpacity = showCriticalPath && !areaHasCritical ? 0.2 : 1;
                       return (
                         <div key={`time-${phase}-${area}`}>
-                          <div className="relative border-b border-[#F1F5F9] bg-[#F8FAFC]/60" style={{ height: AREA_H }}>
+                          {showAreaRow && <div className="relative border-b border-[#F1F5F9] bg-[#F8FAFC]/60" style={{ height: AREA_H }}>
                             {areaSpan && (
                               <div className="absolute transition-opacity" style={{ top: 5, left: areaLeftPx, width: areaWidthPx, height: AREA_H - 10, opacity: areaBarOpacity }}>
                                 <div className="absolute inset-0 rounded overflow-hidden" style={{ background: `${areaColor}25`, border: `1px solid ${areaColor}` }}>
@@ -1882,8 +1888,8 @@ const handleSaveModal = (data: any, newPreds: any) => {
                                 )}
                               </div>
                             )}
-                          </div>
-                          {!areaCollapsed && ts.filter(t => !t.parentTaskId).flatMap((t) => {
+                          </div>}
+                          {(!showAreaRow || !areaCollapsed) && ts.filter(t => !t.parentTaskId).flatMap((t) => {
                             const taskCollapsed = collapsedTasks.has(t.id);
                             const rows = [
                               <GanttRow key={t.id} t={t} selected={selectedId === t.id}

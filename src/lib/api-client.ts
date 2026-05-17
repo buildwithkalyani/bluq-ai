@@ -840,6 +840,13 @@ export async function fetchScheduleVersions(
   );
 }
 
+export async function createScheduleVersion(
+  projectId: string,
+  workspaceId: string
+): Promise<ScheduleVersion> {
+  return apiPost<ScheduleVersion>("/schedule/versions", { projectId, workspaceId });
+}
+
 export interface ScheduleGenerateResult {
   success: boolean;
   jobId: string;
