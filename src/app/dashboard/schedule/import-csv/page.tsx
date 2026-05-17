@@ -8,6 +8,7 @@ import { Card, SectionTitle, Btn } from "@/components/ui/bluq-ui";
 import { useWorkspace } from "@/context/workspace";
 import {
   fetchProjects,
+  fetchTasks,
   isRealProject,
   registerDocument,
   fetchDocuments,
@@ -15,6 +16,7 @@ import {
   generateSchedule,
   pollScheduleStatus,
   fetchScheduleVersions,
+  createScheduleVersion,
   type ScheduleStatusResult,
   type BackendDocument,
   type ScheduleVersion,
@@ -1583,12 +1585,28 @@ function ImportCSVContent() {
     }
   }, [projectIdParam, real, workspaceId]);
 
-  // Fetch existing schedule versions to decide landing state
+  // Fetch existing schedule versions; auto-create v1 if tasks exist but no version yet
   useEffect(() => {
     if (real && workspaceId && isRealProject(projectIdParam)) {
       setVersionsLoading(true);
       fetchScheduleVersions(projectIdParam, workspaceId)
-        .then(v => setVersions(v))
+        .then(async v => {
+          if (v.length === 0) {
+            // Check for manually created tasks
+            try {
+              const existingTasks = await fetchTasks(projectIdParam, workspaceId);
+              console.log("[ImportSchedule] tasks found:", existingTasks.length);
+              if (existingTasks.length > 0) {
+                const newV = await createScheduleVersion(projectIdParam, workspaceId);
+                setVersions([newV]);
+                return;
+              }
+            } catch (e) {
+              console.error("[ImportSchedule] auto-create v1 failed:", e);
+            }
+          }
+          setVersions(v);
+        })
         .catch(() => setVersions([]))
         .finally(() => setVersionsLoading(false));
     } else if (hasProject) {

@@ -77,7 +77,7 @@ function DailyUpdatesInner() {
 
   // Reload tasks/milestones whenever project, range, or workspace changes
   useEffect(() => {
-    if (wsLoading) return;
+    if (wsLoading && !activeWorkspaceId) return;
     const days = ranges[milestoneRange];
 
     if (isDesignMode) {
@@ -101,7 +101,7 @@ function DailyUpdatesInner() {
 
   // Briefing has its own effect — isolated from projects.length to prevent stale races
   useEffect(() => {
-    if (wsLoading || isDesignMode) return;
+    if ((wsLoading && !activeWorkspaceId) || isDesignMode) return;
     if (!activeWorkspaceId || !selectedProjectId || !isRealProject(selectedProjectId)) {
       setBriefing(null);
       return;

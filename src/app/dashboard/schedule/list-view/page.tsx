@@ -294,10 +294,12 @@ function ListViewPageContent() {
                     const areaKey = `${phase}__${area}`;
                     const areaCollapsed = collapsedAreas.has(areaKey);
                     const areaAvg = avgPct(ts);
+                    const showAreaRow = area !== "General" || areas.length > 1;
 
                     return (
                       <React.Fragment key={`area-${areaKey}`}>
-                        {/* ── Area row ── */}
+                        {/* ── Area row — hidden when "General" is the only area ── */}
+                        {showAreaRow && (
                         <tr
                           className="bg-[#f8fafc] border-b border-[#E2E8F0] cursor-pointer hover:bg-[#f0f6fc] transition-colors"
                           onClick={() => toggleArea(areaKey)}>
@@ -317,9 +319,10 @@ function ListViewPageContent() {
                           </td>
                           <td colSpan={2} />
                         </tr>
+                        )}
 
                         {/* ── Task + sub-task rows ── */}
-                        {!areaCollapsed && ts.filter(t => !t.parentTaskId).flatMap(t => {
+                        {(!showAreaRow || !areaCollapsed) && ts.filter(t => !t.parentTaskId).flatMap(t => {
                           const taskCollapsed = collapsedTasks.has(t.id);
                           const hasChildren   = ts.some(s => s.parentTaskId === t.id);
                           const sc = STATUS_CONFIG[t.status as StatusKey];
@@ -558,12 +561,12 @@ function ListViewPageContent() {
               <div className="flex gap-3">
                 <div className="flex-1">
                   <label className="block text-[11px] font-bold text-[#475569] mb-1.5 uppercase tracking-wider">Start Date *</label>
-                  <input type="date" value={newTask.startDate} onChange={e => setNewTask({ ...newTask, startDate: e.target.value })}
+                  <input type="date" value={newTask.startDate} max={newTask.endDate || undefined} onChange={e => setNewTask({ ...newTask, startDate: e.target.value })}
                     className="w-full bg-white border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#2563EB] text-[#0F172A]" />
                 </div>
                 <div className="flex-1">
                   <label className="block text-[11px] font-bold text-[#475569] mb-1.5 uppercase tracking-wider">End Date *</label>
-                  <input type="date" value={newTask.endDate} onChange={e => setNewTask({ ...newTask, endDate: e.target.value })}
+                  <input type="date" value={newTask.endDate} min={newTask.startDate || undefined} onChange={e => setNewTask({ ...newTask, endDate: e.target.value })}
                     className="w-full bg-white border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#2563EB] text-[#0F172A]" />
                 </div>
               </div>
@@ -587,7 +590,7 @@ function ListViewPageContent() {
                     <input type="range" min={0} max={100} step={5}
                       value={newTask.pct} onChange={e => {
                         const p = Number(e.target.value);
-                        setNewTask({ ...newTask, pct: p, status: p === 100 ? "completed" : p === 0 ? "notStarted" : newTask.status });
+                        setNewTask({ ...newTask, pct: p, status: p === 100 ? "completed" : p === 0 ? "notStarted" : "inProgress" });
                       }}
                       className="flex-1 accent-[#2563EB]" />
                     <span className="text-[13px] font-bold font-mono text-[#2563EB] w-10 text-right">{newTask.pct}%</span>
@@ -621,6 +624,7 @@ function ListViewPageContent() {
                         percentComplete: String(newTask.pct),
                         contractor: newTask.contractor || null,
                         area: newTask.space || null,
+                        phase: newTask.phase || null,
                       }).then(() => {
                         setTasks(prev => prev.map(t => t.id === editingTaskId ? {
                           ...t, name: newTask.name.trim(), phase: newTask.phase, space: newTask.space || "General",
@@ -648,6 +652,7 @@ function ListViewPageContent() {
                         percentComplete: newTask.pct,
                         contractor: newTask.contractor || undefined,
                         area: newTask.space || undefined,
+                        phase: newTask.phase || undefined,
                       }).then(created => {
                         setTasks(prev => [...prev, {
                           id: created.id, projectId: 0, name: newTask.name.trim(), phase: newTask.phase,

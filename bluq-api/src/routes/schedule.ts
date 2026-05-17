@@ -471,6 +471,74 @@ export async function scheduleRoute(app: FastifyInstance) {
   });
 
   // =========================================================================
+  // POST /schedule/versions — create a manual schedule version (baseline)
+  // =========================================================================
+  app.post("/schedule/versions", { preHandler: verifySession }, async (request, reply) => {
+    try {
+      const body = request.body as { projectId: string; workspaceId: string };
+      const userId = request.userId;
+
+      if (!body.projectId || !body.workspaceId) {
+        return reply.status(400).send({ error: "projectId and workspaceId are required" });
+      }
+      if (!UUID_REGEX.test(body.projectId) || !UUID_REGEX.test(body.workspaceId)) {
+        return reply.status(400).send({ error: "projectId and workspaceId must be valid UUIDs" });
+      }
+
+      // Next version number
+      const existing = await db
+        .select({ vn: scheduleVersions.versionNumber })
+        .from(scheduleVersions)
+        .where(and(eq(scheduleVersions.projectId, body.projectId), eq(scheduleVersions.workspaceId, body.workspaceId)))
+        .orderBy(desc(scheduleVersions.versionNumber))
+        .limit(1);
+      const nextVersion = (existing[0]?.vn ?? 0) + 1;
+
+      // Demote all previous baselines for this project
+      await db
+        .update(scheduleVersions)
+        .set({ isBaseline: false })
+        .where(and(eq(scheduleVersions.projectId, body.projectId), eq(scheduleVersions.workspaceId, body.workspaceId)));
+
+      const [created] = await db
+        .insert(scheduleVersions)
+        .values({
+          projectId: body.projectId,
+          workspaceId: body.workspaceId,
+          versionNumber: nextVersion,
+          isBaseline: true,
+          isLocked: false,
+          generatedBy: "manual",
+          uploadedBy: userId,
+          scheduleJson: {},
+        })
+        .returning();
+
+      // Re-fetch with user name join to match the shape GET /schedule/versions returns
+      const [row] = await db
+        .select({
+          id: scheduleVersions.id,
+          versionNumber: scheduleVersions.versionNumber,
+          isBaseline: scheduleVersions.isBaseline,
+          isLocked: scheduleVersions.isLocked,
+          generatedBy: scheduleVersions.generatedBy,
+          uploadedBy: scheduleVersions.uploadedBy,
+          uploadedByName: users.name,
+          sourceFileName: scheduleVersions.sourceFileName,
+          aiReasoning: scheduleVersions.aiReasoning,
+          createdAt: scheduleVersions.createdAt,
+        })
+        .from(scheduleVersions)
+        .leftJoin(users, eq(users.id, scheduleVersions.uploadedBy))
+        .where(eq(scheduleVersions.id, created.id));
+
+      return reply.status(201).send(row);
+    } catch (err: any) {
+      console.error("POST /schedule/versions error:", err.message);
+      return reply.status(500).send({ error: "Failed to create schedule version" });
+    }
+  });
+
   // POST /schedule/baseline — lock a version as baseline
   // =========================================================================
   app.post("/schedule/baseline", async (request, reply) => {

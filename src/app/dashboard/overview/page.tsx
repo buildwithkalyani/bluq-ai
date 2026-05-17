@@ -80,6 +80,7 @@ function OverviewContent() {
   const [loading, setLoading] = useState(true);
   const [isOutdated, setIsOutdated] = useState(false);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
   // Modal State
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -124,10 +125,16 @@ function OverviewContent() {
     }
   }, [workspaceId, wsLoading, isDesignMode]);
 
-  const filtered = projects.filter((p) =>
-    p.name.toLowerCase().includes(search.toLowerCase()) ||
-    p.address.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = projects.filter((p) => {
+    const matchesSearch =
+      p.name.toLowerCase().includes(search.toLowerCase()) ||
+      p.address.toLowerCase().includes(search.toLowerCase());
+    const matchesStatus = statusFilter ? p.status === statusFilter : true;
+    return matchesSearch && matchesStatus;
+  });
+
+  const toggleStatusFilter = (status: string) =>
+    setStatusFilter((prev) => (prev === status ? null : status));
 
   const selectedProject = selectedProjectId
     ? projects.find((p) => String(p.id) === selectedProjectId) ?? null
@@ -224,21 +231,29 @@ function OverviewContent() {
 
           {/* ── Summary Metrics ── */}
           <div className="flex gap-4 mb-6">
-            <MetricCard label="Total Projects" value={projects.length} color="#0F172A" />
+            <MetricCard
+              label="Total Projects"
+              value={projects.length}
+              color="#0F172A"
+              onClick={() => setStatusFilter(null)}
+            />
             <MetricCard
               label="On Track"
               value={projects.filter((p) => p.status === "inProgress").length}
               color="#059669"
+              onClick={() => toggleStatusFilter("inProgress")}
             />
             <MetricCard
               label="At Risk"
               value={projects.filter((p) => p.status === "runningLate").length}
               color="#D97706"
+              onClick={() => toggleStatusFilter("runningLate")}
             />
             <MetricCard
               label="Delayed"
               value={projects.filter((p) => p.status === "delayed").length}
               color="#DC2626"
+              onClick={() => toggleStatusFilter("delayed")}
             />
           </div>
 
