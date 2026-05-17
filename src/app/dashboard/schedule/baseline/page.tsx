@@ -51,7 +51,6 @@ function BaselineActualPageContent() {
   const [tasks, setTasks] = useState<ScheduleTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [collapsedPhases, setCollapsedPhases] = useState<Set<string>>(new Set());
-  const [selectedBaselineVersion, setSelectedBaselineVersion] = useState(MOCK_BASELINES[0].version);
   const searchParams = useSearchParams();
   const { isDesignMode, workspaceId: ctxWorkspaceId, loading: wsLoading } = useWorkspace();
   const projectIdParam = searchParams.get("projectId") ?? "0";
@@ -86,7 +85,7 @@ function BaselineActualPageContent() {
     return [...ordered, ...rest];
   }, [tasks]);
 
-  const activeBaseline = MOCK_BASELINES.find(b => b.version === selectedBaselineVersion) ?? MOCK_BASELINES[0];
+  const activeBaseline = MOCK_BASELINES[0];
   const bOffset = (pct: number, status: string) => {
     const raw = pct + (status === "delayed" || status === "runningLate" ? 12 : -4);
     return Math.min(100, Math.max(0, Math.round(raw * activeBaseline.offsetMultiplier)));
@@ -99,7 +98,7 @@ function BaselineActualPageContent() {
     const delayed = parents.filter(t => t.status === "delayed" || t.status === "runningLate").length;
     return { overallActual, overallBaseline, delayed, total: parents.length };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tasks, selectedBaselineVersion]);
+  }, [tasks]);
 
   if (loading) return (
     <div className="p-6 animate-pulse space-y-4">
@@ -122,23 +121,9 @@ function BaselineActualPageContent() {
           <h1 className="text-[20px] font-bold text-[#0F172A] leading-tight">Baseline vs Actual</h1>
           <p className="text-[13px] text-[#64748B] mt-0.5">Track planned schedule against real progress</p>
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex flex-col items-end">
-            <span className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.1em] mb-0.5">Baseline version</span>
-            <select
-              value={selectedBaselineVersion}
-              onChange={e => setSelectedBaselineVersion(Number(e.target.value))}
-              className="border border-[#E2E8F0] rounded-lg px-3 py-1.5 text-[13px] font-semibold text-[#0F172A] bg-white outline-none focus:border-[#2563EB] cursor-pointer shadow-sm"
-            >
-              {MOCK_BASELINES.map(b => (
-                <option key={b.version} value={b.version}>{b.label}</option>
-              ))}
-            </select>
-          </div>
-          <div className="px-3 py-2 bg-white border border-[#E2E8F0] rounded-lg shadow-sm text-right">
-            <div className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.08em]">Uploaded</div>
-            <div className="text-[12px] font-semibold text-[#475569]">{activeBaseline.uploadedAt}</div>
-          </div>
+        <div className="px-3 py-2 bg-white border border-[#E2E8F0] rounded-lg shadow-sm text-right">
+          <div className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.08em]">Uploaded</div>
+          <div className="text-[12px] font-semibold text-[#475569]">{activeBaseline.uploadedAt}</div>
         </div>
       </div>
 

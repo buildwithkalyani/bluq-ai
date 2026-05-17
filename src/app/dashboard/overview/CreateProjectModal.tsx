@@ -182,7 +182,7 @@ export default function CreateProjectModal({ onClose, onCreate, editingProject, 
             <div>
               <label className={labelClass}>Type</label>
               <select className={inputClass} value={type} onChange={e => setType(e.target.value)}>
-                {["Residential", "Commercial", "Mixed-Use", "Industrial"].map(o => (
+                {["Residential", "Commercial", "Mixed Use", "Industrial / Warehouse", "Road / Highway", "Railway / Metro", "Bridge / Flyover", "Tunnel"].map(o => (
                   <option key={o}>{o}</option>
                 ))}
               </select>

@@ -9,7 +9,7 @@ import { WorkspaceProvider, useWorkspace } from "@/context/workspace";
 import { ActivityFeedProvider } from "@/context/activity-feed";
 import { LiveActivityButton, LiveActivityPanel } from "@/components/LiveActivityPanel";
 import { PermissionsProvider, usePermissions } from "@/context/permissions";
-import { fetchProjects, fetchTasks, createProject, clearAuthTokenCache, isRealProject } from "@/lib/api-client";
+import { fetchProjects, fetchTasks, createProject, clearAuthTokenCache, isRealProject, fetchScheduleVersions, type ScheduleVersion } from "@/lib/api-client";
 import { authClient } from "@/lib/auth-client";
 import { useSchedulePoller } from "@/hooks/useSchedulePoller";
 
@@ -120,6 +120,8 @@ function NewProjectModal({
   const { workspaceId } = useWorkspace();
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
+  const [address, setAddress] = useState("");
+  const [category, setCategory] = useState("Residential");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [creating, setCreating] = useState(false);
@@ -149,6 +151,8 @@ function NewProjectModal({
           workspaceId,
           projectName: name.trim(),
           projectCode: code || undefined,
+          address: address.trim() || undefined,
+          category: category || undefined,
           startDate: startDate || undefined,
           endDate: endDate || undefined,
         });
@@ -197,8 +201,8 @@ function NewProjectModal({
   return (
     <>
       <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[440px] bg-white rounded-2xl shadow-2xl border border-[#E2E8F0] animate-in fade-in zoom-in-95 duration-150">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#F1F5F9]">
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[480px] max-h-[90vh] bg-white rounded-2xl shadow-2xl border border-[#E2E8F0] animate-in fade-in zoom-in-95 duration-150 flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#F1F5F9] flex-shrink-0">
           <div className="text-[16px] font-semibold text-[#0F172A] tracking-tight">
             New project
           </div>
@@ -210,7 +214,7 @@ function NewProjectModal({
           </button>
         </div>
 
-        <div className="px-6 py-5 space-y-4">
+        <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
           {error && (
             <div className="text-[12px] text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
               {error}
@@ -232,15 +236,30 @@ function NewProjectModal({
 
           <div>
             <label className="block text-[11px] font-semibold text-[#94A3B8] uppercase tracking-[0.06em] mb-1.5">
-              Project Code
+              Project Address
             </label>
             <input
               type="text"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder="Auto-generated"
-              className="w-full border border-[#E2E8F0] rounded-lg px-3.5 py-2.5 text-[14px] text-[#0F172A] font-mono placeholder:text-[#CBD5E1] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] transition-all"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="e.g. Andheri East, Mumbai"
+              className="w-full border border-[#E2E8F0] rounded-lg px-3.5 py-2.5 text-[14px] text-[#0F172A] placeholder:text-[#CBD5E1] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] transition-all"
             />
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-semibold text-[#94A3B8] uppercase tracking-[0.06em] mb-1.5">
+              Construction Type *
+            </label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="w-full border border-[#E2E8F0] rounded-lg px-3.5 py-2.5 text-[14px] text-[#0F172A] bg-white focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] transition-all"
+            >
+              {["Residential", "Commercial", "Mixed Use", "Industrial / Warehouse", "Road / Highway", "Railway / Metro", "Bridge / Flyover", "Tunnel"].map(o => (
+                <option key={o}>{o}</option>
+              ))}
+            </select>
           </div>
 
           <div className="flex gap-3">
@@ -267,9 +286,22 @@ function NewProjectModal({
               />
             </div>
           </div>
+
+          <div>
+            <label className="block text-[11px] font-semibold text-[#94A3B8] uppercase tracking-[0.06em] mb-1.5">
+              Project Code
+            </label>
+            <input
+              type="text"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="Auto-generated"
+              className="w-full border border-[#E2E8F0] rounded-lg px-3.5 py-2.5 text-[14px] text-[#0F172A] font-mono placeholder:text-[#CBD5E1] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] transition-all"
+            />
+          </div>
         </div>
 
-        <div className="flex items-center justify-end gap-2.5 px-6 py-4 border-t border-[#F1F5F9]">
+        <div className="flex items-center justify-end gap-2.5 px-6 py-4 border-t border-[#F1F5F9] flex-shrink-0">
           <button
             onClick={onClose}
             className="px-4 py-2 text-[13px] font-medium text-[#64748B] bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg hover:bg-[#F1F5F9] transition-colors cursor-pointer"
@@ -407,18 +439,65 @@ function TopNavProjectDropdown() {
 // ─── SUB TABS ───────────────────────────────────────────────
 function ProjectAwareSubTabs() {
   const pathname = usePathname();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = searchParams.get("projectId") || "0";
-  const workspaceId = searchParams.get("workspaceId");
+  const selectedVersionId = searchParams.get("versionId") || "";
   const activeNav = getActiveNav(pathname);
   const activeTab = getActiveTab(pathname, activeNav);
   const isSchedule = activeNav.id === "schedule";
+  const { workspaceId } = useWorkspace();
+
+  const [versions, setVersions] = useState<ScheduleVersion[]>([]);
+
+  useEffect(() => {
+    if (!isSchedule || !workspaceId || !isRealProject(projectId)) { setVersions([]); return; }
+
+    const doFetch = () =>
+      fetchScheduleVersions(projectId, workspaceId)
+        .then(v => {
+          setVersions(v);
+          // Auto-select the baseline (or latest) version in URL if none picked yet
+          if (v.length && !searchParams.get("versionId")) {
+            const pick = v.find(x => x.isBaseline) ?? v[0];
+            const params = new URLSearchParams(searchParams.toString());
+            params.set("versionId", pick.id);
+            router.replace(`${pathname}?${params.toString()}`);
+          }
+        })
+        .catch(() => {});
+
+    doFetch();
+
+    // Re-fetch automatically when a new schedule is generated
+    const onDone = (e: Event) => {
+      const { projectId: pid } = (e as CustomEvent<{ projectId: string }>).detail;
+      if (pid === projectId) doFetch();
+    };
+    window.addEventListener("bluq_schedule_done", onDone);
+    return () => window.removeEventListener("bluq_schedule_done", onDone);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSchedule, projectId, workspaceId]);
+
   if (activeNav.subTabs.length <= 1) return null;
 
-  const buildHref = (href: string) => {
+  const buildHref = (href: string, vId?: string) => {
     const params = new URLSearchParams({ projectId });
     if (workspaceId) params.set("workspaceId", workspaceId);
+    const vid = vId ?? selectedVersionId;
+    if (vid) params.set("versionId", vid);
     return `${href}?${params.toString()}`;
+  };
+
+  const handleVersionChange = (vId: string) => {
+    router.replace(buildHref(pathname, vId));
+  };
+
+  // Format version label compactly
+  const versionLabel = (v: ScheduleVersion) => {
+    const date = new Date(v.createdAt).toLocaleDateString("en-IN", { month: "short", year: "2-digit" });
+    const tag = v.isBaseline ? "Baseline" : "Draft";
+    return `v${v.versionNumber} — ${tag} · ${date}`;
   };
 
   return (
@@ -436,8 +515,24 @@ function ProjectAwareSubTabs() {
           {tab.label}
         </Link>
       ))}
+
+      {isSchedule && versions.length > 0 && (
+        <div className="ml-auto flex items-center gap-2 mr-3">
+          <span className="text-[10px] font-semibold text-[#94A3B8] uppercase tracking-[0.08em]">Version</span>
+          <select
+            value={selectedVersionId || versions.find(v => v.isBaseline)?.id || versions[0]?.id || ""}
+            onChange={e => handleVersionChange(e.target.value)}
+            className="border border-[#E2E8F0] rounded-lg px-2.5 py-1 text-[12px] font-semibold text-[#0F172A] bg-white focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] cursor-pointer"
+          >
+            {versions.map(v => (
+              <option key={v.id} value={v.id}>{versionLabel(v)}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {isSchedule && (
-        <div className="ml-auto">
+        <div className={versions.length > 0 ? "" : "ml-auto"}>
           <LiveActivityButton />
         </div>
       )}
