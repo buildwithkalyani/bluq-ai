@@ -238,29 +238,8 @@ function ListViewPageContent() {
         </div>
       </div>
 
-      {/* Row 2: filters + search + add */}
-      <div className="px-4 py-2 border-b border-[#E2E8F0] bg-white flex items-center justify-between gap-3">
-        <div className="flex items-center gap-1 flex-wrap">
-          {(Object.entries(STATUS_CONFIG) as [StatusKey, typeof STATUS_CONFIG[StatusKey]][]).map(([key, cfg]) => {
-            const countMap: Record<StatusKey, number> = {
-              completed: headerStats.completed, inProgress: headerStats.inProgress,
-              runningLate: headerStats.runningLate, delayed: headerStats.delayed, notStarted: headerStats.notStarted,
-            };
-            const active = filterStatus === key;
-            return (
-              <button key={key} onClick={() => setFilterStatus(filterStatus === key ? "All" : key)}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[13px] font-medium transition-all border ${active ? "border-current shadow-sm" : "border-transparent hover:border-[#E2E8F0]"}`}
-                style={{ color: cfg.color, background: active ? `${cfg.color}15` : "transparent" }}>
-                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: cfg.color }} />
-                <span className="font-semibold tabular-nums">{countMap[key]}</span>
-                <span>{cfg.label}</span>
-              </button>
-            );
-          })}
-          {filterStatus !== "All" && (
-            <button onClick={() => setFilterStatus("All")} className="ml-1 text-[10px] text-[#64748B] hover:text-[#1E293B] underline">Clear</button>
-          )}
-        </div>
+      {/* Row 2: search + controls + add */}
+      <div className="px-4 py-2 border-b border-[#E2E8F0] bg-white flex items-center justify-end gap-3">
         <div className="flex gap-3 items-center">
           <div className="flex items-center gap-2 border border-[#E2E8F0] rounded-md px-2.5 py-1.5 bg-white shadow-sm focus-within:border-[#2563EB] transition-all">
             <Search size={12} className="text-[#94A3B8] shrink-0" />
@@ -308,6 +287,29 @@ function ListViewPageContent() {
           </div>
           <Btn small primary onClick={openAddModal}>+ Add Task</Btn>
         </div>
+      </div>
+
+      {/* Row 3: status filters */}
+      <div className="px-4 py-2 border-b border-[#E2E8F0] bg-white flex items-center gap-1 flex-wrap">
+        {(Object.entries(STATUS_CONFIG) as [StatusKey, typeof STATUS_CONFIG[StatusKey]][]).map(([key, cfg]) => {
+          const countMap: Record<StatusKey, number> = {
+            completed: headerStats.completed, inProgress: headerStats.inProgress,
+            runningLate: headerStats.runningLate, delayed: headerStats.delayed, notStarted: headerStats.notStarted,
+          };
+          const active = filterStatus === key;
+          return (
+            <button key={key} onClick={() => setFilterStatus(filterStatus === key ? "All" : key)}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[13px] font-medium transition-all border ${active ? "border-current shadow-sm" : "border-transparent hover:border-[#E2E8F0]"}`}
+              style={{ color: cfg.color, background: active ? `${cfg.color}15` : "transparent" }}>
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: cfg.color }} />
+              <span className="font-semibold tabular-nums">{countMap[key]}</span>
+              <span>{cfg.label}</span>
+            </button>
+          );
+        })}
+        {filterStatus !== "All" && (
+          <button onClick={() => setFilterStatus("All")} className="ml-1 text-[10px] text-[#64748B] hover:text-[#1E293B] underline">Clear</button>
+        )}
       </div>
 
       <div className="p-5 flex-1 overflow-y-auto">
