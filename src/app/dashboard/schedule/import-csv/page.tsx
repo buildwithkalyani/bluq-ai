@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef, Suspense } from "react";
-import { CheckCircle, AlertTriangle, X, Loader, FileText, Sparkles, RefreshCw, Upload, ClipboardList, Table2, GitBranch, Layers, ArrowLeft, PenLine, Plus, Lock, Bot, FolderOpen } from "lucide-react";
+import { useState, useCallback, useEffect, Suspense } from "react";
+import { CheckCircle, AlertTriangle, X, Loader, FileText, Sparkles, RefreshCw, Upload, ClipboardList, Table2, GitBranch, Layers, ArrowLeft, PenLine, Plus, Lock, Bot, FolderOpen, Calculator, ScrollText, Milestone, BarChart3, Package, MapPin, Receipt, Home, Building2, Factory, Route, Train, Landmark, CircleDot } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { parseCSVPreview, BLUQ_FIELDS } from "@/lib/mock-data";
 import { Card, SectionTitle, Btn } from "@/components/ui/bluq-ui";
@@ -14,7 +15,6 @@ import {
   fetchDocuments,
   deleteDocument,
   generateSchedule,
-  pollScheduleStatus,
   fetchScheduleVersions,
   createScheduleVersion,
   type ScheduleStatusResult,
@@ -23,7 +23,6 @@ import {
 } from "@/lib/api-client";
 import { SCHEDULE_JOB_PREFIX, SCHEDULE_RESULT_PREFIX } from "@/hooks/useSchedulePoller";
 import { uploadFileToStorage } from "@/lib/supabase-storage";
-import { authClient } from "@/lib/auth-client";
 
 // ─── DOCS CACHE ─────────────────────────────────────────────────────────────
 function readDocsCache(projectId: string): BackendDocument[] | null {
@@ -81,17 +80,62 @@ type FileEntry = {
   error?: string;
   url?: string;
   docId?: string; // DB id after registerDocument — needed for deletion
+  docCategory?: string;
 };
 
 type RealStep = "idle" | "uploading" | "ready" | "generating" | "done" | "error";
 
-const ALLOWED_EXTS = new Set([".pdf", ".docx", ".xlsx", ".xls", ".csv", ".jpg", ".jpeg", ".png", ".webp"]);
+const DOC_CATEGORIES: Array<{
+  id: string;
+  label: string;
+  color: string;
+  bg: string;
+  border: string;
+  hint: string;
+  Icon: LucideIcon;
+}> = [
+  { id: "gfc",          label: "GFC Drawings",         color: "#2563EB", bg: "#EFF6FF", border: "#93C5FD",  hint: "Good-For-Construction architectural & structural drawings", Icon: Layers },
+  { id: "boq",          label: "BOQ",                  color: "#059669", bg: "#DCFCE7", border: "#A7F3D0",  hint: "Bill of Quantities and cost estimates",                      Icon: Calculator },
+  { id: "specs",        label: "Specifications",        color: "#0891B2", bg: "#ECFEFF", border: "#67E8F9",  hint: "Technical specs, IS codes, material standards",              Icon: ScrollText },
+  { id: "contract",     label: "Contract / Milestones", color: "#7C3AED", bg: "#F5F3FF", border: "#C4B5FD",  hint: "Contract conditions, contractual milestones",                Icon: Milestone },
+  { id: "productivity", label: "Productivity Sheet",    color: "#D97706", bg: "#FFFBEB", border: "#FCD34D",  hint: "Resource norms, crew output rates, productivity data",       Icon: BarChart3 },
+  { id: "wbs",          label: "WBS Template",          color: "#0F766E", bg: "#F0FDFA", border: "#99F6E4",  hint: "Work Breakdown Structure template",                          Icon: GitBranch },
+  { id: "procurement",  label: "Procurement Schedule",  color: "#9333EA", bg: "#FAF5FF", border: "#D8B4FE",  hint: "Material procurement and delivery schedule",                 Icon: Package },
+  { id: "survey",       label: "Site Survey / Geotech", color: "#B45309", bg: "#FEF3C7", border: "#FDE68A",  hint: "Site survey, soil investigation, geotech report",            Icon: MapPin },
+  { id: "qs",           label: "QS Report",             color: "#DC2626", bg: "#FEF2F2", border: "#FCA5A5",  hint: "Quantity Surveyor report, rate analysis",                    Icon: Receipt },
+];
 
-function formatBytes(b: number) {
-  if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+const CONSTRUCTION_TYPES: Array<{
+  id: string;
+  label: string;
+  color: string;
+  bg: string;
+  Icon: LucideIcon;
+}> = [
+  { id: "residential", label: "Residential",      color: "#2563EB", bg: "#EFF6FF", Icon: Home      },
+  { id: "commercial",  label: "Commercial",        color: "#0891B2", bg: "#ECFEFF", Icon: Building2 },
+  { id: "mixed",       label: "Mixed Use",         color: "#7C3AED", bg: "#F5F3FF", Icon: Layers    },
+  { id: "industrial",  label: "Industrial",        color: "#D97706", bg: "#FFFBEB", Icon: Factory   },
+  { id: "road",        label: "Road / Highway",    color: "#059669", bg: "#DCFCE7", Icon: Route     },
+  { id: "railway",     label: "Railway / Metro",   color: "#0F766E", bg: "#F0FDFA", Icon: Train     },
+  { id: "bridge",      label: "Bridge / Flyover",  color: "#9333EA", bg: "#FAF5FF", Icon: Landmark  },
+  { id: "tunnel",      label: "Tunnel",            color: "#64748B", bg: "#F8FAFC", Icon: CircleDot },
+];
+
+function inferConstructionType(buildingType: string): string {
+  const b = (buildingType ?? "").toLowerCase();
+  if (b.includes("residential"))                       return "residential";
+  if (b.includes("commercial"))                        return "commercial";
+  if (b.includes("mixed"))                             return "mixed";
+  if (b.includes("industrial") || b.includes("warehouse")) return "industrial";
+  if (b.includes("road") || b.includes("highway"))    return "road";
+  if (b.includes("railway") || b.includes("metro"))   return "railway";
+  if (b.includes("bridge") || b.includes("flyover"))  return "bridge";
+  if (b.includes("tunnel"))                            return "tunnel";
+  return "";
 }
+
+const ALLOWED_EXTS = new Set([".pdf", ".docx", ".xlsx", ".xls", ".csv", ".jpg", ".jpeg", ".png", ".webp"]);
 
 function fileExt(name: string) {
   const i = name.lastIndexOf(".");
@@ -179,119 +223,7 @@ const SHORT_MODE_LABEL: Partial<Record<ImportMode, string>> = {
   manual: "Manual",
 };
 
-// ─── AI METHODOLOGY PREP STEP ────────────────────────────────────────────────
-
-function AiMethodologyStep({
-  onSkip,
-  onContinue,
-}: {
-  onSkip: () => void;
-  onContinue: (files: File[]) => void;
-}) {
-  const [files, setFiles] = useState<File[]>([]);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [dragging, setDragging] = useState(false);
-
-  const addFiles = (incoming: FileList | null) => {
-    if (!incoming) return;
-    const arr = Array.from(incoming);
-    setFiles(prev => {
-      const names = new Set(prev.map(f => f.name));
-      return [...prev, ...arr.filter(f => !names.has(f.name))];
-    });
-  };
-
-  const removeFile = (name: string) => setFiles(prev => prev.filter(f => f.name !== name));
-
-  return (
-    <div className="p-6 space-y-5">
-      {/* Header */}
-      <div>
-        <div className="text-[17px] font-bold text-[#0F172A] mb-1">One optional step before we generate</div>
-        <div className="text-[13px] text-[#64748B] max-w-xl">
-          Upload methodology or specification documents to help the AI understand your project better. This produces a more accurate schedule. You can skip this if you don't have any.
-        </div>
-      </div>
-
-      {/* What to upload */}
-      <div className="grid grid-cols-3 gap-2">
-        {[
-          { label: "Construction Methodology", hint: "How the work will be sequenced" },
-          { label: "Project Specifications", hint: "Technical specs and standards" },
-          { label: "Master Programme", hint: "High-level milestone plan" },
-        ].map(item => (
-          <div key={item.label} className="px-3 py-2.5 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC]">
-            <div className="text-[12px] font-semibold text-[#0F172A] mb-0.5">{item.label}</div>
-            <div className="text-[11px] text-[#94A3B8]">{item.hint}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Drop zone */}
-      <div
-        onDragOver={e => { e.preventDefault(); setDragging(true); }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={e => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }}
-        onClick={() => inputRef.current?.click()}
-        className={`border-2 border-dashed rounded-xl px-6 py-8 flex flex-col items-center gap-2 cursor-pointer transition-all ${
-          dragging ? "border-[#4F46E5] bg-[#EEF2FF]" : "border-[#E2E8F0] bg-[#F8FAFC] hover:border-[#C7D2FE] hover:bg-[#EEF2FF]"
-        }`}
-      >
-        <div className="w-10 h-10 rounded-xl bg-white border border-[#E2E8F0] flex items-center justify-center">
-          <Upload size={18} className="text-[#94A3B8]" />
-        </div>
-        <div className="text-[13px] font-semibold text-[#475569]">Drop files here or click to browse</div>
-        <div className="text-[11px] text-[#94A3B8]">PDF, DOCX, XLSX accepted</div>
-        <input ref={inputRef} type="file" multiple accept=".pdf,.docx,.xlsx,.xls" className="hidden" onChange={e => addFiles(e.target.files)} />
-      </div>
-
-      {/* File list */}
-      {files.length > 0 && (
-        <div className="space-y-1.5">
-          {files.map(f => (
-            <div key={f.name} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white border border-[#E2E8F0]">
-              <FileText size={14} className="text-[#4F46E5] shrink-0" />
-              <span className="flex-1 text-[13px] text-[#0F172A] truncate">{f.name}</span>
-              <span className="text-[11px] text-[#94A3B8] shrink-0">{(f.size / 1024).toFixed(0)} KB</span>
-              <button onClick={() => removeFile(f.name)} className="text-[#CBD5E1] hover:text-red-400 transition-colors cursor-pointer">
-                <X size={13} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Actions */}
-      <div className="flex items-center gap-3 pt-1">
-        <button
-          onClick={() => onContinue(files)}
-          disabled={files.length === 0}
-          className="px-6 py-2.5 rounded-xl text-[13px] font-bold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-          style={{ background: AI_COLOR }}
-        >
-          Continue with {files.length > 0 ? `${files.length} file${files.length > 1 ? "s" : ""}` : "documents"}
-        </button>
-        <button onClick={onSkip} className="px-5 py-2.5 rounded-xl text-[13px] font-medium text-[#475569] border border-[#E2E8F0] bg-white hover:bg-[#F8FAFC] transition-colors cursor-pointer">
-          Skip this step
-        </button>
-        <span className="text-[11px] text-[#94A3B8] ml-auto">You can always add more documents later</span>
-      </div>
-    </div>
-  );
-}
-
-function ImportMethodPicker({ projectName, onSelect, onBack }: { projectName: string; onSelect: (m: ImportMode, methodologyFiles?: File[]) => void; onBack?: () => void }) {
-  const [showAiPrep, setShowAiPrep] = useState(false);
-
-  if (showAiPrep) {
-    return (
-      <AiMethodologyStep
-        onSkip={() => onSelect("ai", [])}
-        onContinue={(files) => onSelect("ai", files)}
-      />
-    );
-  }
-
+function ImportMethodPicker({ projectName, onSelect, onBack }: { projectName: string; onSelect: (m: ImportMode) => void; onBack?: () => void }) {
   return (
     <div className="p-6 space-y-6">
       {/* Back link */}
@@ -312,7 +244,7 @@ function ImportMethodPicker({ projectName, onSelect, onBack }: { projectName: st
       {IMPORT_METHODS.filter(m => m.ai).map(method => (
         <button
           key={method.id}
-          onClick={() => setShowAiPrep(true)}
+          onClick={() => onSelect("ai")}
           className="w-full text-left rounded-2xl border-2 hover:shadow-xl transition-all overflow-hidden"
           style={{ borderColor: method.border, background: method.bg }}
         >
@@ -690,7 +622,6 @@ function RealImport({
   initialBuildingType,
   initialCity,
   onBack,
-  methodologyFiles,
 }: {
   projectId: string;
   workspaceId: string;
@@ -700,16 +631,46 @@ function RealImport({
   initialBuildingType?: string | null;
   initialCity?: string | null;
   onBack?: () => void;
-  methodologyFiles?: File[];
 }) {
   const router = useRouter();
   const [step, setStep] = useState<RealStep>("idle");
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [dragging, setDragging] = useState(false);
-  const [startDate, setStartDate] = useState(initialStartDate ?? "");
-  const [endDate, setEndDate] = useState(initialEndDate ?? "");
-  const [buildingType, setBuildingType] = useState(initialBuildingType ?? "");
-  const [city, setCity] = useState(initialCity ?? "");
+  // Project details come from project settings — not re-asked here
+  const startDate = initialStartDate ?? "";
+  const endDate = initialEndDate ?? "";
+  const city = initialCity ?? "";
+  const buildingType = initialBuildingType ?? "";
+  // Schedule-impacting questions
+  const [floors, setFloors] = useState("");
+  const [basement, setBasement] = useState<"0" | "1" | "2plus" | "">("");
+  const [wings, setWings] = useState("");
+  const [workingShift, setWorkingShift] = useState<"single" | "double" | "24x7" | "">("");
+  const [concreteMethod, setConcreteMethod] = useState<"rmc" | "site" | "manual" | "">("");
+  const [useCrane, setUseCrane] = useState<"yes" | "no" | "">("");
+  const [monsoon, setMonsoon] = useState<"yes" | "no" | "na" | "">("");
+  const [priority, setPriority] = useState<"deadline" | "cost" | "">("");
+  // Infrastructure questions
+  const [roadLength, setRoadLength] = useState("");
+  const [laneCount, setLaneCount] = useState<"2" | "4" | "6" | "8plus" | "">("");
+  const [pavementType, setPavementType] = useState<"flexible" | "rigid" | "composite" | "bridge" | "">("");
+  // Industrial questions
+  const [clearHeight, setClearHeight] = useState("");
+  const [spanLength, setSpanLength] = useState("");
+  // Railway questions
+  const [trackLength, setTrackLength] = useState("");
+  const [stationCount, setStationCount] = useState("");
+  const [trackGauge, setTrackGauge] = useState<"broad" | "metre" | "standard" | "">("");
+  // Bridge questions
+  const [totalSpan, setTotalSpan] = useState("");
+  const [pierCount, setPierCount] = useState("");
+  const [deckType, setDeckType] = useState<"psc" | "steel" | "composite" | "cable" | "">("");
+  // Tunnel questions
+  const [tunnelLength, setTunnelLength] = useState("");
+  const [tunnelDiameter, setTunnelDiameter] = useState("");
+  const [tunnelMethod, setTunnelMethod] = useState<"tbm" | "natm" | "cutcover" | "">("");
+  // Construction type — inferred from project category, user can change
+  const [constructionType, setConstructionType] = useState(() => inferConstructionType(buildingType));
   const [jobStatus, setJobStatus] = useState<ScheduleStatusResult | null>(null);
   const [genResult, setGenResult] = useState<ScheduleStatusResult["result"] | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
@@ -808,7 +769,17 @@ function RealImport({
     if (!valid.length) return;
     setFiles(prev => [
       ...prev,
-      ...valid.map(f => ({ file: f, status: "pending" as const, progress: 0 })),
+      ...valid.map(f => ({ file: f, status: "pending" as const, progress: 0, docCategory: "" })),
+    ]);
+  }, []);
+
+  const addFilesToCategory = useCallback((category: string, incoming: FileList | null) => {
+    if (!incoming) return;
+    const valid = Array.from(incoming).filter(f => ALLOWED_EXTS.has(fileExt(f.name)));
+    if (!valid.length) return;
+    setFiles(prev => [
+      ...prev,
+      ...valid.map(f => ({ file: f, status: "pending" as const, progress: 0, docCategory: category })),
     ]);
   }, []);
 
@@ -848,7 +819,7 @@ function RealImport({
           fileUrl: url,
           fileType: fileExt(entry.file.name).slice(1),
           fileSize: entry.file.size,
-          folder: "Schedules",
+          folder: entry.docCategory ? `Schedules/${entry.docCategory}` : "Schedules",
         });
 
         setFiles(prev => prev.map((f, idx) => idx === i ? { ...f, status: "done", progress: 100, url, docId: doc.id } : f));
@@ -870,6 +841,7 @@ function RealImport({
     setErrorMsg("");
 
     try {
+      const docTypes = Array.from(new Set(files.map(f => f.docCategory).filter(Boolean)));
       const res = await generateSchedule({
         projectId,
         workspaceId,
@@ -877,7 +849,38 @@ function RealImport({
         endDate: endDate || undefined,
         buildingType: buildingType || undefined,
         city: city || undefined,
-      });
+        // extra context — backend uses what it supports, ignores the rest
+        ...(floors && { floors }),
+        ...(basement && { basement }),
+        ...(wings && { wings }),
+        ...(workingShift && { workingShift }),
+        ...(concreteMethod && { concreteMethod }),
+        ...(useCrane && { useCrane }),
+        ...(monsoon && { monsoon }),
+        ...(priority && { priority }),
+        // Infrastructure
+        ...(constructionType && { constructionType }),
+        // Road
+        ...(roadLength && { roadLength }),
+        ...(laneCount && { laneCount }),
+        ...(pavementType && { pavementType }),
+        // Industrial
+        ...(clearHeight && { clearHeight }),
+        ...(spanLength && { spanLength }),
+        // Railway
+        ...(trackLength && { trackLength }),
+        ...(stationCount && { stationCount }),
+        ...(trackGauge && { trackGauge }),
+        // Bridge
+        ...(totalSpan && { totalSpan }),
+        ...(pierCount && { pierCount }),
+        ...(deckType && { deckType }),
+        // Tunnel
+        ...(tunnelLength && { tunnelLength }),
+        ...(tunnelDiameter && { tunnelDiameter }),
+        ...(tunnelMethod && { tunnelMethod }),
+        ...(docTypes.length && { docTypes }),
+      } as Parameters<typeof generateSchedule>[0]);
 
       localStorage.setItem(`${SCHEDULE_JOB_PREFIX}${projectId}`, res.jobId);
       // Layout-level poller picks this up and polls in background
@@ -893,34 +896,70 @@ function RealImport({
   const doneCount = files.filter(f => f.status === "done").length;
   const errorCount = files.filter(f => f.status === "error").length;
   const allDone = files.length > 0 && files.every(f => f.status === "done" || f.status === "error");
+  const totalDocs = existingDocs.length + doneCount;
+  const canGenerate = totalDocs > 0;
 
   // ── DONE STATE ──
   if (step === "done" && genResult) {
+    const ASSUMPTIONS = [
+      concreteMethod === "rmc" ? "Ready-mix concrete (RMC) delivery assumed — pump, 1.5m lifts, 14-day cure cycle" : concreteMethod === "site" ? "Site batching plant assumed — crew output derived from productivity norms" : "Concrete supply method inferred from documents or BOQ quantities",
+      useCrane === "yes" ? "Tower crane included — vertical work sequence and hoist cycles planned accordingly" : useCrane === "no" ? "No crane — material hoisting via manual lifts and temporary hoist" : "Crane requirement inferred from building height and floor count",
+      monsoon === "yes" ? "Monsoon shutdown factored into timeline — outdoor structural work paused June–September" : monsoon === "na" ? "No monsoon impact (non-seasonal or indoor project)" : "Monsoon risk assessed from project city",
+      priority === "deadline" ? "Schedule optimised for earliest completion — parallel activities maximised" : priority === "cost" ? "Schedule optimised for resource efficiency — crew continuity prioritised" : "Contractual milestones used to set schedule priorities",
+      "IS code mix designs applied for concrete grades unless specifications state otherwise",
+      "Floor-by-floor sequential construction unless GFC drawings indicate podium or transfer slab",
+      "Procurement lead times defaulted to IS norms — override in Procurement Schedule if different",
+    ];
+
     return (
-      <div className="p-5 space-y-4 max-w-2xl">
-        <SectionTitle>Schedule Generated</SectionTitle>
-        <div className="bg-[#ECFDF5] border border-[#4ac26b] rounded-xl p-6 flex flex-col items-center text-center gap-3">
-          <CheckCircle size={40} className="text-[#059669]" />
-          <div className="text-[15px] font-bold text-[#059669]">Schedule ready for {projectName}</div>
-          <div className="text-[13px] text-[#059669]">
-            {genResult.taskCount} tasks · {genResult.durationDays} days total duration
+      <div className="p-6 space-y-5 max-w-2xl">
+        {/* Success banner */}
+        <div className="rounded-2xl border border-[#A7F3D0] bg-[#ECFDF5] p-5 flex items-start gap-4">
+          <div className="w-10 h-10 rounded-xl bg-[#D1FAE5] flex items-center justify-center shrink-0">
+            <CheckCircle size={22} className="text-[#059669]" />
+          </div>
+          <div className="flex-1">
+            <div className="text-[15px] font-bold text-[#065F46] mb-0.5">Schedule ready — {projectName}</div>
+            <div className="text-[13px] text-[#059669]">
+              {genResult.taskCount} tasks · {genResult.durationDays} days total duration
+            </div>
           </div>
         </div>
+
+        {/* Assumptions log */}
+        <div className="rounded-xl border border-[#E2E8F0] bg-white overflow-hidden">
+          <div className="px-4 py-3 border-b border-[#E2E8F0] bg-[#F8FAFC] flex items-center gap-2">
+            <Bot size={14} className="text-[#4F46E5]" />
+            <span className="text-[12px] font-bold text-[#0F172A]">AI assumptions — change anything you disagree with</span>
+          </div>
+          <div className="divide-y divide-[#F1F5F9]">
+            {ASSUMPTIONS.map((a, i) => (
+              <div key={i} className="px-4 py-2.5 flex items-start gap-3">
+                <span className="text-[10px] font-bold text-[#94A3B8] mt-0.5 shrink-0">✦</span>
+                <span className="text-[12px] text-[#475569]">{a}</span>
+              </div>
+            ))}
+          </div>
+          <div className="px-4 py-3 bg-[#F8FAFC] border-t border-[#E2E8F0]">
+            <span className="text-[11px] text-[#94A3B8]">Open the Gantt chart and edit any task, duration, or dependency directly.</span>
+          </div>
+        </div>
+
         <div className="flex gap-3">
           <button
             onClick={() => router.push(`/dashboard/schedule/gantt?projectId=${projectId}&workspaceId=${workspaceId}`)}
-            className="px-5 py-2 bg-[#2563EB] text-white rounded-md text-[13px] font-semibold hover:bg-[#1D4ED8] transition-colors"
+            className="px-5 py-2.5 rounded-xl text-[13px] font-bold text-white bg-[#4F46E5] hover:bg-[#4338CA] transition-colors"
           >
-            View Gantt →
+            <Sparkles size={13} className="inline mr-1.5" />View Gantt →
           </button>
           <button
             onClick={() => {
               localStorage.removeItem(`${SCHEDULE_RESULT_PREFIX}${projectId}`);
               setStep("idle"); setFiles([]); setJobStatus(null); setGenResult(null);
             }}
-            className="px-5 py-2 border border-[#D0D7DE] bg-white text-[#24292f] rounded-md text-[13px] font-semibold hover:bg-[#f6f8fa]"
+            className="px-5 py-2.5 rounded-xl border border-[#E2E8F0] bg-white text-[#475569] text-[13px] font-semibold hover:bg-[#F8FAFC] transition-colors"
           >
-            Upload More Files
+            Upload more files
           </button>
         </div>
       </div>
@@ -1058,245 +1097,646 @@ function RealImport({
     );
   }
 
-  // ── IDLE / UPLOADING / READY ──
+  // ── IDLE / UPLOADING / READY — combined form ──
+  const ToggleGroup = ({ value, onChange, options }: {
+    value: string;
+    onChange: (v: string) => void;
+    options: { value: string; label: string }[];
+  }) => (
+    <div className="flex gap-2">
+      {options.map(o => (
+        <button
+          key={o.value}
+          onClick={() => onChange(value === o.value ? "" : o.value)}
+          className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-all cursor-pointer ${
+            value === o.value
+              ? "bg-[#4F46E5] text-white border-[#4F46E5]"
+              : "bg-white text-[#475569] border-[#E2E8F0] hover:border-[#C7D2FE] hover:text-[#4F46E5]"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
-    <div className="p-5 space-y-4">
+    <div className="p-5 space-y-5 w-full">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           {onBack && (
-            <>
-              <button onClick={onBack} className="flex items-center gap-1 text-[12px] text-[#64748B] hover:text-[#0F172A] font-semibold transition-colors">
-                <ArrowLeft size={14} /> Back
-              </button>
-              <span className="text-[#E2E8F0]">·</span>
-            </>
-          )}
-          <SectionTitle>AI Generate from Documents</SectionTitle>
-        </div>
-        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#EFF6FF] rounded-md">
-          <span className="w-2 h-2 rounded-full bg-[#2563EB]" />
-          <span className="text-[12px] font-semibold text-[#2563EB]">{projectName}</span>
-        </div>
-      </div>
-
-      {/* Step indicator */}
-      <div className="flex items-center gap-2">
-        {[
-          { label: "1. Upload Files", active: step === "idle" || step === "uploading", done: step === "ready" },
-          { label: "2. Generate Schedule", active: step === "ready", done: false },
-        ].map((s, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <div className={`px-3 py-1 rounded-full text-xs font-semibold ${
-              s.done ? "bg-[#ECFDF5] text-[#059669]" : s.active ? "bg-[#2563EB] text-white" : "bg-[#F1F5F9] text-[#94A3B8]"
-            }`}>{s.label}</div>
-            {i === 0 && <span className="text-[#E2E8F0] text-xs">→</span>}
-          </div>
-        ))}
-      </div>
-
-      {/* ── Existing Documents ── */}
-      {existingDocs.length > 0 && (
-        <div className="bg-white border border-[#E2E8F0] rounded-lg overflow-hidden">
-          <div className="px-4 py-2.5 bg-[#F8FAFC] border-b border-[#E2E8F0] flex items-center justify-between">
-            <span className="text-[12px] font-bold text-[#0F172A]">Uploaded Documents</span>
-            <span className="text-[11px] text-[#94A3B8]">{existingDocs.length} file{existingDocs.length !== 1 ? "s" : ""} · AI will use these for schedule generation</span>
-          </div>
-          <div className="divide-y divide-[#F1F5F9]">
-            {existingDocs.map(doc => (
-              <div key={doc.id} className="px-4 py-2.5 flex items-center gap-3">
-                <span className="text-base shrink-0">📄</span>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[12px] font-semibold text-[#0F172A] truncate">{doc.fileName}</div>
-                  <div className="text-[11px] text-[#94A3B8]">
-                    {doc.fileType?.toUpperCase()} · {doc.fileSize ? `${(doc.fileSize / 1024 / 1024).toFixed(1)} MB` : "—"} · {new Date(doc.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
-                  </div>
-                </div>
-                <button
-                  onClick={() => handleDeleteDoc(doc.id)}
-                  className="text-[#CF222E] text-xs font-semibold hover:opacity-70 transition shrink-0"
-                  title="Remove document"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── STEP 1: Upload files ── */}
-      <Card>
-        {/* Drop zone */}
-        <div
-          onDragOver={e => { e.preventDefault(); setDragging(true); }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={handleDrop}
-          className={`border-2 border-dashed rounded-lg p-10 text-center transition-colors ${
-            dragging ? "border-[#2563EB] bg-[#EFF6FF]" : "border-[#E2E8F0] hover:border-[#94A3B8]"
-          }`}
-        >
-          <div className="text-4xl mb-3">📂</div>
-          <div className="text-sm font-semibold text-[#0F172A] mb-1">
-            Drag & drop project documents here
-          </div>
-          <div className="text-xs text-[#94A3B8] mb-4">
-            PDF drawings, BOQ, scope of work, XLSX schedules · Multiple files at once
-          </div>
-          <label>
-            <input
-              type="file"
-              accept=".pdf,.docx,.xlsx,.xls,.csv,.jpg,.jpeg,.png,.webp"
-              multiple
-              className="hidden"
-              onChange={e => { if (e.target.files?.length) { addFiles(e.target.files); e.target.value = ""; } }}
-            />
-            <span className="inline-block px-5 py-2 bg-[#2563EB] text-white rounded-md text-[13px] font-semibold cursor-pointer hover:bg-[#1D4ED8] transition-colors">
-              Browse Files
-            </span>
-          </label>
-        </div>
-
-        {/* File list */}
-        {files.length > 0 && (
-          <div className="mt-4 space-y-2">
-            {files.map((entry, i) => (
-              <div key={i} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0]">
-                <span className="text-lg shrink-0">
-                  {entry.status === "done" ? <CheckCircle size={18} className="text-[#059669]" /> : entry.status === "error" ? <X size={18} className="text-[#DC2626]" /> : entry.status === "uploading" ? <Loader size={18} className="animate-spin text-[#2563EB]" /> : <FileText size={18} className="text-[#94A3B8]" />}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[12px] font-semibold text-[#0F172A] truncate">{entry.file.name}</div>
-                  <div className="text-[11px] text-[#94A3B8]">{formatBytes(entry.file.size)}</div>
-                  {entry.status === "uploading" && (
-                    <div className="mt-1 h-1 bg-[#E2E8F0] rounded-full overflow-hidden">
-                      <div className="h-full bg-[#2563EB] rounded-full transition-all" style={{ width: `${entry.progress}%` }} />
-                    </div>
-                  )}
-                  {entry.status === "error" && (
-                    <div className="text-[11px] text-[#DC2626] mt-0.5">{entry.error}</div>
-                  )}
-                </div>
-                {(entry.status === "pending" || entry.status === "error") && (
-                  <button onClick={() => removeFile(i)} className="text-[#8C959F] hover:text-[#CF222E] text-sm shrink-0" title="Remove">✕</button>
-                )}
-                {entry.status === "done" && (
-                  <button
-                    onClick={() => entry.docId && handleDeleteDoc(entry.docId)}
-                    disabled={!entry.docId}
-                    className="text-[#8C959F] hover:text-[#CF222E] text-sm shrink-0 disabled:opacity-30"
-                    title="Delete file"
-                  >✕</button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Upload button */}
-        {files.some(f => f.status === "pending") && step !== "uploading" && (
-          <div className="mt-4 flex gap-3 items-center">
-            <button
-              onClick={handleUpload}
-              className="px-5 py-2 bg-[#2563EB] text-white rounded-md text-[13px] font-semibold hover:bg-[#1D4ED8] transition-colors"
-            >
-              Upload {files.filter(f => f.status === "pending").length} File{files.filter(f => f.status === "pending").length > 1 ? "s" : ""}
+            <button onClick={onBack} className="flex items-center gap-1 text-[12px] text-[#64748B] hover:text-[#0F172A] font-semibold transition-colors cursor-pointer">
+              <ArrowLeft size={14} /> Back
             </button>
-            <span className="text-[11px] text-[#94A3B8]">Files are securely stored and used only for schedule generation</span>
-          </div>
-        )}
-
-        {step === "uploading" && (
-          <div className="mt-4 text-[13px] text-[#475569] flex items-center gap-2">
-            <span className="animate-spin text-base">⏳</span> Uploading files…
-          </div>
-        )}
-
-        {/* Upload summary */}
-        {allDone && (
-          <div className={`mt-4 px-3 py-2 rounded-md text-[12px] font-semibold ${
-            errorCount === 0 ? "bg-[#ECFDF5] text-[#059669]" : "bg-[#FFFBEB] text-[#9a6700]"
-          }`}>
-            {doneCount} file{doneCount !== 1 ? "s" : ""} uploaded successfully
-            {errorCount > 0 && ` · ${errorCount} failed`}
-          </div>
-        )}
-
-        {/* Expected formats */}
-        <div className="mt-4 p-3 bg-[#F8FAFC] rounded-md">
-          <div className="text-[11px] font-bold text-[#475569] mb-2">ACCEPTED FILE TYPES</div>
-          <div className="flex flex-wrap gap-1.5">
-            {["PDF (drawings, scope)", "XLSX (BOQ, schedule)", "DOCX (specs)", "JPG/PNG (site photos)", "CSV (task list)"].map(f => (
-              <span key={f} className="px-2 py-0.5 bg-white border border-[#E2E8F0] rounded text-[11px] text-[#475569]">{f}</span>
-            ))}
-          </div>
+          )}
         </div>
-      </Card>
+        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#EEF2FF] rounded-lg">
+          <Sparkles size={12} className="text-[#4F46E5]" />
+          <span className="text-[12px] font-semibold text-[#4F46E5]">{projectName}</span>
+        </div>
+      </div>
+
+      {/* ── CONSTRUCTION TYPE — read from project, inline override if unset ── */}
+      {((): React.ReactNode => {
+        const ctInfo = CONSTRUCTION_TYPES.find(c => c.id === constructionType);
+        const { Icon: CtIcon } = ctInfo ?? {};
+        if (ctInfo) {
+          return (
+            <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl border border-[#E2E8F0] bg-white">
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: ctInfo.bg }}>
+                {CtIcon && <CtIcon size={14} color={ctInfo.color} />}
+              </div>
+              <div className="flex-1">
+                <span className="text-[12px] font-semibold text-[#0F172A]">{ctInfo.label}</span>
+                <span className="text-[11px] text-[#94A3B8] ml-2">from project settings</span>
+              </div>
+              <div className="flex gap-1">
+                {CONSTRUCTION_TYPES.map(ct => (
+                  <button key={ct.id} title={ct.label} onClick={() => setConstructionType(ct.id)}
+                    className="w-5 h-5 rounded-md border-2 transition-all cursor-pointer"
+                    style={ct.id === constructionType
+                      ? { borderColor: ct.color, background: ct.color }
+                      : { borderColor: "#E2E8F0", background: "#F8FAFC" }
+                    } />
+                ))}
+              </div>
+            </div>
+          );
+        }
+        return (
+          <div className="rounded-xl border border-[#FCD34D] bg-[#FFFBEB] overflow-hidden">
+            <div className="px-4 py-2.5 flex items-center gap-2 border-b border-[#FDE68A]">
+              <span className="text-[12px] font-bold text-[#92400E]">Construction type not set for this project</span>
+              <span className="text-[11px] text-[#B45309]">— select one to unlock tailored questions</span>
+            </div>
+            <div className="px-4 py-3 grid grid-cols-4 gap-2 sm:grid-cols-8">
+              {CONSTRUCTION_TYPES.map(ct => {
+                const { Icon } = ct;
+                return (
+                  <button key={ct.id} onClick={() => setConstructionType(ct.id)}
+                    className="flex flex-col items-center gap-1.5 px-2 py-2.5 rounded-xl border-2 cursor-pointer transition-all hover:shadow-sm text-center"
+                    style={{ borderColor: "#E2E8F0", background: "#FFFFFF" }}
+                  >
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: ct.bg }}>
+                      <Icon size={13} color={ct.color} />
+                    </div>
+                    <span className="text-[10px] font-semibold leading-tight text-[#64748B]">{ct.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── SECTION 1: Category tiles upload ── */}
+      <div className="rounded-xl border border-[#E2E8F0] bg-white overflow-hidden">
+        <div className="px-4 py-3 border-b border-[#E2E8F0] bg-[#F8FAFC] flex items-center justify-between">
+          <div>
+            <div className="text-[13px] font-bold text-[#0F172A]">Upload project documents</div>
+            <div className="text-[11px] text-[#64748B] mt-0.5">Click a category → select files. AI reads each type differently — tagging reduces questions</div>
+          </div>
+          {totalDocs > 0 && (
+            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#DCFCE7] text-[#16A34A]">
+              {totalDocs} file{totalDocs !== 1 ? "s" : ""} ready
+            </span>
+          )}
+        </div>
+
+        <div className="px-4 pb-4 pt-3 space-y-3">
+          {/* Category tile grid */}
+          <div className="grid grid-cols-3 gap-2.5">
+            {DOC_CATEGORIES.map(cat => {
+              const catFiles = files.filter(f => f.docCategory === cat.id);
+              const catCount = catFiles.length + existingDocs.filter(d => d.folder?.includes(cat.id)).length;
+              const active = catCount > 0;
+              const { Icon } = cat;
+              return (
+                <label
+                  key={cat.id}
+                  title={cat.hint}
+                  className="relative flex flex-col gap-2 p-3 rounded-xl border-2 cursor-pointer transition-all hover:shadow-md group"
+                  style={active
+                    ? { borderColor: cat.color, background: cat.bg }
+                    : { borderColor: "#E2E8F0", background: "#FFFFFF" }
+                  }
+                >
+                  <input type="file" multiple accept=".pdf,.docx,.xlsx,.xls,.csv,.jpg,.jpeg,.png,.webp" className="hidden"
+                    onChange={e => { addFilesToCategory(cat.id, e.target.files); e.target.value = ""; }} />
+
+                  {/* Icon + badge row */}
+                  <div className="flex items-start justify-between">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                      style={{ background: active ? cat.color : cat.bg }}>
+                      <Icon size={15} color={active ? "#fff" : cat.color} />
+                    </div>
+                    {active ? (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full text-white shrink-0" style={{ background: cat.color }}>
+                        {catCount}
+                      </span>
+                    ) : (
+                      <Upload size={11} className="text-[#CBD5E1] group-hover:text-[#94A3B8] transition-colors mt-0.5" />
+                    )}
+                  </div>
+
+                  {/* Label + state */}
+                  <div>
+                    <div className="text-[11px] font-bold leading-tight" style={{ color: active ? cat.color : "#1E293B" }}>
+                      {cat.label}
+                    </div>
+                    <div className="text-[10px] mt-0.5 leading-tight" style={{ color: active ? cat.color : "#94A3B8" }}>
+                      {active ? `${catCount} file${catCount > 1 ? "s" : ""} added` : "Click to upload"}
+                    </div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+
+          {/* File list — all uploaded files */}
+          {(existingDocs.length > 0 || files.length > 0) && (
+            <div className="space-y-1">
+              {existingDocs.map(doc => {
+                const cat = DOC_CATEGORIES.find(c => doc.folder?.includes(c.id));
+                return (
+                  <div key={doc.id} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0]">
+                    <CheckCircle size={12} className="text-[#059669] shrink-0" />
+                    <span className="flex-1 text-[11px] text-[#0F172A] truncate">{doc.fileName}</span>
+                    {cat && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: cat.bg, color: cat.color }}>{cat.label}</span>}
+                    <button onClick={() => handleDeleteDoc(doc.id)} className="text-[#CBD5E1] hover:text-[#CF222E] cursor-pointer shrink-0"><X size={11} /></button>
+                  </div>
+                );
+              })}
+              {files.map((entry, i) => {
+                const cat = DOC_CATEGORIES.find(c => c.id === entry.docCategory);
+                return (
+                  <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0]">
+                    {entry.status === "done" ? <CheckCircle size={12} className="text-[#059669] shrink-0" />
+                      : entry.status === "error" ? <X size={12} className="text-[#DC2626] shrink-0" />
+                      : entry.status === "uploading" ? <Loader size={12} className="animate-spin text-[#4F46E5] shrink-0" />
+                      : <FileText size={12} className="text-[#94A3B8] shrink-0" />}
+                    <span className="flex-1 text-[11px] text-[#0F172A] truncate">{entry.file.name}</span>
+                    {entry.status === "uploading" && (
+                      <div className="w-16 h-1 bg-[#E2E8F0] rounded-full overflow-hidden shrink-0">
+                        <div className="h-full bg-[#4F46E5] rounded-full" style={{ width: `${entry.progress}%` }} />
+                      </div>
+                    )}
+                    {cat && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: cat.bg, color: cat.color }}>{cat.label}</span>}
+                    {!cat && <span className="text-[10px] text-[#D97706] font-medium shrink-0">untagged</span>}
+                    {(entry.status === "pending" || entry.status === "error") && (
+                      <button onClick={() => removeFile(i)} className="text-[#CBD5E1] hover:text-[#CF222E] cursor-pointer shrink-0"><X size={11} /></button>
+                    )}
+                    {entry.status === "done" && entry.docId && (
+                      <button onClick={() => handleDeleteDoc(entry.docId!)} className="text-[#CBD5E1] hover:text-[#CF222E] cursor-pointer shrink-0"><X size={11} /></button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Fallback drop zone for uncategorised */}
+          <div
+            onDragOver={e => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={handleDrop}
+            className={`border border-dashed rounded-lg px-4 py-3 text-center transition-all ${
+              dragging ? "border-[#4F46E5] bg-[#EEF2FF]" : "border-[#E2E8F0] hover:border-[#C7D2FE]"
+            }`}
+          >
+            <span className="text-[11px] text-[#94A3B8]">Or drag files here — you can tag the category after</span>
+          </div>
+
+          {/* Upload / status */}
+          {files.some(f => f.status === "pending") && step !== "uploading" && (
+            <div className="flex items-center gap-3">
+              <button onClick={handleUpload} className="px-4 py-1.5 rounded-lg bg-[#4F46E5] text-white text-[12px] font-semibold hover:bg-[#4338CA] transition-colors cursor-pointer">
+                Upload {files.filter(f => f.status === "pending").length} file{files.filter(f => f.status === "pending").length > 1 ? "s" : ""}
+              </button>
+            </div>
+          )}
+          {step === "uploading" && <div className="text-[12px] text-[#475569] flex items-center gap-2"><Loader size={13} className="animate-spin text-[#4F46E5]" /> Uploading…</div>}
+          {allDone && errorCount === 0 && <div className="text-[12px] font-semibold text-[#059669]">✓ {doneCount} file{doneCount !== 1 ? "s" : ""} uploaded</div>}
+        </div>
+      </div>
 
       {deleteError && (
-        <div className="px-3 py-2 bg-[#fff8c5] border border-[#d4a72c] rounded-md text-[12px] text-[#9a6700] font-semibold flex items-center justify-between">
-          <span>⚠️ {deleteError}</span>
-          <button onClick={() => setDeleteError("")} className="ml-3 hover:opacity-70">✕</button>
+        <div className="px-3 py-2 bg-[#FEF3C7] border border-[#D97706] rounded-lg text-[12px] text-[#92400E] font-semibold flex items-center justify-between">
+          <span>⚠ {deleteError}</span>
+          <button onClick={() => setDeleteError("")} className="ml-3 hover:opacity-70 cursor-pointer"><X size={12} /></button>
         </div>
       )}
+
+      {/* ── SECTION 2: Smart questions — driven by constructionType ── */}
+      {((): React.ReactNode => {
+        const taggedCategories = new Set(files.map(f => f.docCategory).filter(Boolean));
+        const hasProductivity = taggedCategories.has("productivity") || taggedCategories.has("wbs");
+        const hasGFC = taggedCategories.has("gfc");
+        const hasContract = taggedCategories.has("contract");
+        const hasSurvey = taggedCategories.has("survey");
+        const hasBoq = taggedCategories.has("boq");
+
+        const ct = constructionType;
+        const isBuilding  = ct === "residential" || ct === "commercial" || ct === "mixed" || ct === "";
+        const isIndustrial = ct === "industrial";
+        const isRoad      = ct === "road";
+        const isRailway   = ct === "railway";
+        const isBridge    = ct === "bridge";
+        const isTunnel    = ct === "tunnel";
+
+        if (!ct) {
+          return (
+            <div className="rounded-xl border border-dashed border-[#CBD5E1] bg-[#F8FAFC] p-6 text-center">
+              <div className="text-[13px] font-semibold text-[#94A3B8]">Select a construction type above</div>
+              <div className="text-[11px] text-[#CBD5E1] mt-1">Questions will appear here — tailored to your project</div>
+            </div>
+          );
+        }
+
+        const ctInfo = CONSTRUCTION_TYPES.find(c => c.id === ct);
+
+        return (
+      <div className="rounded-xl border border-[#E2E8F0] bg-white overflow-hidden">
+        <div className="px-4 py-3 border-b border-[#E2E8F0] bg-[#F8FAFC] flex items-center justify-between">
+          <div>
+            <div className="text-[13px] font-bold text-[#0F172A]">
+              {ctInfo?.label} — schedule inputs
+            </div>
+            <div className="text-[11px] text-[#64748B] mt-0.5">
+              {taggedCategories.size > 0
+                ? `${taggedCategories.size} doc type${taggedCategories.size > 1 ? "s" : ""} uploaded — some questions auto-filled`
+                : "Upload tagged documents above to reduce questions here"}
+            </div>
+          </div>
+        </div>
+
+        <div className="px-4 py-4 space-y-5">
+
+          {/* ── BUILDING (Residential / Commercial / Mixed Use) ── */}
+          {isBuilding && (
+            <>
+              {!hasGFC ? (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-[12px] font-bold text-[#0F172A] mb-1">Floors above ground</div>
+                    <div className="text-[11px] text-[#64748B] mb-2">Primary driver of total duration</div>
+                    <input type="number" min="1" max="100" value={floors} onChange={e => setFloors(e.target.value)}
+                      placeholder="e.g. 12"
+                      className="w-full border border-[#E2E8F0] rounded-lg px-3 py-2 text-[13px] focus:ring-1 focus:ring-[#4F46E5] outline-none" />
+                  </div>
+                  <div>
+                    <div className="text-[12px] font-bold text-[#0F172A] mb-1">Basement levels</div>
+                    <div className="text-[11px] text-[#64748B] mb-2">Adds excavation + dewatering tasks</div>
+                    <ToggleGroup value={basement} onChange={v => setBasement(v as typeof basement)} options={[
+                      { value: "0", label: "None" },
+                      { value: "1", label: "1 level" },
+                      { value: "2plus", label: "2+" },
+                    ]} />
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#EFF6FF] border border-[#93C5FD]">
+                  <CheckCircle size={12} className="text-[#2563EB] shrink-0" />
+                  <span className="text-[11px] text-[#2563EB]">GFC drawings uploaded — floors, basement, and spans detected automatically</span>
+                </div>
+              )}
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-[12px] font-bold text-[#0F172A]">Wings / blocks</div>
+                  <div className="text-[11px] text-[#64748B]">Multiple wings enable parallel work — compresses schedule</div>
+                </div>
+                <input type="number" min="1" max="20" value={wings} onChange={e => setWings(e.target.value)}
+                  placeholder="1"
+                  className="w-20 border border-[#E2E8F0] rounded-lg px-3 py-1.5 text-[13px] text-center focus:ring-1 focus:ring-[#4F46E5] outline-none" />
+              </div>
+              <div className="h-px bg-[#F1F5F9]" />
+              {!hasProductivity ? (
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-[12px] font-bold text-[#0F172A]">Concrete supply</div>
+                    <div className="text-[11px] text-[#64748B]">Determines daily pour output and cycle time</div>
+                  </div>
+                  <ToggleGroup value={concreteMethod} onChange={v => setConcreteMethod(v as typeof concreteMethod)} options={[
+                    { value: "rmc", label: "RMC" },
+                    { value: "site", label: "Batching plant" },
+                    { value: "manual", label: "Manual mix" },
+                  ]} />
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#FFFBEB] border border-[#FCD34D]">
+                  <CheckCircle size={12} className="text-[#D97706] shrink-0" />
+                  <span className="text-[11px] text-[#D97706]">Productivity sheet uploaded — crew norms and output rates read from it</span>
+                </div>
+              )}
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-[12px] font-bold text-[#0F172A]">Tower crane on site?</div>
+                  <div className="text-[11px] text-[#64748B]">Changes vertical sequencing and hoist cycles</div>
+                </div>
+                <ToggleGroup value={useCrane} onChange={v => setUseCrane(v as typeof useCrane)} options={[
+                  { value: "yes", label: "Yes" },
+                  { value: "no", label: "No" },
+                ]} />
+              </div>
+            </>
+          )}
+
+          {/* ── INDUSTRIAL ── */}
+          {isIndustrial && (
+            <>
+              {!hasGFC ? (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-[12px] font-bold text-[#0F172A] mb-1">Clear height (m)</div>
+                    <div className="text-[11px] text-[#64748B] mb-2">Drives structure and crane headroom</div>
+                    <input type="number" min="3" max="50" value={clearHeight} onChange={e => setClearHeight(e.target.value)}
+                      placeholder="e.g. 12"
+                      className="w-full border border-[#E2E8F0] rounded-lg px-3 py-2 text-[13px] focus:ring-1 focus:ring-[#4F46E5] outline-none" />
+                  </div>
+                  <div>
+                    <div className="text-[12px] font-bold text-[#0F172A] mb-1">Bay span (m)</div>
+                    <div className="text-[11px] text-[#64748B] mb-2">Column spacing — affects structural cycle time</div>
+                    <input type="number" min="5" max="100" value={spanLength} onChange={e => setSpanLength(e.target.value)}
+                      placeholder="e.g. 24"
+                      className="w-full border border-[#E2E8F0] rounded-lg px-3 py-2 text-[13px] focus:ring-1 focus:ring-[#4F46E5] outline-none" />
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#EFF6FF] border border-[#93C5FD]">
+                  <CheckCircle size={12} className="text-[#2563EB] shrink-0" />
+                  <span className="text-[11px] text-[#2563EB]">GFC drawings uploaded — clear height and bay spans detected automatically</span>
+                </div>
+              )}
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-[12px] font-bold text-[#0F172A]">Overhead / gantry crane?</div>
+                  <div className="text-[11px] text-[#64748B]">Adds crane rail erection and commissioning tasks</div>
+                </div>
+                <ToggleGroup value={useCrane} onChange={v => setUseCrane(v as typeof useCrane)} options={[
+                  { value: "yes", label: "Yes" },
+                  { value: "no", label: "No" },
+                ]} />
+              </div>
+              <div className="h-px bg-[#F1F5F9]" />
+            </>
+          )}
+
+          {/* ── ROAD / HIGHWAY ── */}
+          {isRoad && (
+            <>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-[12px] font-bold text-[#0F172A]">Total length (km)</div>
+                  <div className="text-[11px] text-[#64748B]">Primary quantity driver for earthworks and paving</div>
+                </div>
+                <input type="number" min="0.1" step="0.1" value={roadLength} onChange={e => setRoadLength(e.target.value)}
+                  placeholder="e.g. 12.5"
+                  className="w-24 border border-[#E2E8F0] rounded-lg px-3 py-1.5 text-[13px] text-center focus:ring-1 focus:ring-[#4F46E5] outline-none" />
+              </div>
+              {!hasSurvey ? (
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-[12px] font-bold text-[#0F172A]">Number of lanes</div>
+                    <div className="text-[11px] text-[#64748B]">Doubles earthwork and pavement quantities per km</div>
+                  </div>
+                  <ToggleGroup value={laneCount} onChange={v => setLaneCount(v as typeof laneCount)} options={[
+                    { value: "2", label: "2 lane" },
+                    { value: "4", label: "4 lane" },
+                    { value: "6", label: "6 lane" },
+                    { value: "8plus", label: "8+" },
+                  ]} />
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#FFFBEB] border border-[#FCD34D]">
+                  <CheckCircle size={12} className="text-[#D97706] shrink-0" />
+                  <span className="text-[11px] text-[#D97706]">Site survey uploaded — cross-section and lane data read from it</span>
+                </div>
+              )}
+              {!hasBoq ? (
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-[12px] font-bold text-[#0F172A]">Pavement type</div>
+                    <div className="text-[11px] text-[#64748B]">Determines layer sequence, curing time, and plant required</div>
+                  </div>
+                  <ToggleGroup value={pavementType} onChange={v => setPavementType(v as typeof pavementType)} options={[
+                    { value: "flexible", label: "Flexible (BT)" },
+                    { value: "rigid", label: "Rigid (CC)" },
+                    { value: "composite", label: "Composite" },
+                  ]} />
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#FFFBEB] border border-[#FCD34D]">
+                  <CheckCircle size={12} className="text-[#D97706] shrink-0" />
+                  <span className="text-[11px] text-[#D97706]">BOQ uploaded — pavement layers and quantities read from it</span>
+                </div>
+              )}
+              <div className="h-px bg-[#F1F5F9]" />
+            </>
+          )}
+
+          {/* ── RAILWAY / METRO ── */}
+          {isRailway && (
+            <>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-[12px] font-bold text-[#0F172A]">Track length (km)</div>
+                  <div className="text-[11px] text-[#64748B]">Total track length including loops and sidings</div>
+                </div>
+                <input type="number" min="0.1" step="0.1" value={trackLength} onChange={e => setTrackLength(e.target.value)}
+                  placeholder="e.g. 45"
+                  className="w-24 border border-[#E2E8F0] rounded-lg px-3 py-1.5 text-[13px] text-center focus:ring-1 focus:ring-[#4F46E5] outline-none" />
+              </div>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-[12px] font-bold text-[#0F172A]">Number of stations</div>
+                  <div className="text-[11px] text-[#64748B]">Each station is a parallel sub-project with civil + fit-out</div>
+                </div>
+                <input type="number" min="1" max="200" value={stationCount} onChange={e => setStationCount(e.target.value)}
+                  placeholder="e.g. 12"
+                  className="w-24 border border-[#E2E8F0] rounded-lg px-3 py-1.5 text-[13px] text-center focus:ring-1 focus:ring-[#4F46E5] outline-none" />
+              </div>
+              {!hasSurvey ? (
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-[12px] font-bold text-[#0F172A]">Track gauge</div>
+                    <div className="text-[11px] text-[#64748B]">Determines rail, sleeper, and ballast specifications</div>
+                  </div>
+                  <ToggleGroup value={trackGauge} onChange={v => setTrackGauge(v as typeof trackGauge)} options={[
+                    { value: "broad", label: "Broad (1676mm)" },
+                    { value: "metre", label: "Metre (1000mm)" },
+                    { value: "standard", label: "Standard (1435mm)" },
+                  ]} />
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#FFFBEB] border border-[#FCD34D]">
+                  <CheckCircle size={12} className="text-[#D97706] shrink-0" />
+                  <span className="text-[11px] text-[#D97706]">Site survey uploaded — alignment and gauge data read from it</span>
+                </div>
+              )}
+              <div className="h-px bg-[#F1F5F9]" />
+            </>
+          )}
+
+          {/* ── BRIDGE / FLYOVER ── */}
+          {isBridge && (
+            <>
+              {!hasSurvey ? (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-[12px] font-bold text-[#0F172A] mb-1">Total span (m)</div>
+                    <div className="text-[11px] text-[#64748B] mb-2">Sum of all spans — drives falsework and erection plan</div>
+                    <input type="number" min="10" value={totalSpan} onChange={e => setTotalSpan(e.target.value)}
+                      placeholder="e.g. 480"
+                      className="w-full border border-[#E2E8F0] rounded-lg px-3 py-2 text-[13px] focus:ring-1 focus:ring-[#4F46E5] outline-none" />
+                  </div>
+                  <div>
+                    <div className="text-[12px] font-bold text-[#0F172A] mb-1">Number of piers</div>
+                    <div className="text-[11px] text-[#64748B] mb-2">Each pier is a sequential substructure cycle</div>
+                    <input type="number" min="1" value={pierCount} onChange={e => setPierCount(e.target.value)}
+                      placeholder="e.g. 16"
+                      className="w-full border border-[#E2E8F0] rounded-lg px-3 py-2 text-[13px] focus:ring-1 focus:ring-[#4F46E5] outline-none" />
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#FFFBEB] border border-[#FCD34D]">
+                  <CheckCircle size={12} className="text-[#D97706] shrink-0" />
+                  <span className="text-[11px] text-[#D97706]">Site survey uploaded — span lengths and pier positions read from it</span>
+                </div>
+              )}
+              {!hasBoq ? (
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-[12px] font-bold text-[#0F172A]">Deck type</div>
+                    <div className="text-[11px] text-[#64748B]">Determines launching / casting method and cycle time</div>
+                  </div>
+                  <ToggleGroup value={deckType} onChange={v => setDeckType(v as typeof deckType)} options={[
+                    { value: "psc", label: "PSC girder" },
+                    { value: "steel", label: "Steel girder" },
+                    { value: "composite", label: "Composite" },
+                    { value: "cable", label: "Cable-stayed" },
+                  ]} />
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#FFFBEB] border border-[#FCD34D]">
+                  <CheckCircle size={12} className="text-[#D97706] shrink-0" />
+                  <span className="text-[11px] text-[#D97706]">BOQ uploaded — deck type and quantities read from it</span>
+                </div>
+              )}
+              <div className="h-px bg-[#F1F5F9]" />
+            </>
+          )}
+
+          {/* ── TUNNEL ── */}
+          {isTunnel && (
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="text-[12px] font-bold text-[#0F172A] mb-1">Tunnel length (m)</div>
+                  <div className="text-[11px] text-[#64748B] mb-2">Total bored / cut length</div>
+                  <input type="number" min="10" value={tunnelLength} onChange={e => setTunnelLength(e.target.value)}
+                    placeholder="e.g. 1200"
+                    className="w-full border border-[#E2E8F0] rounded-lg px-3 py-2 text-[13px] focus:ring-1 focus:ring-[#4F46E5] outline-none" />
+                </div>
+                <div>
+                  <div className="text-[12px] font-bold text-[#0F172A] mb-1">Internal diameter (m)</div>
+                  <div className="text-[11px] text-[#64748B] mb-2">Drives TBM / lining ring size and segment count</div>
+                  <input type="number" min="2" max="20" step="0.1" value={tunnelDiameter} onChange={e => setTunnelDiameter(e.target.value)}
+                    placeholder="e.g. 6.5"
+                    className="w-full border border-[#E2E8F0] rounded-lg px-3 py-2 text-[13px] focus:ring-1 focus:ring-[#4F46E5] outline-none" />
+                </div>
+              </div>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-[12px] font-bold text-[#0F172A]">Construction method</div>
+                  <div className="text-[11px] text-[#64748B]">Determines excavation sequence, lining, and cycle time</div>
+                </div>
+                <ToggleGroup value={tunnelMethod} onChange={v => setTunnelMethod(v as typeof tunnelMethod)} options={[
+                  { value: "tbm", label: "TBM" },
+                  { value: "natm", label: "NATM" },
+                  { value: "cutcover", label: "Cut & Cover" },
+                ]} />
+              </div>
+              <div className="h-px bg-[#F1F5F9]" />
+            </>
+          )}
+
+          {/* ── COMMON (all types) ── */}
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-[12px] font-bold text-[#0F172A]">Working pattern</div>
+              <div className="text-[11px] text-[#64748B]">Double shift cuts duration ~40% — major schedule lever</div>
+            </div>
+            <ToggleGroup value={workingShift} onChange={v => setWorkingShift(v as typeof workingShift)} options={[
+              { value: "single", label: "Single (8h)" },
+              { value: "double", label: "Double (16h)" },
+              { value: "24x7", label: "24×7" },
+            ]} />
+          </div>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-[12px] font-bold text-[#0F172A]">Monsoon shutdown?</div>
+              <div className="text-[11px] text-[#64748B]">
+                {isRoad || isRailway ? "Stops earthworks and paving for ~3 months"
+                  : isBridge ? "Halts substructure and casting work in monsoon months"
+                  : isTunnel ? "Usually unaffected — confirm if portal works are outdoor"
+                  : "Adds ~3 months gap in outdoor structural work"}
+              </div>
+            </div>
+            <ToggleGroup value={monsoon} onChange={v => setMonsoon(v as typeof monsoon)} options={[
+              { value: "yes", label: "Yes" },
+              { value: "no", label: "No" },
+              { value: "na", label: "N/A" },
+            ]} />
+          </div>
+          {!hasContract ? (
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-[12px] font-bold text-[#0F172A]">Schedule priority</div>
+                <div className="text-[11px] text-[#64748B]">Shapes how AI compresses or smooths the plan</div>
+              </div>
+              <ToggleGroup value={priority} onChange={v => setPriority(v as typeof priority)} options={[
+                { value: "deadline", label: "Hit deadline" },
+                { value: "cost", label: "Minimise cost" },
+              ]} />
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#F5F3FF] border border-[#C4B5FD]">
+              <CheckCircle size={12} className="text-[#7C3AED] shrink-0" />
+              <span className="text-[11px] text-[#7C3AED]">Contract uploaded — contractual milestones will set schedule priorities</span>
+            </div>
+          )}
+        </div>
+      </div>
+        );
+      })()}
+
+      {/* ── GENERATE BUTTON ── */}
+      <div className="rounded-xl border border-[#C7D2FE] bg-[#EEF2FF] p-4">
+        <button
+          onClick={handleGenerate}
+          disabled={!canGenerate}
+          className="w-full py-3 rounded-xl text-[14px] font-bold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          style={{ background: canGenerate ? "linear-gradient(135deg, #4F46E5, #6D28D9)" : "#94A3B8" }}
+        >
+          <Sparkles size={16} />
+          Generate schedule with AI
+        </button>
+        {canGenerate ? (
+          <div className="text-[11px] text-[#4F46E5] text-center mt-2.5 font-medium">
+            Using {totalDocs} document{totalDocs !== 1 ? "s" : ""} · ready in ~2 minutes
+          </div>
+        ) : (
+          <div className="text-[11px] text-[#64748B] text-center mt-2.5">
+            Upload at least one document to generate
+          </div>
+        )}
+      </div>
 
       {files.some(f => f.status === "pending") && (
-        <div className="px-3 py-2 bg-[#fff8c5] border border-[#d4a72c] rounded-md text-[12px] text-[#9a6700] font-semibold">
-          ⚠️ {files.filter(f => f.status === "pending").length} file{files.filter(f => f.status === "pending").length > 1 ? "s" : ""} not uploaded yet — will be lost if you navigate away
+        <div className="px-3 py-2 bg-[#FEF3C7] border border-[#D97706] rounded-lg text-[12px] text-[#92400E] font-semibold">
+          ⚠ {files.filter(f => f.status === "pending").length} file{files.filter(f => f.status === "pending").length > 1 ? "s" : ""} not uploaded yet — upload before generating
         </div>
-      )}
-
-      {/* ── STEP 2: Generate Schedule (shown after upload) ── */}
-      {step === "ready" && (doneCount > 0 || existingDocs.length > 0) && (
-        <Card className="space-y-4">
-          <div>
-            <div className="text-[13px] font-bold text-[#0F172A] mb-0.5">Generate Schedule</div>
-            <div className="text-[12px] text-[#475569]">
-              AI will parse your documents and build a full Gantt schedule for <span className="font-semibold text-[#0F172A]">{projectName}</span>.
-              Optionally provide project dates and type to improve accuracy.
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] font-bold text-[#475569] mb-1">Start Date</label>
-              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
-                className="w-full border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] focus:ring-1 focus:ring-[#2563EB] outline-none" />
-            </div>
-            <div>
-              <label className="block text-[11px] font-bold text-[#475569] mb-1">End Date</label>
-              <input type="date" value={endDate} min={startDate || undefined} onChange={e => setEndDate(startDate && e.target.value < startDate ? startDate : e.target.value)}
-                className="w-full border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] focus:ring-1 focus:ring-[#2563EB] outline-none" />
-            </div>
-            <div>
-              <label className="block text-[11px] font-bold text-[#475569] mb-1">Building Type</label>
-              <select value={buildingType} onChange={e => setBuildingType(e.target.value)}
-                className="w-full border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] focus:ring-1 focus:ring-[#2563EB] outline-none bg-white">
-                <option value="">Auto-detect</option>
-                {["residential", "commercial", "mixed-use", "industrial", "infrastructure"].map(t => (
-                  <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[11px] font-bold text-[#475569] mb-1">City</label>
-              <input type="text" value={city} onChange={e => setCity(e.target.value)}
-                placeholder="e.g. Mumbai, Dubai"
-                className="w-full border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] focus:ring-1 focus:ring-[#2563EB] outline-none" />
-            </div>
-          </div>
-
-          <button
-            onClick={handleGenerate}
-            className="w-full py-2.5 bg-[#2563EB] text-white rounded-md text-[13px] font-semibold hover:bg-[#1D4ED8] transition-colors"
-          >
-            <Sparkles size={14} className="inline mr-1" /> Generate Schedule with AI
-          </button>
-
-          <div className="text-[11px] text-[#94A3B8] flex items-center gap-1.5">
-            <span>💬</span>
-            Progress updates come from WhatsApp via your contractors — the schedule tracks against those actuals.
-          </div>
-        </Card>
       )}
     </div>
   );
@@ -1305,7 +1745,7 @@ function RealImport({
 // ─── MOCK MODE WIZARD ────────────────────────────────────────────────────────
 
 function MockImport({
-  projectId, projectName, mode, onBack, currentVersionCount = 0, onComplete,
+  projectId: _projectId, projectName, mode, onBack, currentVersionCount = 0, onComplete,
 }: {
   projectId: number;
   projectName: string;
@@ -1547,7 +1987,6 @@ function ImportCSVContent() {
   const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
   const hasProject = projectIdParam !== "0" && projectIdParam !== "";
   const [importMode, setImportMode] = useState<ImportMode | null>(null);
-  const [methodologyFiles, setMethodologyFiles] = useState<File[]>([]);
   const [versions, setVersions] = useState<ScheduleVersion[] | null>(null);
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [showNewBaselinePicker, setShowNewBaselinePicker] = useState(false);
@@ -1638,8 +2077,7 @@ function ImportCSVContent() {
 
   const goBack = () => { setImportMode(null); setShowNewBaselinePicker(false); };
 
-  const pickMethod = (m: ImportMode, files?: File[]) => {
-    setMethodologyFiles(files ?? []);
+  const pickMethod = (m: ImportMode) => {
     setShowNewBaselinePicker(false);
     setImportMode(m);
   };
@@ -1698,11 +2136,11 @@ function ImportCSVContent() {
     onComplete: handleImportComplete,
   };
 
-  if (real) {
-    if (importMode === "ai") {
-      return <RealImport projectId={projectIdParam} workspaceId={workspaceId!} projectName={projectName} initialStartDate={projectStartDate} initialEndDate={projectEndDate} initialBuildingType={projectCategory} initialCity={projectCity} onBack={goBack} methodologyFiles={methodologyFiles} />;
-    }
-    return <MockImport {...mockImportProps} />;
+  // AI mode always uses RealImport — works for both real and mock projects
+  // ?testType=Infrastructure|Industrial|Residential overrides project category for local testing
+  const testType = process.env.NODE_ENV === "development" ? searchParams.get("testType") : null;
+  if (importMode === "ai") {
+    return <RealImport projectId={projectIdParam} workspaceId={workspaceId ?? ""} projectName={projectName} initialStartDate={projectStartDate} initialEndDate={projectEndDate} initialBuildingType={testType ?? projectCategory} initialCity={projectCity} onBack={goBack} />;
   }
 
   return <MockImport {...mockImportProps} />;

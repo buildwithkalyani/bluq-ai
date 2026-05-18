@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useMemo, Suspense } from 'react';
-import { Search, Pencil, Trash2 } from "lucide-react";
+import { Search, Pencil, Trash2, Plus } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import {
   getScheduleTasks,
@@ -51,10 +51,12 @@ function ListViewPageContent() {
   const [modalError, setModalError] = useState("");
   const [menuOpenTaskId, setMenuOpenTaskId] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<StatusFilter>("All");
+  const [isExporting, setIsExporting] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
 
-  const openAddModal = () => {
+  const openAddModal = (ctx?: { phase?: string; space?: string }) => {
     setEditingTaskId(null);
-    setNewTask({ name: "", phase: "", space: "", contractor: "", startDate: "", endDate: "", pct: 0, status: "notStarted" });
+    setNewTask({ name: "", phase: ctx?.phase ?? "", space: ctx?.space ?? "", contractor: "", startDate: "", endDate: "", pct: 0, status: "notStarted" });
     setModalError("");
     setIsModalOpen(true);
   };
@@ -104,6 +106,38 @@ function ListViewPageContent() {
     setCollapsedAreas(prev => { const s = new Set(prev); s.has(k) ? s.delete(k) : s.add(k); return s; });
   const toggleTask = (id: string) =>
     setCollapsedTasks(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+
+  const handleExportExcel = async () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    try {
+      const XLSX = await import("xlsx");
+      const rows = filteredTasks.filter(t => !t.parentTaskId).map(t => ({
+        "WBS": wbsMap[t.id] ?? "",
+        "Task Name": t.name,
+        "Phase": t.phase ?? "",
+        "Space": t.space ?? "",
+        "Contractor": t.contractor ?? "",
+        "Start Date": t.startDate,
+        "End Date": t.endDate,
+        "Duration": t.duration ?? "",
+        "Progress %": t.pct,
+        "Status": STATUS_CONFIG[t.status as StatusKey]?.label ?? t.status,
+        "Delay": t.delay ?? "",
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const colWidths = Object.keys(rows[0] ?? {}).map(k => ({
+        wch: Math.max(k.length, ...rows.map(r => String((r as Record<string, unknown>)[k] ?? "").length)) + 2,
+      }));
+      ws["!cols"] = colWidths;
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Schedule");
+      XLSX.writeFile(wb, `schedule-list-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    } finally {
+      setIsExporting(false);
+      setShowExportMenu(false);
+    }
+  };
 
   const contractorOptions = useMemo(() => ["All", ...Array.from(new Set(tasks.filter(t => t.contractor && !t.parentTaskId).map(t => t.contractor))).sort()], [tasks]);
   const spaceOptions      = useMemo(() => ["All", ...Array.from(new Set(tasks.filter(t => t.space && !t.parentTaskId).map(t => t.space))).sort()], [tasks]);
@@ -204,29 +238,8 @@ function ListViewPageContent() {
         </div>
       </div>
 
-      {/* Row 2: filters + search + add */}
-      <div className="px-4 py-2 border-b border-[#E2E8F0] bg-white flex items-center justify-between gap-3">
-        <div className="flex items-center gap-1 flex-wrap">
-          {(Object.entries(STATUS_CONFIG) as [StatusKey, typeof STATUS_CONFIG[StatusKey]][]).map(([key, cfg]) => {
-            const countMap: Record<StatusKey, number> = {
-              completed: headerStats.completed, inProgress: headerStats.inProgress,
-              runningLate: headerStats.runningLate, delayed: headerStats.delayed, notStarted: headerStats.notStarted,
-            };
-            const active = filterStatus === key;
-            return (
-              <button key={key} onClick={() => setFilterStatus(filterStatus === key ? "All" : key)}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[13px] font-medium transition-all border ${active ? "border-current shadow-sm" : "border-transparent hover:border-[#E2E8F0]"}`}
-                style={{ color: cfg.color, background: active ? `${cfg.color}15` : "transparent" }}>
-                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: cfg.color }} />
-                <span className="font-semibold tabular-nums">{countMap[key]}</span>
-                <span>{cfg.label}</span>
-              </button>
-            );
-          })}
-          {filterStatus !== "All" && (
-            <button onClick={() => setFilterStatus("All")} className="ml-1 text-[10px] text-[#64748B] hover:text-[#1E293B] underline">Clear</button>
-          )}
-        </div>
+      {/* Row 2: search + controls + add */}
+      <div className="px-4 py-2 border-b border-[#E2E8F0] bg-white flex items-center justify-end gap-3">
         <div className="flex gap-3 items-center">
           <div className="flex items-center gap-2 border border-[#E2E8F0] rounded-md px-2.5 py-1.5 bg-white shadow-sm focus-within:border-[#2563EB] transition-all">
             <Search size={12} className="text-[#94A3B8] shrink-0" />
@@ -243,8 +256,60 @@ function ListViewPageContent() {
             style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2357606a'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 6px center" }}>
             {spaceOptions.map(s => <option key={s} value={s}>{s === "All" ? "All Spaces" : s}</option>)}
           </select>
+          <div className="relative">
+            {showExportMenu && (
+              <div className="fixed inset-0 z-20" onClick={() => setShowExportMenu(false)} />
+            )}
+            <button
+              onClick={() => setShowExportMenu(v => !v)}
+              disabled={isExporting}
+              className="flex items-center gap-1.5 px-3 h-8 text-[13px] font-semibold text-[#0F172A] bg-white border border-[#E2E8F0] rounded-md shadow-sm hover:bg-[#F8FAFC] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isExporting ? (
+                <svg className="animate-spin w-3.5 h-3.5 text-[#64748B]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+              ) : (
+                <svg className="w-3.5 h-3.5 text-[#64748B]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"/></svg>
+              )}
+              {isExporting ? "Downloading…" : "Download"}
+              <svg width="10" height="6" viewBox="0 0 10 6" fill="none" className="text-[#94A3B8]"><path d="M1 1l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+            {showExportMenu && !isExporting && (
+              <div className="absolute right-0 top-full mt-1.5 w-44 bg-white border border-[#E2E8F0] rounded-xl shadow-xl py-1.5 z-30">
+                <button
+                  onClick={handleExportExcel}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-[13px] text-[#0F172A] hover:bg-[#F8FAFC] transition-colors"
+                >
+                  <svg className="w-4 h-4 text-[#22c55e]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                  Export as Excel
+                </button>
+              </div>
+            )}
+          </div>
           <Btn small primary onClick={openAddModal}>+ Add Task</Btn>
         </div>
+      </div>
+
+      {/* Row 3: status filters */}
+      <div className="px-4 py-2 border-b border-[#E2E8F0] bg-white flex items-center gap-1 flex-wrap">
+        {(Object.entries(STATUS_CONFIG) as [StatusKey, typeof STATUS_CONFIG[StatusKey]][]).map(([key, cfg]) => {
+          const countMap: Record<StatusKey, number> = {
+            completed: headerStats.completed, inProgress: headerStats.inProgress,
+            runningLate: headerStats.runningLate, delayed: headerStats.delayed, notStarted: headerStats.notStarted,
+          };
+          const active = filterStatus === key;
+          return (
+            <button key={key} onClick={() => setFilterStatus(filterStatus === key ? "All" : key)}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[13px] font-medium transition-all border ${active ? "border-current shadow-sm" : "border-transparent hover:border-[#E2E8F0]"}`}
+              style={{ color: cfg.color, background: active ? `${cfg.color}15` : "transparent" }}>
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: cfg.color }} />
+              <span className="font-semibold tabular-nums">{countMap[key]}</span>
+              <span>{cfg.label}</span>
+            </button>
+          );
+        })}
+        {filterStatus !== "All" && (
+          <button onClick={() => setFilterStatus("All")} className="ml-1 text-[10px] text-[#64748B] hover:text-[#1E293B] underline">Clear</button>
+        )}
       </div>
 
       <div className="p-5 flex-1 overflow-y-auto">
@@ -253,9 +318,12 @@ function ListViewPageContent() {
       <Card className="p-0 overflow-hidden shadow-sm border-[#E2E8F0]">
         <table className="w-full border-collapse text-xs">
           <thead>
-            <tr className="bg-[#F8FAFC] border-b border-[#E2E8F0]">
-              {["#", "Task Name", "Contractor", "Space", "Start", "End", "%", "Status", ""].map((h, i) => (
-                <th key={i} className="px-4 py-3 text-left font-bold text-[#94A3B8] text-[11px] uppercase tracking-[0.08em] whitespace-nowrap">{h}</th>
+            <tr className="border-b border-[#E2E8F0]">
+              {["#", "Task Name", "Contractor", "Space", "Start", "End", "%", "Status", ""].map((label, i) => (
+                <th key={i}
+                  className="px-4 py-2.5 text-left font-semibold text-[11px] uppercase tracking-[0.08em] whitespace-nowrap bg-[#F8FAFC] text-[#64748B]">
+                  {label}
+                </th>
               ))}
             </tr>
           </thead>
@@ -322,7 +390,9 @@ function ListViewPageContent() {
                         )}
 
                         {/* ── Task + sub-task rows ── */}
-                        {(!showAreaRow || !areaCollapsed) && ts.filter(t => !t.parentTaskId).flatMap(t => {
+                        {(!showAreaRow || !areaCollapsed) && (
+                        <>
+                        {ts.filter(t => !t.parentTaskId).flatMap(t => {
                           const taskCollapsed = collapsedTasks.has(t.id);
                           const hasChildren   = ts.some(s => s.parentTaskId === t.id);
                           const sc = STATUS_CONFIG[t.status as StatusKey];
@@ -433,6 +503,19 @@ function ListViewPageContent() {
                           }
                           return rows;
                         })}
+                        <tr key={`add-${areaKey}`} className="border-b border-[#F8FAFC]">
+                          <td colSpan={9} className="px-4 py-1.5 pl-8">
+                            <button
+                              onClick={() => openAddModal({ phase, space: area })}
+                              className="flex items-center gap-1.5 text-[11px] text-[#94A3B8] hover:text-[#4F46E5] transition-colors group cursor-pointer"
+                            >
+                              <Plus size={11} className="group-hover:text-[#4F46E5]" />
+                              Add task in {area}
+                            </button>
+                          </td>
+                        </tr>
+                        </>
+                        )}
                       </React.Fragment>
                     );
                   })}

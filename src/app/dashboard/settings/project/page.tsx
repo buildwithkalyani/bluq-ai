@@ -45,7 +45,7 @@ interface ProjectFormData {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const STAGE_OPTIONS = ["Planning", "Design", "Foundation", "Structure", "Superstructure", "MEP", "Finishing", "Handover"];
-const TYPE_OPTIONS = ["Residential", "Commercial", "Industrial", "Mixed Use", "Infrastructure"];
+const TYPE_OPTIONS = ["Residential", "Commercial", "Mixed Use", "Industrial / Warehouse", "Road / Highway", "Railway / Metro", "Bridge / Flyover", "Tunnel"];
 const EOD_TIMES = ["4:00 PM", "5:00 PM", "5:30 PM", "6:00 PM", "7:00 PM", "8:00 PM"];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
