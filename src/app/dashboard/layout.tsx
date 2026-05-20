@@ -9,7 +9,7 @@ import { WorkspaceProvider, useWorkspace } from "@/context/workspace";
 import { ActivityFeedProvider } from "@/context/activity-feed";
 import { LiveActivityButton, LiveActivityPanel } from "@/components/LiveActivityPanel";
 import { PermissionsProvider, usePermissions } from "@/context/permissions";
-import { fetchProjects, fetchTasks, createProject, clearAuthTokenCache, isRealProject, fetchScheduleVersions, type ScheduleVersion } from "@/lib/api-client";
+import { fetchProjects, createProject, clearAuthTokenCache, isRealProject, fetchScheduleVersions, type ScheduleVersion, prefetchGanttData } from "@/lib/api-client";
 import { authClient } from "@/lib/auth-client";
 import { useSchedulePoller } from "@/hooks/useSchedulePoller";
 
@@ -558,23 +558,8 @@ function Sidebar() {
   const activeNav = getActiveNav(pathname);
   const projectId   = searchParams.get("projectId") || "0";
   const workspaceIdParam = searchParams.get("workspaceId");
-  const { orgName, workspaceId: ctxWorkspaceId } = useWorkspace();
+  const { orgName, workspaceId: ctxWorkspaceId, orgLogoUrl } = useWorkspace();
   const [collapsed, setCollapsed] = useState(false);
-  const [orgLogoUrl, setOrgLogoUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!ctxWorkspaceId) return;
-    authClient.getSession().then((s) => {
-      const token = (s as any)?.data?.session?.token ?? "";
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
-      fetch(`${backendUrl}/orgs/mine`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-        .then((r) => r.json())
-        .then((data: any[]) => { if (data?.[0]?.logoUrl) setOrgLogoUrl(data[0].logoUrl); })
-        .catch(() => {});
-    });
-  }, [ctxWorkspaceId]);
 
   const workspaceInitials = orgName
     ? orgName.trim().split(/\s+/).map((w: string) => w[0]?.toUpperCase()).join("").slice(0, 2)
@@ -585,6 +570,7 @@ function Sidebar() {
 
   const NavItem = ({ n }: { n: typeof NAV_ITEMS[0] }) => {
     const active = activeNav.id === n.id;
+    const workspaceId = workspaceIdParam ?? ctxWorkspaceId;
     return (
       <div
         onClick={() => {
@@ -593,6 +579,11 @@ function Sidebar() {
           if (workspaceIdParam) p.set("workspaceId", workspaceIdParam);
           const qs = p.toString();
           router.push(`${n.subTabs[0].href}${qs ? `?${qs}` : ""}`);
+        }}
+        onMouseEnter={() => {
+          if (n.id === "schedule" && !active && isRealProject(projectId) && workspaceId) {
+            prefetchGanttData(projectId, workspaceId);
+          }
         }}
         title={collapsed ? (SIDEBAR_LABEL_OVERRIDE[n.id] ?? n.label) : undefined}
         className={`relative flex items-center gap-3 rounded-lg cursor-pointer transition-all mb-0.5 ${collapsed ? "justify-center px-0 py-2.5 mx-1" : "px-3 py-2"} ${active ? "bg-[#1E2235]" : "hover:bg-[#ffffff08]"}`}
@@ -799,15 +790,22 @@ function ProjectKPIStrip() {
         if (!project) { setReady(true); return; }
         const plannedEnd = project.endDate ?? null;
         const address = (project as any).address ?? null;
+        // Try Gantt localStorage cache before making a separate fetchTasks call
+        try {
+          const raw = localStorage.getItem(`bluq_gantt_${projectIdParam}`);
+          if (raw) {
+            const cached = JSON.parse(raw);
+            const parents = (cached.tasks ?? []).filter((t: any) => !t.parentTaskId);
+            const ends = parents.map((t: any) => t.endDate).filter(Boolean).sort() as string[];
+            const projectedEnd = ends.length > 0 ? ends[ends.length - 1] : plannedEnd;
+            setData({ projectedEnd, plannedEnd, address });
+            setReady(true);
+            return;
+          }
+        } catch {}
         setData({ projectedEnd: plannedEnd, plannedEnd, address });
         setReady(true);
-        return fetchTasks(projectIdParam, workspaceId!).then(tasks => {
-          const parents = tasks.filter(t => !t.parentTaskId);
-          if (parents.length === 0) return;
-          const ends = parents.map(t => t.endDate).filter(Boolean).sort();
-          const projectedEnd = ends.length > 0 ? ends[ends.length - 1] : plannedEnd;
-          setData({ projectedEnd, plannedEnd, address });
-        });
+        return;
       } else {
         const ends = projects.map(p => p.endDate).filter(Boolean).sort() as string[];
         setData({ projectedEnd: ends[ends.length - 1] ?? null, plannedEnd: ends[ends.length - 1] ?? null, address: null });

@@ -66,10 +66,14 @@ const STATUS_MAP: Record<string, string> = {
 };
 
 function deriveStatus(raw: string | null, pct: number): string {
-  if (raw && STATUS_MAP[raw]) return STATUS_MAP[raw];
+  const mapped = raw ? (STATUS_MAP[raw] ?? null) : null;
+  // Trust explicit terminal/negative states from backend
+  if (mapped === "delayed" || mapped === "runningLate") return mapped;
+  if (mapped === "completed") return "completed";
+  // Progress always overrides "notStarted" — backend may lag on parent-task avg
   if (pct >= 100) return "completed";
   if (pct > 0)   return "inProgress";
-  return "notStarted";
+  return mapped ?? "notStarted";
 }
 
 function mapBackendProjects(rows: Awaited<ReturnType<typeof fetchProjects>>): Project[] {
