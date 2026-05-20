@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Card, SectionTitle, Btn } from "@/components/ui/bluq-ui";
 import type { Project } from "@/lib/mock-data";
 import { useWorkspace } from "@/context/workspace";
 import { createProject, updateProject } from "@/lib/api-client";
+import { CheckCircle2, MapPin } from "lucide-react";
 
 function parseIsoDate(dateStr: string): string {
   if (!dateStr) return "";
@@ -12,6 +13,13 @@ function parseIsoDate(dateStr: string): string {
   const d = new Date(dateStr);
   if (!isNaN(d.getTime())) return d.toISOString().split("T")[0];
   return "";
+}
+
+interface NominatimResult {
+  place_id: number;
+  display_name: string;
+  lat: string;
+  lon: string;
 }
 
 interface Props {
@@ -27,6 +35,11 @@ export default function CreateProjectModal({ onClose, onCreate, editingProject, 
 
   const [name, setName] = useState(editingProject?.name ?? "");
   const [address, setAddress] = useState(editingProject?.address ?? "");
+  const [addressValidated, setAddressValidated] = useState(isEditing); // existing projects assumed valid
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [suggestions, setSuggestions] = useState<NominatimResult[]>([]);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [stage, setStage] = useState(editingProject?.stage ?? "Foundation");
   const [type, setType] = useState("Residential");
   const [startDate, setStartDate] = useState(parseIsoDate(editingProject?.startDate ?? ""));
@@ -34,6 +47,9 @@ export default function CreateProjectModal({ onClose, onCreate, editingProject, 
   const [code, setCode] = useState(editingProject?.code ?? "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isEditing) return;
@@ -44,9 +60,48 @@ export default function CreateProjectModal({ onClose, onCreate, editingProject, 
     }
   }, [name]);
 
-  const fmt = (d: string) => {
-    const dt = new Date(d);
-    return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setSuggestionsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const fetchSuggestions = useCallback(async (query: string) => {
+    if (query.length < 4) { setSuggestions([]); setSuggestionsOpen(false); return; }
+    setLoadingSuggestions(true);
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&addressdetails=0`;
+      const res = await fetch(url, { headers: { "Accept-Language": "en", "User-Agent": "BLUQ-ConstructionPM/1.0" } });
+      const data: NominatimResult[] = await res.json();
+      setSuggestions(data);
+      setSuggestionsOpen(true); // always open — shows suggestions or "use as typed" fallback
+    } catch {
+      setSuggestions([]);
+      setSuggestionsOpen(true);
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  }, []);
+
+  const handleAddressChange = (val: string) => {
+    setAddress(val);
+    setAddressValidated(false);
+    setCoords(null);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => fetchSuggestions(val), 500);
+  };
+
+  const selectSuggestion = (s: NominatimResult) => {
+    setAddress(s.display_name);
+    setCoords({ lat: parseFloat(s.lat), lng: parseFloat(s.lon) });
+    setAddressValidated(true);
+    setSuggestionsOpen(false);
+    setSuggestions([]);
   };
 
   const handleSubmit = async () => {
@@ -54,8 +109,27 @@ export default function CreateProjectModal({ onClose, onCreate, editingProject, 
       setError("Please fill in all required fields.");
       return;
     }
+    if (!addressValidated) {
+      setError("Select a valid address from the suggestions — this is needed for weather data.");
+      return;
+    }
     setSaving(true);
     setError("");
+
+    // If validated via "use as typed" (no coords), attempt geocoding one more time
+    let resolvedCoords = coords;
+    if (!resolvedCoords && address.trim().length >= 4) {
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address.trim())}&format=json&limit=1`,
+          { headers: { "Accept-Language": "en", "User-Agent": "BLUQ-ConstructionPM/1.0" } }
+        );
+        const data: NominatimResult[] = await res.json();
+        if (data[0]) resolvedCoords = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+      } catch { /* proceed without coords */ }
+    }
+
+    const settingsJson = resolvedCoords ? { lat: resolvedCoords.lat, lng: resolvedCoords.lng } : undefined;
 
     if (isEditing && editingProject && workspaceId) {
       try {
@@ -67,6 +141,7 @@ export default function CreateProjectModal({ onClose, onCreate, editingProject, 
           startDate,
           endDate,
           projectCode: code.trim(),
+          ...(settingsJson ? { settingsJson } : {}),
         });
         onUpdate?.({
           ...editingProject,
@@ -96,6 +171,7 @@ export default function CreateProjectModal({ onClose, onCreate, editingProject, 
           category: type,
           startDate,
           endDate,
+          settingsJson,
         });
         onCreate({
           id: p.id as any,
@@ -165,9 +241,52 @@ export default function CreateProjectModal({ onClose, onCreate, editingProject, 
             <input autoFocus className={inputClass} placeholder="Al Nakheel Tower" value={name} onChange={e => setName(e.target.value)} />
           </div>
 
-          <div>
+          {/* Address with autocomplete */}
+          <div ref={dropdownRef} className="relative">
             <label className={labelClass}>Project Address *</label>
-            <input className={inputClass} placeholder="Dubai Marina, Dubai, UAE" value={address} onChange={e => setAddress(e.target.value)} />
+            <div className="relative">
+              <input
+                className={`${inputClass} pr-8 ${addressValidated ? "border-[#059669] ring-[#059669]/20" : ""}`}
+                placeholder="Start typing an address…"
+                value={address}
+                onChange={e => handleAddressChange(e.target.value)}
+                onFocus={() => { if (suggestions.length > 0) setSuggestionsOpen(true); }}
+                autoComplete="off"
+              />
+              {addressValidated && (
+                <CheckCircle2 size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#059669]" />
+              )}
+              {loadingSuggestions && !addressValidated && (
+                <div className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 border-2 border-[#2563EB] border-t-transparent rounded-full animate-spin" />
+              )}
+            </div>
+            {suggestionsOpen && !loadingSuggestions && (
+              <div className="absolute z-[200] left-0 right-0 mt-1 bg-white border border-[#E2E8F0] rounded-lg shadow-xl overflow-hidden">
+                {suggestions.map((s) => (
+                  <button
+                    key={s.place_id}
+                    type="button"
+                    onMouseDown={() => selectSuggestion(s)}
+                    className="w-full text-left px-3 py-2.5 text-[12px] text-[#0F172A] hover:bg-[#F8FAFC] flex items-start gap-2 transition-colors border-b border-[#F1F5F9] last:border-0"
+                  >
+                    <MapPin size={11} className="text-[#94A3B8] shrink-0 mt-0.5" />
+                    <span className="line-clamp-2">{s.display_name}</span>
+                  </button>
+                ))}
+                {suggestions.length === 0 && (
+                  <div className="px-3 py-2 border-b border-[#F1F5F9]">
+                    <p className="text-[11px] text-[#94A3B8] mb-1.5">No suggestions found for this address.</p>
+                    <button
+                      type="button"
+                      onMouseDown={() => { setAddressValidated(true); setCoords(null); setSuggestionsOpen(false); }}
+                      className="text-[12px] font-semibold text-[#2563EB] hover:underline"
+                    >
+                      Use "{address}" as typed
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -192,11 +311,26 @@ export default function CreateProjectModal({ onClose, onCreate, editingProject, 
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={labelClass}>Start Date *</label>
-              <input type="date" className={inputClass} value={startDate} onChange={e => setStartDate(e.target.value)} />
+              <input
+                type="date"
+                className={inputClass}
+                value={startDate}
+                max={endDate || undefined}
+                onChange={e => {
+                  setStartDate(e.target.value);
+                  if (endDate && e.target.value > endDate) setEndDate("");
+                }}
+              />
             </div>
             <div>
               <label className={labelClass}>End Date *</label>
-              <input type="date" className={inputClass} value={endDate} min={startDate || undefined} onChange={e => setEndDate(startDate && e.target.value < startDate ? startDate : e.target.value)} />
+              <input
+                type="date"
+                className={inputClass}
+                value={endDate}
+                min={startDate || undefined}
+                onChange={e => setEndDate(e.target.value)}
+              />
             </div>
           </div>
 

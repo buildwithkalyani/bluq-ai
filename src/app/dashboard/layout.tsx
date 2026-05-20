@@ -270,7 +270,11 @@ function NewProjectModal({
               <input
                 type="date"
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                max={endDate || undefined}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  if (endDate && e.target.value > endDate) setEndDate("");
+                }}
                 className="w-full border border-[#E2E8F0] rounded-lg px-3.5 py-2.5 text-[14px] text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] transition-all"
               />
             </div>
@@ -281,6 +285,7 @@ function NewProjectModal({
               <input
                 type="date"
                 value={endDate}
+                min={startDate || undefined}
                 onChange={(e) => setEndDate(e.target.value)}
                 className="w-full border border-[#E2E8F0] rounded-lg px-3.5 py-2.5 text-[14px] text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] transition-all"
               />

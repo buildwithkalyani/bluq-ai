@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useMemo, Suspense } from 'react';
 import { Search } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { getScheduleTasks, getScheduleDeps, type ScheduleTask, type TaskDependency } from "@/lib/mock-data";
-import { fetchTasks, fetchTaskDependencies, createTaskDependency, deleteTaskDependency, fetchLatestScheduleVersion, isRealProject, updateTask, type ScheduleVersion } from "@/lib/api-client";
+import { fetchTasks, fetchTaskDependencies, createTaskDependency, deleteTaskDependency, fetchLatestScheduleVersion, isRealProject, updateTask, createTask, fetchProject, type ScheduleVersion } from "@/lib/api-client";
 import { GapCheckPanel, type SuspectedGap } from "@/components/ui/GapCheckPanel";
 import { useWorkspace } from "@/context/workspace";
 import { useActivityFeed } from "@/context/activity-feed";
@@ -983,8 +983,10 @@ function GanttChartContent() {
   const projectIdParam = searchParams.get("projectId") ?? "0";
   const urlWs = searchParams.get("workspaceId");
   const workspaceId = (urlWs && urlWs !== "null") ? urlWs : ctxWorkspaceId;
+  const urlProjectEndDate = searchParams.get("projectEndDate") ?? null;
   const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
 
+  const [projectEndDate, setProjectEndDate] = useState<string | null>(urlProjectEndDate);
   const [tasks, setTasks] = useState<ScheduleTask[]>([]);
   const [deps, setDeps] = useState<TaskDependency[]>([]);
   const [depIds, setDepIds] = useState<Record<string, string>>({});
@@ -1000,6 +1002,28 @@ function GanttChartContent() {
   const [showBaseline, setShowBaseline] = useState(true);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [reoptimizing, setReoptimizing] = useState(false);
+
+  // Resolve project end date: URL param → projects localStorage cache → API
+  useEffect(() => {
+    if (urlProjectEndDate) return; // already have it
+    // Try localStorage cache first (written by overview page)
+    if (workspaceId) {
+      try {
+        const raw = localStorage.getItem(`bluq_projects_cache_${workspaceId}`);
+        if (raw) {
+          const cache = JSON.parse(raw);
+          const proj = cache?.data?.find((p: any) => String(p.id) === projectIdParam);
+          if (proj?.endDate) { setProjectEndDate(proj.endDate); return; }
+        }
+      } catch {}
+    }
+    // Fall back to API
+    if (real) {
+      fetchProject(projectIdParam)
+        .then(p => { if (p.endDate) setProjectEndDate(p.endDate); })
+        .catch(() => {});
+    }
+  }, [real, projectIdParam, workspaceId, urlProjectEndDate]);
 
   useEffect(() => {
     if (real) {
@@ -1114,11 +1138,23 @@ function GanttChartContent() {
     const notStarted  = parents.filter(t => effectiveStatus(t) === "notStarted").length;
     const atRisk      = runningLate + delayed;
     const total       = parents.length;
-    const overall     = total ? Math.round(parents.reduce((s, t) => s + t.pct, 0) / total) : 0;
+    // Duration-weighted progress (industry standard — Primavera P6 / MS Project)
+    // Each task contributes proportional to its planned duration, not just task count
+    const overall = (() => {
+      if (total === 0) return 0;
+      let weightedSum = 0;
+      let totalDur = 0;
+      parents.forEach(t => {
+        const dur = Math.max(diffDays(t.startDate, t.endDate), 1);
+        weightedSum += t.pct * dur;
+        totalDur += dur;
+      });
+      return totalDur > 0 ? Math.round(weightedSum / totalDur) : 0;
+    })();
     const ends = parents.map(t => t.endDate).filter(Boolean).sort();
-    const projectedEnd = ends.length > 0 ? ends[ends.length - 1] : "2026-09-30";
+    const projectedEnd = ends.length > 0 ? ends[ends.length - 1] : (projectEndDate ?? new Date().toISOString().slice(0, 10));
     return { completed, inProgress, runningLate, delayed, notStarted, atRisk, total, overall, projectedEnd };
-  }, [tasks]);
+  }, [tasks, projectEndDate]);
 
   // Slip detection drives the reoptimize banner
   const slipSummary = useMemo(() => detectSlip(tasks.filter(t => !t.parentTaskId)), [tasks]);
@@ -1182,7 +1218,15 @@ function GanttChartContent() {
 
   const phaseAvgPct = (areas: [string, ScheduleTask[]][]) => {
     const parents = areas.flatMap(([, ts]) => ts).filter(t => !t.parentTaskId);
-    return parents.length ? Math.round(parents.reduce((s, t) => s + t.pct, 0) / parents.length) : 0;
+    if (!parents.length) return 0;
+    let weightedSum = 0;
+    let totalDur = 0;
+    parents.forEach(t => {
+      const dur = Math.max(diffDays(t.startDate, t.endDate), 1);
+      weightedSum += t.pct * dur;
+      totalDur += dur;
+    });
+    return totalDur > 0 ? Math.round(weightedSum / totalDur) : 0;
   };
 
   const { taskYMap, totalH, wbsMap } = useMemo(() => {
@@ -1239,7 +1283,13 @@ function GanttChartContent() {
     if (!parents.length) return null;
     const start = parents.reduce((m, t) => parseDate(t.startDate) < parseDate(m) ? t.startDate : m, parents[0].startDate);
     const end   = parents.reduce((m, t) => parseDate(t.endDate)   > parseDate(m) ? t.endDate   : m, parents[0].endDate);
-    const avg   = Math.round(parents.reduce((s, t) => s + t.pct, 0) / parents.length);
+    let weightedSum = 0, totalDur = 0;
+    parents.forEach(t => {
+      const dur = Math.max(diffDays(t.startDate, t.endDate), 1);
+      weightedSum += t.pct * dur;
+      totalDur += dur;
+    });
+    const avg = totalDur > 0 ? Math.round(weightedSum / totalDur) : 0;
     return { start, end, avg };
   };
 
@@ -1296,8 +1346,30 @@ const handleSaveModal = (data: any, newPreds: any) => {
       return [...filtered, ...newPreds.map((pr: any) => ({ from: pr.id, to: targetId, type: pr.type, label: pr.type }))];
     });
     if (real && workspaceId && targetId) {
-      // Persist task edits to backend
-      if (modalConfig.mode === "edit") {
+      if (modalConfig.mode === "add") {
+        createTask({
+          workspaceId,
+          projectId: projectIdParam,
+          title: data.name,
+          status: toDbStatus(data.status ?? "notStarted"),
+          startDate: data.startDate,
+          endDate: data.endDate,
+          percentComplete: data.pct ?? 0,
+          contractor: data.contractor || undefined,
+          area: data.space || undefined,
+          phase: data.phase || undefined,
+        }).then(created => {
+          // Replace temp id with real backend id
+          setTasks(p => p.map(t => t.id === targetId ? { ...t, id: created.id } : t));
+          // Re-wire deps to real id
+          setDeps(p => p.map(d => d.to === targetId ? { ...d, to: created.id } : d));
+          newPreds.forEach((pr: any) => {
+            createTaskDependency({ workspaceId: workspaceId!, predecessorId: pr.id, successorId: created.id, dependencyType: pr.type })
+              .then(r => { if (r) setDepIds(p => ({ ...p, [depIdKey(pr.id, created.id)]: r.id })); })
+              .catch(console.error);
+          });
+        }).catch(console.error);
+      } else if (modalConfig.mode === "edit") {
         updateTask(targetId, {
           title: data.name,
           status: toDbStatus(data.status),
@@ -1309,17 +1381,19 @@ const handleSaveModal = (data: any, newPreds: any) => {
           phase: data.phase || null,
         }).catch(console.error);
       }
-      // delete old deps for this task, then create new ones
-      const oldDeps = deps.filter(d => d.to === targetId);
-      oldDeps.forEach(d => {
-        const bid = depIds[depIdKey(d.from, d.to)];
-        if (bid) deleteTaskDependency(bid).catch(console.error);
-      });
-      newPreds.forEach((pr: any) => {
-        createTaskDependency({ workspaceId: workspaceId!, predecessorId: pr.id, successorId: targetId!, dependencyType: pr.type })
-          .then(r => { if (r) setDepIds(p => ({ ...p, [depIdKey(pr.id, targetId!)]: r.id })); })
-          .catch(console.error);
-      });
+      // For edits: delete old deps then recreate (add mode handles deps in createTask.then above)
+      if (modalConfig.mode === "edit") {
+        const oldDeps = deps.filter(d => d.to === targetId);
+        oldDeps.forEach(d => {
+          const bid = depIds[depIdKey(d.from, d.to)];
+          if (bid) deleteTaskDependency(bid).catch(console.error);
+        });
+        newPreds.forEach((pr: any) => {
+          createTaskDependency({ workspaceId: workspaceId!, predecessorId: pr.id, successorId: targetId!, dependencyType: pr.type })
+            .then(r => { if (r) setDepIds(p => ({ ...p, [depIdKey(pr.id, targetId!)]: r.id })); })
+            .catch(console.error);
+        });
+      }
     }
   };
 
