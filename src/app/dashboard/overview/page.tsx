@@ -49,25 +49,49 @@ function writeProjectsCache(workspaceId: string, projects: Project[]): void {
 
 function isSameProjects(a: Project[], b: Project[]): boolean {
   if (a.length !== b.length) return false;
-  return JSON.stringify(a.map(p => p.id).sort()) === JSON.stringify(b.map(p => p.id).sort());
+  const key = (p: Project) => `${p.id}:${p.status}:${p.pct}`;
+  return JSON.stringify(a.map(key).sort()) === JSON.stringify(b.map(key).sort());
+}
+
+const STATUS_MAP: Record<string, string> = {
+  not_started:  "notStarted",
+  in_progress:  "inProgress",
+  completed:    "completed",
+  running_late: "runningLate",
+  delayed:      "delayed",
+  // already camelCase (in case backend returns either form)
+  notStarted:   "notStarted",
+  inProgress:   "inProgress",
+  runningLate:  "runningLate",
+};
+
+function deriveStatus(raw: string | null, pct: number): string {
+  if (raw && STATUS_MAP[raw]) return STATUS_MAP[raw];
+  if (pct >= 100) return "completed";
+  if (pct > 0)   return "inProgress";
+  return "notStarted";
 }
 
 function mapBackendProjects(rows: Awaited<ReturnType<typeof fetchProjects>>): Project[] {
-  return rows.map((p) => ({
-    id: p.id as any,
-    name: p.projectName,
-    code: p.projectCode ?? "",
-    pct: Number(p.percentComplete ?? 0),
-    status: "notStarted" as const,
-    tasks: 0,
-    tasksDone: 0,
-    workers: 0,
-    issues: 0,
-    stage: p.stage ?? "",
-    startDate: p.startDate ?? "",
-    endDate: p.endDate ?? "",
-    address: p.address ?? "",
-  }));
+  return rows.map((p) => {
+    const pct = Number(p.percentComplete ?? 0);
+    return {
+      id: p.id as any,
+      name: p.projectName,
+      code: p.projectCode ?? "",
+      pct,
+      status: deriveStatus(p.status, pct) as any,
+      tasks: 0,
+      tasksDone: 0,
+      workers: 0,
+      issues: 0,
+      stage: p.stage ?? "",
+      startDate: p.startDate ?? "",
+      endDate: p.endDate ?? "",
+      address: p.address ?? "",
+      settingsJson: p.settingsJson ?? undefined,
+    };
+  });
 }
 
 function OverviewContent() {
@@ -398,7 +422,8 @@ function OverviewContent() {
                       <button
                         key={label}
                         onClick={() => {
-                          const params = workspaceId ? `?projectId=${p.id}&workspaceId=${workspaceId}` : `?projectId=${p.id}`;
+                          const endDateParam = p.endDate ? `&projectEndDate=${p.endDate}` : "";
+                          const params = workspaceId ? `?projectId=${p.id}&workspaceId=${workspaceId}${endDateParam}` : `?projectId=${p.id}${endDateParam}`;
                           router.push(`${href}${params}`);
                         }}
                         className="flex items-center gap-1.5 px-2.5 py-1.5 text-[12px] font-medium text-[#64748B] hover:text-[#2563EB] hover:bg-[#EFF6FF] rounded-lg transition-colors"

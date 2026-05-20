@@ -148,11 +148,17 @@ export interface BackendProject {
   status: string | null;
   clientName: string | null;
   percentComplete: number | null;
+  settingsJson?: Record<string, unknown> | null;
 }
 
 /** GET /projects?workspaceId= → BackendProject[] */
 export async function fetchProjects(workspaceId: string): Promise<BackendProject[]> {
   return apiFetch<BackendProject[]>(`/projects?workspaceId=${workspaceId}`);
+}
+
+/** GET /projects/:id → BackendProject */
+export async function fetchProject(id: string): Promise<BackendProject> {
+  return apiFetch<BackendProject>(`/projects/${id}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +202,7 @@ export async function createProject(data: {
   category?: string;
   startDate?: string;
   endDate?: string;
+  settingsJson?: Record<string, unknown>;
 }): Promise<BackendProject> {
   return apiPost<BackendProject>("/projects", data);
 }
