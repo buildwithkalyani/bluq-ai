@@ -140,7 +140,7 @@ function WeatherWidget({ address, lat, lng }: { address: string; lat?: number | 
   useEffect(() => {
     (async () => {
       try {
-        let latitude: number, longitude: number;
+        let latitude = 0, longitude = 0;
         if (lat != null && lng != null) {
           latitude = lat;
           longitude = lng;
@@ -882,7 +882,7 @@ export default function ProjectDetailView({
 
             {/* Right: Weather + Project Vitals */}
             <div className="w-[256px] shrink-0 flex flex-col gap-3">
-              {(proj.address || proj.settingsJson?.lat) && (
+              {!!(proj.address || (proj.settingsJson as any)?.lat) && (
                 <WeatherWidget
                   address={proj.address}
                   lat={proj.settingsJson?.lat as number | null}

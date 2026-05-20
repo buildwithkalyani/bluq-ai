@@ -17,7 +17,7 @@
 import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
 import { scheduleVersions, documents, tasks, gapCheckFeedback, users } from "../db/schema.js";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { aiSchedulerQueue } from "../lib/queues.js";
 import type { ScheduleJobData } from "../workers/ai-scheduler.worker.js";
 import { verifySession } from "../lib/verifySession.js";
@@ -237,7 +237,7 @@ export async function scheduleRoute(app: FastifyInstance) {
           createdAt: scheduleVersions.createdAt,
         })
         .from(scheduleVersions)
-        .leftJoin(users, eq(users.id, scheduleVersions.uploadedBy))
+        .leftJoin(users, sql`${users.id}::text = ${scheduleVersions.uploadedBy}`)
         .where(
           and(
             eq(scheduleVersions.projectId, projectId),
@@ -529,7 +529,7 @@ export async function scheduleRoute(app: FastifyInstance) {
           createdAt: scheduleVersions.createdAt,
         })
         .from(scheduleVersions)
-        .leftJoin(users, eq(users.id, scheduleVersions.uploadedBy))
+        .leftJoin(users, sql`${users.id}::text = ${scheduleVersions.uploadedBy}`)
         .where(eq(scheduleVersions.id, created.id));
 
       return reply.status(201).send(row);
