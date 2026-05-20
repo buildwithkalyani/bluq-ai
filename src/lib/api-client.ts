@@ -30,22 +30,29 @@ import { authClient } from "@/lib/auth-client";
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
 
 let _tokenCache: { token: string; exp: number } | null = null;
+let _tokenFlight: Promise<string> | null = null;
 
 async function getAuthToken(): Promise<string> {
   if (_tokenCache && Date.now() < _tokenCache.exp) return _tokenCache.token;
-  const session = await authClient.getSession();
-  const token = session?.data?.session?.token ?? "";
-  _tokenCache = { token, exp: Date.now() + 60_000 };
-  return token;
+  if (_tokenFlight) return _tokenFlight;
+  _tokenFlight = authClient.getSession().then(session => {
+    const token = session?.data?.session?.token ?? "";
+    _tokenCache = { token, exp: Date.now() + 60_000 };
+    _tokenFlight = null;
+    return token;
+  });
+  return _tokenFlight;
 }
 
 export function clearAuthTokenCache(): void {
   _tokenCache = null;
+  _tokenFlight = null;
 }
 
-async function apiFetch<T>(path: string): Promise<T> {
+async function apiFetch<T>(path: string, signal?: AbortSignal): Promise<T> {
   const token = await getAuthToken();
   const res = await fetch(`${BACKEND_URL}${path}`, {
+    signal,
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -374,10 +381,12 @@ function backendTaskToScheduleTask(t: BackendTask): ScheduleTask {
 /** GET /tasks?projectId=&workspaceId= → ScheduleTask[] */
 export async function fetchTasks(
   projectId: string,
-  workspaceId: string
+  workspaceId: string,
+  signal?: AbortSignal
 ): Promise<ScheduleTask[]> {
   const rows = await apiFetch<BackendTask[]>(
-    `/tasks?projectId=${projectId}&workspaceId=${workspaceId}`
+    `/tasks?projectId=${projectId}&workspaceId=${workspaceId}`,
+    signal
   );
   return (rows ?? []).map(backendTaskToScheduleTask);
 }
@@ -434,11 +443,41 @@ export interface BackendTaskDependency {
 /** GET /tasks/dependencies?projectId=&workspaceId= */
 export async function fetchTaskDependencies(
   projectId: string,
-  workspaceId: string
+  workspaceId: string,
+  signal?: AbortSignal
 ): Promise<BackendTaskDependency[]> {
   return apiFetch<BackendTaskDependency[]>(
-    `/tasks/dependencies?projectId=${projectId}&workspaceId=${workspaceId}`
+    `/tasks/dependencies?projectId=${projectId}&workspaceId=${workspaceId}`,
+    signal
   );
+}
+
+/**
+ * Prefetch tasks + deps for a project and write them to the Gantt localStorage
+ * cache. Call on Schedule nav hover so navigation feels instant.
+ * No-op if fresh cache already exists (< 60s old).
+ */
+export function prefetchGanttData(projectId: string, workspaceId: string): void {
+  if (!projectId || !workspaceId) return;
+  try {
+    const raw = localStorage.getItem(`bluq_gantt_${projectId}`);
+    if (raw) {
+      const cached = JSON.parse(raw);
+      if (cached.lastFetchedAt && Date.now() - cached.lastFetchedAt < 60_000) return;
+    }
+  } catch {}
+
+  Promise.all([
+    fetchTasks(projectId, workspaceId),
+    fetchTaskDependencies(projectId, workspaceId),
+  ]).then(([tasks, depRows]) => {
+    const deps = depRows.map(r => ({ from: r.predecessorId, to: r.successorId, type: r.dependencyType, label: r.dependencyType }));
+    const depIds: Record<string, string> = {};
+    depRows.forEach(r => { depIds[`${r.predecessorId}__${r.successorId}`] = r.id; });
+    try {
+      localStorage.setItem(`bluq_gantt_${projectId}`, JSON.stringify({ tasks, deps, depIds, lastFetchedAt: Date.now() }));
+    } catch {}
+  }).catch(() => {});
 }
 
 /** POST /tasks/dependencies */
