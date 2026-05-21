@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Download, CheckCircle2, AlertTriangle,
@@ -131,46 +131,29 @@ function DailyUpdatesInner() {
       })()
     : null;
 
+  const contentRef = useRef<HTMLDivElement>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
-  const handleDownloadDPR = async () => {
-    if (!activeWorkspaceId || !selectedProjectId || !isRealProject(selectedProjectId)) {
-      setDownloadError("Select a project first to export a PDF.");
-      return;
-    }
+  const handleExportPDF = async () => {
+    if (!contentRef.current) return;
     setDownloadError(null);
     setDownloading(true);
     try {
+      const html2pdf = (await import("html2pdf.js")).default;
       const today = new Date().toISOString().split("T")[0];
-      const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
-      const { authClient } = await import("@/lib/auth-client");
-      const sessionData = await authClient.getSession();
-      const token = (sessionData as any)?.data?.session?.token ?? "";
-      const params = new URLSearchParams({
-        projectId: selectedProjectId,
-        workspaceId: activeWorkspaceId,
-        reportDate: today,
-        sections: "ai_summary,s_curve,site_progress,site_attendance,material_usage,critical_issues,site_photos",
-      });
-      const res = await fetch(`${BACKEND_URL}/reports/download?${params}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string };
-        throw new Error(err.error ?? `HTTP ${res.status}`);
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `DPR-${today}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      await html2pdf()
+        .set({
+          margin: [8, 8, 8, 8],
+          filename: `Daily-Updates-${today}.pdf`,
+          image: { type: "jpeg", quality: 0.97 },
+          html2canvas: { scale: 2, useCORS: true, scrollY: 0 },
+          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+        })
+        .from(contentRef.current)
+        .save();
     } catch (err: any) {
-      setDownloadError(err.message ?? "Failed to download report.");
+      setDownloadError(err.message ?? "Failed to export PDF.");
     } finally {
       setDownloading(false);
     }
@@ -189,7 +172,7 @@ function DailyUpdatesInner() {
 
   return (
     <div className="p-6 overflow-y-auto h-full">
-      <div>
+      <div ref={contentRef}>
 
         {/* ── Page header ── */}
         <div className="flex items-start justify-between mb-6">
@@ -207,7 +190,7 @@ function DailyUpdatesInner() {
 
           <div className="flex flex-col items-end gap-1">
             <button
-              onClick={handleDownloadDPR}
+              onClick={handleExportPDF}
               disabled={downloading}
               className="inline-flex items-center gap-2 bg-[#2563EB] text-white rounded-lg px-4 py-2 text-[13px] font-semibold hover:bg-[#1D4ED8] transition-colors shadow-sm cursor-pointer disabled:opacity-60"
             >

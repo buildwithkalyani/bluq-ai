@@ -132,21 +132,43 @@ function extractCity(address: string): string {
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 // ── Weather Widget ────────────────────────────────────────────
-function WeatherWidget({ address }: { address: string }) {
+function WeatherWidget({ address, lat, lng }: { address: string; lat?: number | null; lng?: number | null }) {
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [loading, setLoading] = useState(true);
   const city = extractCity(address);
 
   useEffect(() => {
-    if (!city) { setLoading(false); return; }
     (async () => {
       try {
-        const geo = await fetch(
-          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1`
-        );
-        const geoData = await geo.json();
-        if (!geoData.results?.[0]) { setLoading(false); return; }
-        const { latitude, longitude } = geoData.results[0];
+        let latitude = 0, longitude = 0;
+        if (lat != null && lng != null) {
+          latitude = lat;
+          longitude = lng;
+        } else {
+          // Try full address then each comma-part right-to-left via Nominatim
+          const parts = address
+            ? address.split(",").map(s => s.trim()).filter(Boolean)
+            : [];
+          const queries = address ? [address, ...parts.slice().reverse()] : parts.slice().reverse();
+          let resolved = false;
+          for (const q of queries) {
+            if (!q || q.length < 3) continue;
+            try {
+              const nm = await fetch(
+                `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`,
+                { headers: { "Accept-Language": "en", "User-Agent": "BLUQ-ConstructionPM/1.0" } }
+              );
+              const nmData = await nm.json();
+              if (nmData[0]) {
+                latitude = parseFloat(nmData[0].lat);
+                longitude = parseFloat(nmData[0].lon);
+                resolved = true;
+                break;
+              }
+            } catch { /* try next */ }
+          }
+          if (!resolved) { setLoading(false); return; }
+        }
         const wx = await fetch(
           `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}` +
           `&current=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m,uv_index` +
@@ -159,9 +181,9 @@ function WeatherWidget({ address }: { address: string }) {
         setLoading(false);
       }
     })();
-  }, [city]);
+  }, [lat, lng, city]);
 
-  if (!city) return null;
+  if (!lat && !lng && !city) return null;
 
   if (loading) {
     return (
@@ -482,11 +504,25 @@ export default function ProjectDetailView({
   const averageProgress = hasTasks ? Math.round(parentTasks.reduce((a, t) => a + t.pct, 0) / total) : null;
 
   const totalDays    = proj.startDate && proj.endDate
-    ? Math.round((new Date(proj.endDate).getTime() - new Date(proj.startDate).getTime()) / 86_400_000)
+    ? Math.round((new Date(proj.endDate + "T00:00:00").getTime() - new Date(proj.startDate + "T00:00:00").getTime()) / 86_400_000)
     : 0;
   const elapsedDays  = proj.startDate
-    ? Math.max(0, Math.round((Date.now() - new Date(proj.startDate).getTime()) / 86_400_000))
+    ? Math.max(0, Math.round((Date.now() - new Date(proj.startDate + "T00:00:00").getTime()) / 86_400_000))
     : 0;
+
+  // Minimum timeline required by tasks
+  const taskDatedStart = parentTasks.filter(t => t.startDate);
+  const taskDatedEnd   = parentTasks.filter(t => t.endDate);
+  const taskMinStartMs = taskDatedStart.length > 0
+    ? Math.min(...taskDatedStart.map(t => new Date(t.startDate! + "T00:00:00").getTime()))
+    : null;
+  const taskMaxEndMs   = taskDatedEnd.length > 0
+    ? Math.max(...taskDatedEnd.map(t => new Date(t.endDate! + "T00:00:00").getTime()))
+    : null;
+  const minTaskDays = taskMinStartMs && taskMaxEndMs
+    ? Math.round((taskMaxEndMs - taskMinStartMs) / 86_400_000)
+    : null;
+  const timelineInsufficient = proj.startDate && proj.endDate && minTaskDays !== null && totalDays < minTaskDays;
   const remainingDays = Math.max(0, totalDays - elapsedDays);
   const timeUsedPct   = totalDays > 0 ? Math.round((elapsedDays / totalDays) * 100) : 0;
 
@@ -514,8 +550,8 @@ export default function ProjectDetailView({
 
   const fmt = (v: number | null, suffix = "%") => v === null ? "—" : `${v}${suffix}`;
   const scheduleParams = workspaceId
-    ? `?projectId=${proj.id}&workspaceId=${workspaceId}`
-    : `?projectId=${proj.id}`;
+    ? `?projectId=${proj.id}&workspaceId=${workspaceId}${proj.endDate ? `&projectEndDate=${proj.endDate}` : ""}`
+    : `?projectId=${proj.id}${proj.endDate ? `&projectEndDate=${proj.endDate}` : ""}`;
 
   // ── S-Curve chart data ──────────────────────────────────────
   const scData = proj.startDate && proj.endDate
@@ -645,14 +681,6 @@ export default function ProjectDetailView({
               <span className="text-[12px] text-[#475569] font-mono tabular-nums">{fmtDate(proj.startDate)} → {fmtDate(proj.endDate)}</span>
             </div>
           )}
-          {scheduleHealth && (
-            <span
-              className="text-[11px] font-bold rounded-full px-2 py-0.5 border"
-              style={{ color: scheduleColor, background: scheduleColor + "12", borderColor: scheduleColor + "40" }}
-            >
-              {scheduleHealth}
-            </span>
-          )}
         </div>
 
         <div className="flex items-center gap-4 shrink-0">
@@ -728,6 +756,18 @@ export default function ProjectDetailView({
           >
             Dismiss
           </button>
+        </div>
+      )}
+
+      {timelineInsufficient && (
+        <div className="mb-4 px-4 py-3 rounded-xl border border-[#FEE2E2] bg-[#FEF2F2] flex items-center gap-3">
+          <AlertCircle size={14} className="text-[#EF4444] shrink-0" />
+          <div>
+            <span className="text-[13px] font-bold text-[#EF4444]">Project can't be completed in given timeline</span>
+            <div className="text-[11px] text-[#F87171] mt-0.5">
+              Minimum timeline required: <span className="font-bold">{minTaskDays}d</span> — current: <span className="font-bold">{totalDays}d</span>. Extend the project end date.
+            </div>
+          </div>
         </div>
       )}
 
@@ -842,7 +882,13 @@ export default function ProjectDetailView({
 
             {/* Right: Weather + Project Vitals */}
             <div className="w-[256px] shrink-0 flex flex-col gap-3">
-              {proj.address && <WeatherWidget address={proj.address} />}
+              {!!(proj.address || (proj.settingsJson as any)?.lat) && (
+                <WeatherWidget
+                  address={proj.address}
+                  lat={proj.settingsJson?.lat as number | null}
+                  lng={proj.settingsJson?.lng as number | null}
+                />
+              )}
 
               {/* Project Vitals */}
               <div className="bg-white border border-[#E2E8F0] rounded-xl p-4 shadow-sm">

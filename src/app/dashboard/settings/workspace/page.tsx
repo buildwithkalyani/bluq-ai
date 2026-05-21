@@ -7,12 +7,13 @@ import { updateOrg, fetchOrgLogoUploadUrl } from "@/lib/api-client";
 
 
 export default function WorkspaceSettingsPage() {
-  const { workspaceId, orgName, isDesignMode, setWorkspace } = useWorkspace();
+  const { workspaceId, orgName, isDesignMode, setWorkspace, setOrgLogoUrl: setContextLogoUrl } = useWorkspace();
 
   const [companyName, setCompanyName] = useState(orgName ?? "");
   const [savedName, setSavedName] = useState(orgName ?? "");
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
-  const [logoUploading, setLogoUploading] = useState(false);
+  const [pendingLogo, setPendingLogo] = useState<File | null>(null);
+  const [pendingLogoPreview, setPendingLogoPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(false);
   const [error, setError] = useState("");
@@ -43,29 +44,15 @@ export default function WorkspaceSettingsPage() {
     });
   }, [workspaceId, isDesignMode]);
 
-  const dirty = companyName !== savedName;
+  const dirty = companyName !== savedName || pendingLogo !== null;
 
-  const handleLogoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !workspaceId) return;
-    setLogoUploading(true);
-    setError("");
-    try {
-      const { signedUrl, publicUrl } = await fetchOrgLogoUploadUrl(workspaceId, file.name);
-      const uploadRes = await fetch(signedUrl, {
-        method: "PUT",
-        headers: { "Content-Type": file.type || "image/png" },
-        body: file,
-      });
-      if (!uploadRes.ok) throw new Error("Upload failed");
-      await updateOrg(workspaceId, { logoUrl: publicUrl });
-      setLogoUrl(publicUrl);
-    } catch (err: any) {
-      setError(err.message ?? "Logo upload failed");
-    } finally {
-      setLogoUploading(false);
-      if (logoInputRef.current) logoInputRef.current.value = "";
-    }
+    if (!file) return;
+    if (pendingLogoPreview) URL.revokeObjectURL(pendingLogoPreview);
+    setPendingLogo(file);
+    setPendingLogoPreview(URL.createObjectURL(file));
+    if (logoInputRef.current) logoInputRef.current.value = "";
   };
 
   const handleSave = async () => {
@@ -74,14 +61,33 @@ export default function WorkspaceSettingsPage() {
     setError("");
     try {
       if (!isDesignMode && workspaceId) {
-        await updateOrg(workspaceId, { name: companyName });
+        const updates: Record<string, string> = {};
+        if (companyName !== savedName) updates.name = companyName;
+        if (pendingLogo) {
+          const { signedUrl, publicUrl } = await fetchOrgLogoUploadUrl(workspaceId, pendingLogo.name);
+          const uploadRes = await fetch(signedUrl, {
+            method: "PUT",
+            headers: { "Content-Type": pendingLogo.type || "image/png" },
+            body: pendingLogo,
+          });
+          if (!uploadRes.ok) throw new Error("Logo upload failed");
+          updates.logoUrl = publicUrl;
+        }
+        if (Object.keys(updates).length > 0) await updateOrg(workspaceId, updates);
+        if (updates.logoUrl) {
+          if (pendingLogoPreview) URL.revokeObjectURL(pendingLogoPreview);
+          setLogoUrl(updates.logoUrl);
+          setContextLogoUrl(updates.logoUrl);
+          setPendingLogo(null);
+          setPendingLogoPreview(null);
+        }
       }
       setSavedName(companyName);
       setWorkspace(workspaceId ?? "", companyName);
       setToast(true);
       setTimeout(() => setToast(false), 2500);
     } catch (err: any) {
-      setError("Failed to save. Please try again.");
+      setError(err.message ?? "Failed to save. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -116,8 +122,8 @@ export default function WorkspaceSettingsPage() {
           <div>
             <label className="block text-xs font-semibold text-[#475569] mb-1">Company Logo</label>
             <div className="flex items-center gap-4">
-              {logoUrl ? (
-                <img src={logoUrl} alt="Company logo" className="w-14 h-14 rounded-xl object-cover border border-[#E2E8F0] shrink-0" />
+              {(pendingLogoPreview ?? logoUrl) ? (
+                <img src={pendingLogoPreview ?? logoUrl!} alt="Company logo" className="w-14 h-14 rounded-xl object-cover border border-[#E2E8F0] shrink-0" />
               ) : (
                 <div className="w-14 h-14 rounded-xl bg-[#EFF6FF] flex items-center justify-center text-xl font-extrabold text-[#2563EB] shrink-0">
                   {initials}
@@ -133,10 +139,10 @@ export default function WorkspaceSettingsPage() {
                 />
                 <button
                   onClick={() => logoInputRef.current?.click()}
-                  disabled={logoUploading || (!workspaceId && !isDesignMode)}
+                  disabled={loading || (!workspaceId && !isDesignMode)}
                   className="px-3 py-1.5 text-xs font-semibold border border-[#E2E8F0] rounded-md bg-white cursor-pointer hover:bg-[#F8FAFC] transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {logoUploading ? "Uploading…" : "Change Logo"}
+                  {pendingLogo ? "Change Logo ●" : "Change Logo"}
                 </button>
                 <div className="text-[11px] text-[#94A3B8] mt-1.5">PNG, JPEG or WebP · max 2 MB</div>
               </div>

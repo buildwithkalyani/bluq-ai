@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useMemo, Suspense } from 'react';
 import { Search } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { getScheduleTasks, getScheduleDeps, type ScheduleTask, type TaskDependency } from "@/lib/mock-data";
-import { fetchTasks, fetchTaskDependencies, createTaskDependency, deleteTaskDependency, fetchLatestScheduleVersion, isRealProject, updateTask, type ScheduleVersion } from "@/lib/api-client";
+import { fetchTasks, fetchTaskDependencies, createTaskDependency, deleteTaskDependency, fetchLatestScheduleVersion, isRealProject, updateTask, createTask, fetchProject, type ScheduleVersion } from "@/lib/api-client";
 import { GapCheckPanel, type SuspectedGap } from "@/components/ui/GapCheckPanel";
 import { useWorkspace } from "@/context/workspace";
 import { useActivityFeed } from "@/context/activity-feed";
@@ -983,12 +983,15 @@ function GanttChartContent() {
   const projectIdParam = searchParams.get("projectId") ?? "0";
   const urlWs = searchParams.get("workspaceId");
   const workspaceId = (urlWs && urlWs !== "null") ? urlWs : ctxWorkspaceId;
+  const urlProjectEndDate = searchParams.get("projectEndDate") ?? null;
   const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
 
+  const [projectEndDate, setProjectEndDate] = useState<string | null>(urlProjectEndDate);
   const [tasks, setTasks] = useState<ScheduleTask[]>([]);
   const [deps, setDeps] = useState<TaskDependency[]>([]);
   const [depIds, setDepIds] = useState<Record<string, string>>({});
   const [scheduleVersion, setScheduleVersion] = useState<ScheduleVersion | null>(null);
+  const [dataLoading, setDataLoading] = useState(false);
   const depIdKey = (from: string, to: string) => `${from}__${to}`;
 
   // Activity feed — mock data only in design mode; real mode shows empty until socket/API wired
@@ -999,24 +1002,50 @@ function GanttChartContent() {
   const [filterStatus, setFilterStatus] = useState<StatusFilter>("All");
   const [showBaseline, setShowBaseline] = useState(true);
   const [bannerDismissed, setBannerDismissed] = useState(false);
-  const [reoptimizing, setReoptimizing] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Resolve project end date: URL param → projects localStorage cache → API
+  useEffect(() => {
+    if (urlProjectEndDate) return; // already have it
+    // Try localStorage cache first (written by overview page)
+    if (workspaceId) {
+      try {
+        const raw = localStorage.getItem(`bluq_projects_cache_${workspaceId}`);
+        if (raw) {
+          const cache = JSON.parse(raw);
+          const proj = cache?.data?.find((p: any) => String(p.id) === projectIdParam);
+          if (proj?.endDate) { setProjectEndDate(proj.endDate); return; }
+        }
+      } catch {}
+    }
+    // Fall back to API
+    if (real) {
+      fetchProject(projectIdParam)
+        .then(p => { if (p.endDate) setProjectEndDate(p.endDate); })
+        .catch(() => {});
+    }
+  }, [real, projectIdParam, workspaceId, urlProjectEndDate]);
 
   useEffect(() => {
     if (real) {
+      const controller = new AbortController();
+      const { signal } = controller;
+
       // Show cached data instantly so chart isn't blank on navigate-back
       const cached = readGanttCache(projectIdParam);
       if (cached) {
         setTasks(cached.tasks);
         setDeps(cached.deps);
         setDepIds(cached.depIds);
+      } else {
+        setDataLoading(true);
       }
 
-      // Fetch fresh in background
+      // Fetch tasks + deps first (critical path); schedule version is non-blocking
       Promise.all([
-        fetchTasks(projectIdParam, workspaceId!),
-        fetchTaskDependencies(projectIdParam, workspaceId!),
-        fetchLatestScheduleVersion(projectIdParam, workspaceId!),
-      ]).then(([freshTasks, depRows, version]) => {
+        fetchTasks(projectIdParam, workspaceId!, signal),
+        fetchTaskDependencies(projectIdParam, workspaceId!, signal),
+      ]).then(([freshTasks, depRows]) => {
         const freshDeps = depRows.map(r => ({ from: r.predecessorId, to: r.successorId, type: r.dependencyType, label: r.dependencyType }));
         const freshDepIds: Record<string, string> = {};
         depRows.forEach(r => { freshDepIds[depIdKey(r.predecessorId, r.successorId)] = r.id; });
@@ -1024,9 +1053,18 @@ function GanttChartContent() {
         setTasks(freshTasks);
         setDeps(freshDeps);
         setDepIds(freshDepIds);
-        setScheduleVersion(version);
+        setDataLoading(false);
         writeGanttCache(projectIdParam, { tasks: freshTasks, deps: freshDeps, depIds: freshDepIds });
-      }).catch(console.error);
+
+        // Lazily load schedule version after tasks are visible
+        fetchLatestScheduleVersion(projectIdParam, workspaceId!)
+          .then(setScheduleVersion)
+          .catch(() => {});
+      }).catch(err => {
+        if (err?.name !== "AbortError") setDataLoading(false);
+      });
+
+      return () => controller.abort();
     } else if (isDesignMode) {
       const numId = Number(projectIdParam);
       getScheduleTasks(numId).then(setTasks);
@@ -1114,11 +1152,24 @@ function GanttChartContent() {
     const notStarted  = parents.filter(t => effectiveStatus(t) === "notStarted").length;
     const atRisk      = runningLate + delayed;
     const total       = parents.length;
-    const overall     = total ? Math.round(parents.reduce((s, t) => s + t.pct, 0) / total) : 0;
+    // Duration-weighted progress (industry standard — Primavera P6 / MS Project)
+    // Each task contributes proportional to its planned duration, not just task count
+    const overall = (() => {
+      if (total === 0) return 0;
+      let weightedSum = 0;
+      let totalDur = 0;
+      parents.forEach(t => {
+        const dur = Math.max(diffDays(t.startDate, t.endDate), 1);
+        weightedSum += t.pct * dur;
+        totalDur += dur;
+      });
+      return totalDur > 0 ? Math.round(weightedSum / totalDur) : 0;
+    })();
     const ends = parents.map(t => t.endDate).filter(Boolean).sort();
-    const projectedEnd = ends.length > 0 ? ends[ends.length - 1] : "2026-09-30";
+    // When tasks exist → last task end date. When no tasks → project's configured end date. Never today as fallback.
+    const projectedEnd = ends.length > 0 ? ends[ends.length - 1] : (projectEndDate ?? null);
     return { completed, inProgress, runningLate, delayed, notStarted, atRisk, total, overall, projectedEnd };
-  }, [tasks]);
+  }, [tasks, projectEndDate]);
 
   // Slip detection drives the reoptimize banner
   const slipSummary = useMemo(() => detectSlip(tasks.filter(t => !t.parentTaskId)), [tasks]);
@@ -1182,7 +1233,15 @@ function GanttChartContent() {
 
   const phaseAvgPct = (areas: [string, ScheduleTask[]][]) => {
     const parents = areas.flatMap(([, ts]) => ts).filter(t => !t.parentTaskId);
-    return parents.length ? Math.round(parents.reduce((s, t) => s + t.pct, 0) / parents.length) : 0;
+    if (!parents.length) return 0;
+    let weightedSum = 0;
+    let totalDur = 0;
+    parents.forEach(t => {
+      const dur = Math.max(diffDays(t.startDate, t.endDate), 1);
+      weightedSum += t.pct * dur;
+      totalDur += dur;
+    });
+    return totalDur > 0 ? Math.round(weightedSum / totalDur) : 0;
   };
 
   const { taskYMap, totalH, wbsMap } = useMemo(() => {
@@ -1239,7 +1298,13 @@ function GanttChartContent() {
     if (!parents.length) return null;
     const start = parents.reduce((m, t) => parseDate(t.startDate) < parseDate(m) ? t.startDate : m, parents[0].startDate);
     const end   = parents.reduce((m, t) => parseDate(t.endDate)   > parseDate(m) ? t.endDate   : m, parents[0].endDate);
-    const avg   = Math.round(parents.reduce((s, t) => s + t.pct, 0) / parents.length);
+    let weightedSum = 0, totalDur = 0;
+    parents.forEach(t => {
+      const dur = Math.max(diffDays(t.startDate, t.endDate), 1);
+      weightedSum += t.pct * dur;
+      totalDur += dur;
+    });
+    const avg = totalDur > 0 ? Math.round(weightedSum / totalDur) : 0;
     return { start, end, avg };
   };
 
@@ -1264,29 +1329,25 @@ function GanttChartContent() {
     if (selectedId === id) setSelectedId(null);
   };
 
-  // Reoptimize action — wire to your /api/reoptimize endpoint in production
-  const handleReoptimize = async () => {
-    setReoptimizing(true);
-    // TODO: POST to /api/reoptimize with current schedule + slipped task ids
-    // Response should include new task dates + dependency adjustments
-    await new Promise(r => setTimeout(r, 1200));
-    setReoptimizing(false);
+  const handleReoptimize = () => {
     setBannerDismissed(true);
-    // Real implementation would refresh tasks and show a diff view
-    refreshTasks();
   };
 
 const handleSaveModal = (data: any, newPreds: any) => {
+    setSaveError(null);
     let targetId = modalConfig.taskId;
     if (modalConfig.mode === "add") {
       targetId = `t_${Date.now()}`;
       const days = diffDays(data.startDate, data.endDate);
-      setTasks(p => [...p, {
+      const newTask = {
         id: targetId, projectId: 0, name: data.name, phase: data.phase, space: data.space || "General",
         contractor: data.contractor || "—", startDate: data.startDate, endDate: data.endDate,
         duration: `${days}d`, pct: data.pct ?? 0, status: data.status ?? "notStarted",
         critical: false, group: "", delay: null, left: 0, width: 0, photos: [] as string[],
-      } as any]);
+      } as any;
+      const optimisticTasks = [...tasks, newTask];
+      setTasks(optimisticTasks);
+      writeGanttCache(projectIdParam, { tasks: optimisticTasks, deps, depIds });
     } else {
       setTasks(p => p.map(t => t.id === targetId
         ? { ...t, ...data, duration: `${diffDays(data.startDate, data.endDate)}d` } : t));
@@ -1296,8 +1357,33 @@ const handleSaveModal = (data: any, newPreds: any) => {
       return [...filtered, ...newPreds.map((pr: any) => ({ from: pr.id, to: targetId, type: pr.type, label: pr.type }))];
     });
     if (real && workspaceId && targetId) {
-      // Persist task edits to backend
-      if (modalConfig.mode === "edit") {
+      if (modalConfig.mode === "add") {
+        createTask({
+          workspaceId,
+          projectId: projectIdParam,
+          title: data.name,
+          status: toDbStatus(data.status ?? "notStarted"),
+          startDate: data.startDate,
+          endDate: data.endDate,
+          percentComplete: data.pct ?? 0,
+          contractor: data.contractor || undefined,
+          area: data.space || undefined,
+          phase: data.phase || undefined,
+        }).then(created => {
+          setTasks(p => p.map(t => t.id === targetId ? { ...t, id: created.id } : t));
+          setDeps(p => p.map(d => d.to === targetId ? { ...d, to: created.id } : d));
+          refreshTasks();
+          newPreds.forEach((pr: any) => {
+            createTaskDependency({ workspaceId: workspaceId!, predecessorId: pr.id, successorId: created.id, dependencyType: pr.type })
+              .then(r => { if (r) setDepIds(p => ({ ...p, [depIdKey(pr.id, created.id)]: r.id })); })
+              .catch(console.error);
+          });
+        }).catch((err) => {
+          console.error("createTask failed:", err);
+          setSaveError("Failed to save task. Please try again.");
+          setTasks(p => p.filter(t => t.id !== targetId));
+        });
+      } else if (modalConfig.mode === "edit") {
         updateTask(targetId, {
           title: data.name,
           status: toDbStatus(data.status),
@@ -1307,19 +1393,24 @@ const handleSaveModal = (data: any, newPreds: any) => {
           contractor: data.contractor || null,
           area: data.space || null,
           phase: data.phase || null,
-        }).catch(console.error);
+        }).catch((err) => {
+          console.error("updateTask failed:", err);
+          setSaveError("Failed to save changes. Please try again.");
+        });
       }
-      // delete old deps for this task, then create new ones
-      const oldDeps = deps.filter(d => d.to === targetId);
-      oldDeps.forEach(d => {
-        const bid = depIds[depIdKey(d.from, d.to)];
-        if (bid) deleteTaskDependency(bid).catch(console.error);
-      });
-      newPreds.forEach((pr: any) => {
-        createTaskDependency({ workspaceId: workspaceId!, predecessorId: pr.id, successorId: targetId!, dependencyType: pr.type })
-          .then(r => { if (r) setDepIds(p => ({ ...p, [depIdKey(pr.id, targetId!)]: r.id })); })
-          .catch(console.error);
-      });
+      // For edits: delete old deps then recreate (add mode handles deps in createTask.then above)
+      if (modalConfig.mode === "edit") {
+        const oldDeps = deps.filter(d => d.to === targetId);
+        oldDeps.forEach(d => {
+          const bid = depIds[depIdKey(d.from, d.to)];
+          if (bid) deleteTaskDependency(bid).catch(console.error);
+        });
+        newPreds.forEach((pr: any) => {
+          createTaskDependency({ workspaceId: workspaceId!, predecessorId: pr.id, successorId: targetId!, dependencyType: pr.type })
+            .then(r => { if (r) setDepIds(p => ({ ...p, [depIdKey(pr.id, targetId!)]: r.id })); })
+            .catch(console.error);
+        });
+      }
     }
   };
 
@@ -1486,6 +1577,25 @@ const handleSaveModal = (data: any, newPreds: any) => {
     ? activity.filter(a => a.taskId === selectedTask.id || a.impact.toLowerCase().includes((selectedTask.phase || "").toLowerCase()))
     : [];
 
+  if (dataLoading) {
+    return (
+      <div className="flex w-full h-full min-h-[600px] border border-[#E2E8F0] rounded-xl overflow-hidden bg-white font-sans">
+        <div className="flex-1 flex flex-col min-w-0 animate-pulse p-4 gap-3">
+          <div className="flex items-center gap-3 pb-2 border-b border-[#E2E8F0]">
+            <div className="h-5 w-20 bg-[#E2E8F0] rounded" />
+            <div className="h-5 w-32 bg-[#E2E8F0] rounded-full" />
+          </div>
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="flex items-center gap-3">
+              <div className="h-4 rounded bg-[#E2E8F0]" style={{ width: `${120 + (i % 3) * 40}px` }} />
+              <div className="flex-1 h-4 bg-[#F1F5F9] rounded" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex w-full h-full min-h-[600px] border border-[#E2E8F0] rounded-xl overflow-hidden bg-white font-sans relative">
       <div className="flex-1 flex flex-col min-w-0">
@@ -1506,9 +1616,13 @@ const handleSaveModal = (data: any, newPreds: any) => {
             </div>
             <div className="w-px h-4 bg-[#E2E8F0]" />
             <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-semibold text-[#94A3B8] uppercase tracking-wide">Projected Handover</span>
+              <span className="text-[11px] font-semibold text-[#94A3B8] uppercase tracking-wide">
+                {tasks.filter(t => !t.parentTaskId).length > 0 ? "Projected Handover" : "Planned Handover"}
+              </span>
               <span className="text-[14px] font-bold text-[#0F172A]">
-                {new Date(headerStats.projectedEnd).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}
+                {headerStats.projectedEnd
+                  ? new Date(headerStats.projectedEnd).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })
+                  : "—"}
               </span>
             </div>
           </div>
@@ -1523,13 +1637,10 @@ const handleSaveModal = (data: any, newPreds: any) => {
             onDismiss={() => setBannerDismissed(true)}
           />
         )}
-        {reoptimizing && (
-          <div className="px-4 py-2 bg-blue-50 border-b border-blue-100 text-[12px] text-blue-700 font-medium flex items-center gap-2">
-            <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-            </svg>
-            Reoptimizing schedule based on current site status…
+        {saveError && (
+          <div className="px-4 py-2 bg-red-50 border-b border-red-200 text-[12px] text-red-700 font-medium flex items-center justify-between">
+            <span>⚠ {saveError}</span>
+            <button onClick={() => setSaveError(null)} className="text-red-400 hover:text-red-600 text-[14px] leading-none">✕</button>
           </div>
         )}
 

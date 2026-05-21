@@ -27,17 +27,21 @@ const DESIGN_ACCOUNTS = ["aishna.tijaria@gmail.com"];
 interface WorkspaceContextType {
   workspaceId: string | null;
   orgName: string | null;
+  orgLogoUrl: string | null;
   loading: boolean;
   isDesignMode: boolean;   // true → always show mock data
   setWorkspace: (id: string, name: string) => void;
+  setOrgLogoUrl: (url: string | null) => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextType>({
   workspaceId: null,
   orgName: null,
+  orgLogoUrl: null,
   loading: true,
   isDesignMode: false,
   setWorkspace: () => {},
+  setOrgLogoUrl: () => {},
 });
 
 async function getAuthToken(): Promise<string> {
@@ -82,6 +86,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // This prevents User B from briefly seeing User A's workspace on the same device.
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [orgName, setOrgName] = useState<string | null>(null);
+  const [orgLogoUrl, setOrgLogoUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -120,6 +125,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           if (first) {
             setWorkspaceId(first.id);
             setOrgName(first.name);
+            if (first.logoUrl) setOrgLogoUrl(first.logoUrl);
             writeWorkspaceCache(first.id, first.name, userId);
             // Redirect to resume onboarding only if user hasn't explicitly skipped/finished
             const done = localStorage.getItem("onboarding_done") === "true";
@@ -158,7 +164,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   return (
     <WorkspaceContext.Provider
-      value={{ workspaceId, orgName, loading, isDesignMode, setWorkspace }}
+      value={{ workspaceId, orgName, orgLogoUrl, loading, isDesignMode, setWorkspace, setOrgLogoUrl }}
     >
       {children}
     </WorkspaceContext.Provider>

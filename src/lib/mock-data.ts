@@ -31,6 +31,7 @@ export interface Project {
   startDate: string;
   endDate: string;
   address: string;
+  settingsJson?: Record<string, unknown>;
 }
 
 const PROJECTS: Project[] = [
