@@ -1,7 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
 import { projects, tasks } from "../db/schema.js";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull, sql } from "drizzle-orm";
 import { verifySession } from "../lib/verifySession.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -19,10 +19,87 @@ export async function projectsRoute(app: FastifyInstance) {
         return reply.status(400).send({ error: "workspaceId must be a valid UUID" });
       }
       const data = await db.select().from(projects).where(eq(projects.workspaceId, workspaceId));
-      return data;
+
+      // Compute per-project task aggregates in one query
+      // "delayed" = DB status is delayed/running_late OR end_date is past today and not complete
+      // This mirrors the frontend effectiveStatus() logic used in the Gantt
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+      // Duration-weighted progress = Σ(duration_days × %complete) / Σ(duration_days)
+      // This is the Earned Value / Primavera P6 standard. Handles parallel tasks correctly:
+      // a 1-day task and a 90-day task are weighted by their planned effort, not counted equally.
+      // Parent tasks only — subtasks would double-count effort already captured in the parent.
+      const aggs = await db
+        .select({
+          projectId: tasks.projectId,
+          weightedPct: sql<number>`
+            round(
+              sum(
+                greatest(coalesce(${tasks.endDate}::date - ${tasks.startDate}::date, 1), 1)::numeric
+                * coalesce(${tasks.percentComplete}::numeric, 0)
+              )
+              /
+              nullif(
+                sum(greatest(coalesce(${tasks.endDate}::date - ${tasks.startDate}::date, 1), 1)::numeric),
+                0
+              )
+            )
+          `,
+          total: sql<number>`count(*)`,
+          completed: sql<number>`count(*) filter (where ${tasks.status} = 'completed')`,
+          delayed: sql<number>`count(*) filter (where
+            ${tasks.status} in ('delayed', 'running_late')
+            or (
+              ${tasks.endDate} is not null
+              and ${tasks.endDate} < ${today}
+              and ${tasks.status} != 'completed'
+              and coalesce(${tasks.percentComplete}::numeric, 0) < 100
+            )
+          )`,
+          anyProgress: sql<number>`count(*) filter (where coalesce(${tasks.percentComplete}::numeric, 0) > 0)`,
+        })
+        .from(tasks)
+        .where(and(
+          eq(tasks.workspaceId, workspaceId),
+          isNull(tasks.parentTaskId)
+        ))
+        .groupBy(tasks.projectId);
+
+      const aggMap = new Map(aggs.map(a => [a.projectId, a]));
+
+      return data.map(p => {
+        const a = aggMap.get(p.id);
+        const total = Number(a?.total ?? 0);
+        const pct = total > 0 ? Number(a?.weightedPct ?? 0) : 0;
+        let status = p.status ?? "not_started";
+        if (total > 0) {
+          const delayed = Number(a?.delayed ?? 0);
+          const anyProgress = Number(a?.anyProgress ?? 0);
+          const completed = Number(a?.completed ?? 0);
+          if (delayed > 0) status = "delayed";
+          else if (pct >= 100 && completed === total) status = "completed";
+          else if (anyProgress > 0 || pct > 0) status = "in_progress";
+          else status = "not_started";
+        }
+        return { ...p, percentComplete: pct, status };
+      });
     } catch (err: any) {
       console.error("GET /projects error:", err.message, err.cause);
       return reply.status(500).send({ error: "Failed to fetch projects", details: err.message });
+    }
+  });
+
+  // =========================================================================
+  // GET /projects/:id — single project
+  // =========================================================================
+  app.get("/projects/:id", { preHandler: verifySession }, async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      if (!UUID_REGEX.test(id)) return reply.status(400).send({ error: "id must be a valid UUID" });
+      const [project] = await db.select().from(projects).where(eq(projects.id, id)).limit(1);
+      if (!project) return reply.status(404).send({ error: "Project not found" });
+      return project;
+    } catch (err: any) {
+      return reply.status(500).send({ error: "Failed to fetch project", details: err.message });
     }
   });
 
@@ -177,6 +254,7 @@ Write a professional morning briefing. Be direct and actionable — highlight wh
         endDate?: string;
         status?: string;
         createdBy?: string;
+        settingsJson?: Record<string, unknown>;
       };
       if (!body.workspaceId || !body.projectName) return reply.status(400).send({ error: "workspaceId and projectName required" });
       if (!UUID_REGEX.test(body.workspaceId)) {

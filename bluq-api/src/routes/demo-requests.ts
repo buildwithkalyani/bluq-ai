@@ -107,7 +107,7 @@ async function sendInternalNotification(req: {
           const isContact = req.source === "contact";
           const isSignup = req.source === "signup";
           const approveUrl = isSignup && req.id
-            ? `${process.env.BETTER_AUTH_URL?.replace("https://bluq.ai", process.env.API_URL || "https://bluq-api.railway.app") || "https://bluq-api.railway.app"}/demo-requests/${req.id}/approve?secret=${encodeURIComponent(process.env.ADMIN_SECRET || "")}`
+            ? `${process.env.BETTER_AUTH_URL || "https://bluq.ai"}/api/approve/${req.id}?secret=${encodeURIComponent(process.env.ADMIN_SECRET || "")}`
             : null;
           return isContact ? `
           <div style="font-family: sans-serif; max-width: 560px; color: #1a1a1a;">

@@ -1,11 +1,16 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, Suspense } from "react";
-// Suspense is used to wrap useSearchParams per Next.js 14 requirements
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import { authClient } from "@/lib/auth-client";
 import { useWorkspace } from "@/context/workspace";
 import { fetchProjects, updateProject, sendContractorWelcome, sendTeamInvite, BackendProject } from "@/lib/api-client";
 import { getProjects } from "@/lib/mock-data";
+
+function parseMockDate(d: string): string | null {
+  try { const t = new Date(d); return isNaN(t.getTime()) ? null : t.toISOString().split("T")[0]; }
+  catch { return null; }
+}
 
 function mockToBackendProject(p: Awaited<ReturnType<typeof getProjects>>[number]): BackendProject {
   return {
@@ -16,8 +21,8 @@ function mockToBackendProject(p: Awaited<ReturnType<typeof getProjects>>[number]
     address: p.address,
     stage: p.stage,
     category: null,
-    startDate: null,
-    endDate: null,
+    startDate: parseMockDate(p.startDate),
+    endDate: parseMockDate(p.endDate),
     status: p.status,
     clientName: null,
     percentComplete: p.pct,
@@ -40,7 +45,7 @@ interface ProjectFormData {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const STAGE_OPTIONS = ["Planning", "Design", "Foundation", "Structure", "Superstructure", "MEP", "Finishing", "Handover"];
-const TYPE_OPTIONS = ["Residential", "Commercial", "Industrial", "Mixed Use", "Infrastructure"];
+const TYPE_OPTIONS = ["Residential", "Commercial", "Mixed Use", "Industrial / Warehouse", "Road / Highway", "Railway / Metro", "Bridge / Flyover", "Tunnel"];
 const EOD_TIMES = ["4:00 PM", "5:00 PM", "5:30 PM", "6:00 PM", "7:00 PM", "8:00 PM"];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -62,7 +67,7 @@ function projectToForm(p: BackendProject): ProjectFormData {
 // ─── Shared UI Components ─────────────────────────────────────────────────────
 
 const Card = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
-  <div className={`bg-white border border-[#D0D7DE] rounded-lg p-5 ${className}`}>{children}</div>
+  <div className={`bg-white border border-[#E2E8F0] rounded-lg p-5 ${className}`}>{children}</div>
 );
 
 const InputField = ({
@@ -71,14 +76,14 @@ const InputField = ({
   label: string; value: string; onChange: (val: string) => void; type?: string; disabled?: boolean; min?: string;
 }) => (
   <div>
-    <label className="block text-xs font-semibold text-[#57606a] mb-1">{label}</label>
+    <label className="block text-xs font-semibold text-[#475569] mb-1">{label}</label>
     <input
       type={type}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
       min={min}
-      className="w-full border border-[#D0D7DE] rounded-md px-3 py-2 text-sm text-[#24292f] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20 disabled:bg-[#f6f8fa] disabled:text-[#57606a] transition"
+      className="w-full border border-[#E2E8F0] rounded-md px-3 py-2 text-sm text-[#0F172A] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20 disabled:bg-[#F8FAFC] disabled:text-[#475569] transition"
     />
   </div>
 );
@@ -89,11 +94,11 @@ const SelectField = ({
   label: string; value: string; onChange: (val: string) => void; options: string[];
 }) => (
   <div>
-    <label className="block text-xs font-semibold text-[#57606a] mb-1">{label}</label>
+    <label className="block text-xs font-semibold text-[#475569] mb-1">{label}</label>
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="w-full border border-[#D0D7DE] rounded-md px-3 py-2 text-sm text-[#24292f] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20 transition"
+      className="w-full border border-[#E2E8F0] rounded-md px-3 py-2 text-sm text-[#0F172A] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20 transition"
     >
       {options.map((opt) => (
         <option key={opt} value={opt}>{opt}</option>
@@ -108,7 +113,7 @@ const DateField = ({
   label: string; value: string; onChange: (val: string) => void; min?: string;
 }) => (
   <div>
-    <label className="block text-xs font-semibold text-[#57606a] mb-1">{label}</label>
+    <label className="block text-xs font-semibold text-[#475569] mb-1">{label}</label>
     <input
       type="date"
       value={value}
@@ -118,7 +123,7 @@ const DateField = ({
         if (min && val && val < min) return;
         onChange(val);
       }}
-      className="w-full border border-[#D0D7DE] rounded-md px-3 py-2 text-sm text-[#24292f] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20 transition"
+      className="w-full border border-[#E2E8F0] rounded-md px-3 py-2 text-sm text-[#0F172A] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20 transition"
     />
   </div>
 );
@@ -127,7 +132,7 @@ const SaveButton = ({ onClick, loading, dirty }: { onClick: () => void; loading:
   <button
     onClick={onClick}
     disabled={loading || !dirty}
-    className="bg-[#3A4EA2] text-white border-none rounded-md px-5 py-2 text-sm font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[#2d3d8a] active:scale-95 transition-all"
+    className="bg-[#2563EB] text-white border-none rounded-md px-5 py-2 text-sm font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[#2d3d8a] active:scale-95 transition-all"
   >
     {loading ? "Saving…" : dirty ? "Save Changes" : "Saved"}
   </button>
@@ -146,62 +151,6 @@ const Toast = ({ message, show }: { message: string; show: boolean }) => (
   </div>
 );
 
-// ─── Project Selector ─────────────────────────────────────────────────────────
-
-function ProjectSelector({
-  projects, activeId, onChange,
-}: {
-  projects: BackendProject[]; activeId: string; onChange: (id: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const active = projects.find((p) => p.id === activeId) ?? projects[0];
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  if (!active) return null;
-
-  return (
-    <div className="relative" ref={ref}>
-      <div
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 bg-white border border-[#D0D7DE] rounded-md px-2.5 py-1 text-[13px] font-medium cursor-pointer select-none"
-      >
-        <span className="w-2 h-2 rounded-full bg-[#3fb950] inline-block" />
-        {active.projectName}
-        <span className="text-[#57606a] text-[11px] ml-0.5">▾</span>
-      </div>
-
-      {open && (
-        <div className="absolute top-full left-0 mt-1 w-[220px] bg-white border border-[#D0D7DE] rounded-lg shadow-lg z-50 py-1">
-          {projects.map((p) => (
-            <div
-              key={p.id}
-              onClick={() => { onChange(p.id); setOpen(false); }}
-              className="px-3 py-2 text-xs cursor-pointer flex items-center gap-2 hover:bg-[#f6f8fa]"
-              style={{ fontWeight: p.id === activeId ? 700 : 400, color: p.id === activeId ? "#3A4EA2" : "#24292f" }}
-            >
-              <span
-                className="w-2 h-2 rounded-full shrink-0"
-                style={{ background: p.id === activeId ? "#3A4EA2" : "#D0D7DE" }}
-              />
-              <div>
-                <div>{p.projectName}</div>
-                <div className="text-[10px] text-[#8C959F] font-normal mt-0.5">{p.projectCode}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── General Tab ─────────────────────────────────────────────────────────────
 
@@ -255,46 +204,61 @@ function GeneralTab({ project, isMock = false, onSettingsUpdated }: { project: B
 
   return (
     <>
-      <Card>
-        <div className="flex flex-col gap-4">
-          <InputField label="Project Name" value={form.name} onChange={set("name")} />
-          <InputField label="Project Address" value={form.address} onChange={set("address")} />
-
-          <div className="grid grid-cols-2 gap-4">
-            <SelectField label="Stage" value={form.stage} onChange={set("stage")} options={STAGE_OPTIONS} />
-            <SelectField label="Type" value={form.type} onChange={set("type")} options={TYPE_OPTIONS} />
+      <div className="bg-white border border-[#E2E8F0] rounded-xl shadow-sm overflow-hidden">
+        {/* Card header — project identity */}
+        <div className="px-6 py-4 border-b border-[#F1F5F9] flex items-center justify-between">
+          <div>
+            <div className="text-[15px] font-semibold text-[#0F172A] leading-tight">{form.name || "Untitled Project"}</div>
+            {form.code && <code className="text-[11px] font-mono text-[#94A3B8] mt-0.5 block">{form.code}</code>}
           </div>
+          {form.stage && (
+            <span className="px-2.5 py-1 text-[11px] font-semibold rounded-full bg-[#EFF6FF] text-[#2563EB]">{form.stage}</span>
+          )}
+        </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <DateField
-              label="Project Start Date"
-              value={form.startDate}
-              onChange={(val) => {
-                setForm((prev) => ({
-                  ...prev,
-                  startDate: val,
-                  endDate: prev.endDate && prev.endDate < val ? val : prev.endDate,
-                }));
-              }}
-            />
-            <DateField
-              label="Project End Date"
-              value={form.endDate}
-              onChange={set("endDate")}
-              min={form.startDate || undefined}
-            />
+        {/* Form body */}
+        <div className="px-6 py-5 grid grid-cols-2 gap-x-5 gap-y-4">
+          <div className="col-span-2">
+            <InputField label="Project Name" value={form.name} onChange={set("name")} />
           </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <InputField label="Project Code" value={form.code} onChange={set("code")} disabled />
-            <SelectField label="EOD Bot Prompt Time" value={form.eodTime} onChange={set("eodTime")} options={EOD_TIMES} />
+          <div className="col-span-2">
+            <InputField label="Project Address" value={form.address} onChange={set("address")} />
+          </div>
+          <SelectField label="Stage" value={form.stage} onChange={set("stage")} options={STAGE_OPTIONS} />
+          <SelectField label="Type" value={form.type} onChange={set("type")} options={TYPE_OPTIONS} />
+          <DateField
+            label="Start Date"
+            value={form.startDate}
+            onChange={(val) => {
+              setForm((prev) => ({
+                ...prev,
+                startDate: val,
+                endDate: prev.endDate && prev.endDate < val ? val : prev.endDate,
+              }));
+            }}
+          />
+          <DateField
+            label="End Date"
+            value={form.endDate}
+            onChange={set("endDate")}
+            min={form.startDate || undefined}
+          />
+          <SelectField label="EOD Bot Prompt Time" value={form.eodTime} onChange={set("eodTime")} options={EOD_TIMES} />
+          <div>
+            <label className="block text-xs font-semibold text-[#475569] mb-1">Project Code</label>
+            <div className="flex items-center gap-2 h-[38px] px-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-md">
+              <code className="text-[13px] font-mono text-[#475569] flex-1 truncate">{form.code || "—"}</code>
+              <span className="text-[10px] text-[#CBD5E1] shrink-0">read-only</span>
+            </div>
           </div>
         </div>
 
-        <div className="mt-5">
+        {/* Card footer */}
+        <div className="px-6 py-3.5 bg-[#F8FAFC] border-t border-[#F1F5F9] flex items-center gap-3">
           <SaveButton onClick={handleSave} loading={loading} dirty={dirty} />
+          {dirty && <span className="text-[12px] text-[#94A3B8]">Unsaved changes</span>}
         </div>
-      </Card>
+      </div>
 
       <Toast message="Project settings saved!" show={toast} />
     </>
@@ -423,40 +387,40 @@ function ContractorsTab({ project, isMock = false, onSettingsUpdated }: { projec
     <>
       <Card>
         <div className="flex items-center justify-between mb-1">
-          <div className="text-sm font-bold text-[#24292f]">Linked Contractors</div>
+          <div className="text-sm font-bold text-[#0F172A]">Linked Contractors</div>
           <button
             onClick={() => setAdding(true)}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-[#3A4EA2] rounded-md hover:bg-[#2d3d8a] transition-colors"
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-[#2563EB] rounded-lg hover:bg-[#2d3d8a] transition-colors"
           >
             <span className="text-sm leading-none">+</span> Add Contractor
           </button>
         </div>
-        <div className="text-xs text-[#57606a] mb-4">
+        <div className="text-xs text-[#475569] mb-4">
           The Bluq bot collects daily updates from linked contractors on WhatsApp.
         </div>
 
         {/* Add form */}
         {adding && (
-          <div className="mb-4 p-3 bg-[#f6f8fa] border border-[#D0D7DE] rounded-lg flex flex-col gap-3">
-            <div className="text-xs font-semibold text-[#24292f]">New Contractor</div>
+          <div className="mb-4 p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg flex flex-col gap-3">
+            <div className="text-xs font-semibold text-[#0F172A]">New Contractor</div>
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="block text-[10px] font-semibold text-[#57606a] mb-1">NAME *</label>
+                <label className="block text-[10px] font-semibold text-[#475569] mb-1">NAME *</label>
                 <input
                   autoFocus
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   placeholder="e.g. Rajesh Kumar"
-                  className="w-full border border-[#D0D7DE] rounded-md px-2.5 py-1.5 text-xs text-[#24292f] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20"
+                  className="w-full border border-[#E2E8F0] rounded-md px-2.5 py-1.5 text-xs text-[#0F172A] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20"
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-semibold text-[#57606a] mb-1">WHATSAPP NUMBER *</label>
-                <div className="flex border border-[#D0D7DE] rounded-md overflow-hidden focus-within:border-[#0969da] focus-within:ring-2 focus-within:ring-[#0969da]/20 bg-white">
+                <label className="block text-[10px] font-semibold text-[#475569] mb-1">WHATSAPP NUMBER *</label>
+                <div className="flex border border-[#E2E8F0] rounded-md overflow-hidden focus-within:border-[#0969da] focus-within:ring-2 focus-within:ring-[#0969da]/20 bg-white">
                   <select
                     value={newCountryCode}
                     onChange={(e) => setNewCountryCode(e.target.value)}
-                    className="shrink-0 border-r border-[#D0D7DE] bg-[#f6f8fa] px-1.5 py-1.5 text-xs text-[#24292f] outline-none cursor-pointer"
+                    className="shrink-0 border-r border-[#E2E8F0] bg-[#F8FAFC] px-1.5 py-1.5 text-xs text-[#0F172A] outline-none cursor-pointer"
                   >
                     {COUNTRY_CODES.map((c) => (
                       <option key={c.code} value={c.code}>{c.flag} {c.code}</option>
@@ -466,16 +430,16 @@ function ContractorsTab({ project, isMock = false, onSettingsUpdated }: { projec
                     value={newPhone}
                     onChange={(e) => setNewPhone(e.target.value.replace(/\D/g, ""))}
                     placeholder="98765 43210"
-                    className="flex-1 px-2.5 py-1.5 text-xs text-[#24292f] bg-white outline-none min-w-0"
+                    className="flex-1 px-2.5 py-1.5 text-xs text-[#0F172A] bg-white outline-none min-w-0"
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-[10px] font-semibold text-[#57606a] mb-1">TRADE</label>
+                <label className="block text-[10px] font-semibold text-[#475569] mb-1">TRADE</label>
                 <select
                   value={newTrade}
                   onChange={(e) => setNewTrade(e.target.value)}
-                  className="w-full border border-[#D0D7DE] rounded-md px-2.5 py-1.5 text-xs text-[#24292f] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20"
+                  className="w-full border border-[#E2E8F0] rounded-md px-2.5 py-1.5 text-xs text-[#0F172A] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20"
                 >
                   {TRADE_OPTIONS.map((t) => <option key={t}>{t}</option>)}
                 </select>
@@ -485,13 +449,13 @@ function ContractorsTab({ project, isMock = false, onSettingsUpdated }: { projec
               <button
                 onClick={handleAdd}
                 disabled={!newName.trim() || !newPhone.trim()}
-                className="px-3 py-1.5 text-xs font-semibold text-white bg-[#3A4EA2] rounded-md hover:bg-[#2d3d8a] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="px-3 py-1.5 text-xs font-semibold text-white bg-[#2563EB] rounded-lg hover:bg-[#2d3d8a] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 Add
               </button>
               <button
                 onClick={() => { setAdding(false); setNewName(""); setNewPhone(""); setNewCountryCode("+91"); setNewTrade("Civil"); }}
-                className="px-3 py-1.5 text-xs font-semibold text-[#24292f] bg-white border border-[#D0D7DE] rounded-md hover:bg-[#f0f1f3] transition-colors"
+                className="px-3 py-1.5 text-xs font-semibold text-[#0F172A] bg-white border border-[#E2E8F0] rounded-lg hover:bg-[#F1F5F9] transition-colors"
               >
                 Cancel
               </button>
@@ -501,35 +465,35 @@ function ContractorsTab({ project, isMock = false, onSettingsUpdated }: { projec
 
         {/* Contractor list */}
         {contractors.length === 0 ? (
-          <div className="bg-[#f6f8fa] border border-[#D0D7DE] border-dashed rounded-lg py-8 text-center">
-            <div className="text-sm text-[#8C959F] mb-1">No contractors linked</div>
-            <div className="text-xs text-[#8C959F]">Add contractors to receive daily WhatsApp updates from them.</div>
+          <div className="bg-[#F8FAFC] border border-[#E2E8F0] border-dashed rounded-lg py-8 text-center">
+            <div className="text-sm text-[#94A3B8] mb-1">No contractors linked</div>
+            <div className="text-xs text-[#94A3B8]">Add contractors to receive daily WhatsApp updates from them.</div>
           </div>
         ) : (
-          <div className="border border-[#D0D7DE] rounded-lg overflow-hidden">
+          <div className="border border-[#E2E8F0] rounded-lg overflow-hidden">
             <table className="w-full text-xs">
               <thead>
-                <tr className="bg-[#f6f8fa] border-b border-[#D0D7DE]">
-                  <th className="text-left px-3 py-2 font-semibold text-[#57606a]">Name</th>
-                  <th className="text-left px-3 py-2 font-semibold text-[#57606a]">WhatsApp</th>
-                  <th className="text-left px-3 py-2 font-semibold text-[#57606a]">Trade</th>
+                <tr className="bg-[#F8FAFC] border-b border-[#E2E8F0]">
+                  <th className="text-left px-3 py-2 font-semibold text-[#475569]">Name</th>
+                  <th className="text-left px-3 py-2 font-semibold text-[#475569]">WhatsApp</th>
+                  <th className="text-left px-3 py-2 font-semibold text-[#475569]">Trade</th>
                   <th className="px-3 py-2 w-8" />
                 </tr>
               </thead>
               <tbody>
                 {contractors.map((c, i) => (
-                  <tr key={c.id} className={`border-b border-[#D0D7DE] last:border-0 ${i % 2 === 1 ? "bg-[#f6f8fa]" : "bg-white"}`}>
-                    <td className="px-3 py-2.5 font-medium text-[#24292f]">{c.name}</td>
-                    <td className="px-3 py-2.5 text-[#57606a] font-mono">{c.phone}</td>
+                  <tr key={c.id} className={`border-b border-[#E2E8F0] last:border-0 ${i % 2 === 1 ? "bg-[#F8FAFC]" : "bg-white"}`}>
+                    <td className="px-3 py-2.5 font-medium text-[#0F172A]">{c.name}</td>
+                    <td className="px-3 py-2.5 text-[#475569] font-mono">{c.phone}</td>
                     <td className="px-3 py-2.5">
-                      <span className="inline-block bg-[#ddf4ff] text-[#0969da] px-2 py-0.5 rounded-full text-[10px] font-semibold">
+                      <span className="inline-block bg-[#EFF6FF] text-[#0969da] px-2 py-0.5 rounded-full text-[10px] font-semibold">
                         {c.trade}
                       </span>
                     </td>
                     <td className="px-3 py-2.5 text-right">
                       <button
                         onClick={() => handleRemove(c.id)}
-                        className="text-[#8C959F] hover:text-red-600 transition-colors text-base leading-none"
+                        className="text-[#94A3B8] hover:text-red-600 transition-colors text-base leading-none"
                         title="Remove"
                       >
                         ×
@@ -569,9 +533,9 @@ interface TeamMember {
 const ROLE_OPTIONS: TeamMember["role"][] = ["Admin", "Editor", "Viewer"];
 
 const ROLE_STYLE: Record<TeamMember["role"], { bg: string; text: string }> = {
-  Admin:  { bg: "#ffebe9", text: "#CF222E" },
-  Editor: { bg: "#ddf4ff", text: "#0969da" },
-  Viewer: { bg: "#f0f1f3", text: "#57606a" },
+  Admin:  { bg: "#FEF2F2", text: "#DC2626" },
+  Editor: { bg: "#EFF6FF", text: "#0969da" },
+  Viewer: { bg: "#F1F5F9", text: "#475569" },
 };
 
 function TeamTab({ project, isMock = false, onSettingsUpdated }: { project: BackendProject; isMock?: boolean; onSettingsUpdated?: (id: string, s: Record<string, unknown>) => void }) {
@@ -668,49 +632,49 @@ function TeamTab({ project, isMock = false, onSettingsUpdated }: { project: Back
     <>
       <Card>
         <div className="flex items-center justify-between mb-1">
-          <div className="text-sm font-bold text-[#24292f]">Team Members</div>
+          <div className="text-sm font-bold text-[#0F172A]">Team Members</div>
           <button
             onClick={() => setAdding(true)}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-[#3A4EA2] rounded-md hover:bg-[#2d3d8a] transition-colors"
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-[#2563EB] rounded-lg hover:bg-[#2d3d8a] transition-colors"
           >
             <span className="text-sm leading-none">+</span> Add Member
           </button>
         </div>
-        <div className="text-xs text-[#57606a] mb-4">
+        <div className="text-xs text-[#475569] mb-4">
           Manage who has access to this project.
         </div>
 
         {/* Add form */}
         {adding && (
-          <div className="mb-4 p-3 bg-[#f6f8fa] border border-[#D0D7DE] rounded-lg flex flex-col gap-3">
-            <div className="text-xs font-semibold text-[#24292f]">New Team Member</div>
+          <div className="mb-4 p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg flex flex-col gap-3">
+            <div className="text-xs font-semibold text-[#0F172A]">New Team Member</div>
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="block text-[10px] font-semibold text-[#57606a] mb-1">NAME *</label>
+                <label className="block text-[10px] font-semibold text-[#475569] mb-1">NAME *</label>
                 <input
                   autoFocus
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   placeholder="e.g. Ahmed Hassan"
-                  className="w-full border border-[#D0D7DE] rounded-md px-2.5 py-1.5 text-xs text-[#24292f] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20"
+                  className="w-full border border-[#E2E8F0] rounded-md px-2.5 py-1.5 text-xs text-[#0F172A] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20"
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-semibold text-[#57606a] mb-1">EMAIL *</label>
+                <label className="block text-[10px] font-semibold text-[#475569] mb-1">EMAIL *</label>
                 <input
                   type="email"
                   value={newEmail}
                   onChange={(e) => setNewEmail(e.target.value)}
                   placeholder="ahmed@example.com"
-                  className="w-full border border-[#D0D7DE] rounded-md px-2.5 py-1.5 text-xs text-[#24292f] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20"
+                  className="w-full border border-[#E2E8F0] rounded-md px-2.5 py-1.5 text-xs text-[#0F172A] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20"
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-semibold text-[#57606a] mb-1">ROLE</label>
+                <label className="block text-[10px] font-semibold text-[#475569] mb-1">ROLE</label>
                 <select
                   value={newRole}
                   onChange={(e) => setNewRole(e.target.value as TeamMember["role"])}
-                  className="w-full border border-[#D0D7DE] rounded-md px-2.5 py-1.5 text-xs text-[#24292f] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20"
+                  className="w-full border border-[#E2E8F0] rounded-md px-2.5 py-1.5 text-xs text-[#0F172A] bg-white outline-none focus:border-[#0969da] focus:ring-2 focus:ring-[#0969da]/20"
                 >
                   {ROLE_OPTIONS.map((r) => <option key={r}>{r}</option>)}
                 </select>
@@ -720,13 +684,13 @@ function TeamTab({ project, isMock = false, onSettingsUpdated }: { project: Back
               <button
                 onClick={handleAdd}
                 disabled={!newName.trim() || !newEmail.trim()}
-                className="px-3 py-1.5 text-xs font-semibold text-white bg-[#3A4EA2] rounded-md hover:bg-[#2d3d8a] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="px-3 py-1.5 text-xs font-semibold text-white bg-[#2563EB] rounded-lg hover:bg-[#2d3d8a] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 Add
               </button>
               <button
                 onClick={() => { setAdding(false); setNewName(""); setNewEmail(""); setNewRole("Editor"); }}
-                className="px-3 py-1.5 text-xs font-semibold text-[#24292f] bg-white border border-[#D0D7DE] rounded-md hover:bg-[#f0f1f3] transition-colors"
+                className="px-3 py-1.5 text-xs font-semibold text-[#0F172A] bg-white border border-[#E2E8F0] rounded-lg hover:bg-[#F1F5F9] transition-colors"
               >
                 Cancel
               </button>
@@ -736,38 +700,38 @@ function TeamTab({ project, isMock = false, onSettingsUpdated }: { project: Back
 
         {/* Member list */}
         {members.length === 0 ? (
-          <div className="bg-[#f6f8fa] border border-[#D0D7DE] border-dashed rounded-lg py-8 text-center">
-            <div className="text-sm text-[#8C959F] mb-1">No team members added</div>
-            <div className="text-xs text-[#8C959F]">Add team members to control who has access to this project.</div>
+          <div className="bg-[#F8FAFC] border border-[#E2E8F0] border-dashed rounded-lg py-8 text-center">
+            <div className="text-sm text-[#94A3B8] mb-1">No team members added</div>
+            <div className="text-xs text-[#94A3B8]">Add team members to control who has access to this project.</div>
           </div>
         ) : (
-          <div className="border border-[#D0D7DE] rounded-lg overflow-hidden">
+          <div className="border border-[#E2E8F0] rounded-lg overflow-hidden">
             <table className="w-full text-xs">
               <thead>
-                <tr className="bg-[#f6f8fa] border-b border-[#D0D7DE]">
-                  <th className="text-left px-3 py-2 font-semibold text-[#57606a]">Name</th>
-                  <th className="text-left px-3 py-2 font-semibold text-[#57606a]">Email</th>
-                  <th className="text-left px-3 py-2 font-semibold text-[#57606a]">Role</th>
+                <tr className="bg-[#F8FAFC] border-b border-[#E2E8F0]">
+                  <th className="text-left px-3 py-2 font-semibold text-[#475569]">Name</th>
+                  <th className="text-left px-3 py-2 font-semibold text-[#475569]">Email</th>
+                  <th className="text-left px-3 py-2 font-semibold text-[#475569]">Role</th>
                   <th className="px-3 py-2 w-8" />
                 </tr>
               </thead>
               <tbody>
                 {members.map((m, i) => (
-                  <tr key={m.id} className={`border-b border-[#D0D7DE] last:border-0 ${i % 2 === 1 ? "bg-[#f6f8fa]" : "bg-white"}`}>
-                    <td className="px-3 py-2.5 font-medium text-[#24292f]">
+                  <tr key={m.id} className={`border-b border-[#E2E8F0] last:border-0 ${i % 2 === 1 ? "bg-[#F8FAFC]" : "bg-white"}`}>
+                    <td className="px-3 py-2.5 font-medium text-[#0F172A]">
                       <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-full bg-[#3A4EA2] flex items-center justify-center text-white text-[10px] font-bold shrink-0">
+                        <div className="w-6 h-6 rounded-full bg-[#2563EB] flex items-center justify-center text-white text-[10px] font-bold shrink-0">
                           {m.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}
                         </div>
                         {m.name}
                       </div>
                     </td>
-                    <td className="px-3 py-2.5 text-[#57606a]">{m.email}</td>
+                    <td className="px-3 py-2.5 text-[#475569]">{m.email}</td>
                     <td className="px-3 py-2.5">
                       <select
                         value={m.role}
                         onChange={(e) => handleRoleChange(m.id, e.target.value as TeamMember["role"])}
-                        className="border border-[#D0D7DE] rounded px-1.5 py-0.5 text-[10px] font-semibold outline-none"
+                        className="border border-[#E2E8F0] rounded px-1.5 py-0.5 text-[10px] font-semibold outline-none"
                         style={{ background: ROLE_STYLE[m.role].bg, color: ROLE_STYLE[m.role].text }}
                       >
                         {ROLE_OPTIONS.map((r) => <option key={r}>{r}</option>)}
@@ -776,7 +740,7 @@ function TeamTab({ project, isMock = false, onSettingsUpdated }: { project: Back
                     <td className="px-3 py-2.5 text-right">
                       <button
                         onClick={() => handleRemove(m.id)}
-                        className="text-[#8C959F] hover:text-red-600 transition-colors text-base leading-none"
+                        className="text-[#94A3B8] hover:text-red-600 transition-colors text-base leading-none"
                         title="Remove"
                       >
                         ×
@@ -806,10 +770,11 @@ function TeamTab({ project, isMock = false, onSettingsUpdated }: { project: Back
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-type SidebarItem = "General" | "Contractors" | "Team";
+type SidebarItem = "General" | "Contractors";
 
 function ProjectSettingsPageInner() {
-  const { workspaceId, isDesignMode } = useWorkspace();
+  const { workspaceId, isDesignMode, loading: wsLoading } = useWorkspace();
+  const { isPending: sessionPending } = authClient.useSession();
   const searchParams = useSearchParams();
   const urlProjectId = searchParams.get("projectId");
 
@@ -817,6 +782,9 @@ function ProjectSettingsPageInner() {
   const [activeProjectId, setActiveProjectId] = useState<string>("");
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [sidebar, setSidebar] = useState<SidebarItem>("General");
+
+  // Use mock data when in design mode OR when no workspace is available (backend offline)
+  const useMock = isDesignMode || (!wsLoading && !sessionPending && !workspaceId);
 
   const handleSettingsUpdated = useCallback((projectId: string, newSettingsJson: Record<string, unknown>) => {
     setProjects((prev) =>
@@ -827,7 +795,10 @@ function ProjectSettingsPageInner() {
   }, []);
 
   useEffect(() => {
-    if (isDesignMode) {
+    // Wait for both workspace and session before deciding design vs real mode
+    if (wsLoading || sessionPending) return;
+
+    if (useMock) {
       setLoadingProjects(true);
       getProjects().then((mockProjects) => {
         const data = mockProjects.map(mockToBackendProject);
@@ -839,7 +810,8 @@ function ProjectSettingsPageInner() {
       }).finally(() => setLoadingProjects(false));
       return;
     }
-    if (!workspaceId) return;
+    if (wsLoading) return; // workspace still resolving
+    if (!workspaceId) { setLoadingProjects(false); return; }
     setLoadingProjects(true);
     fetchProjects(workspaceId)
       .then((data) => {
@@ -851,14 +823,14 @@ function ProjectSettingsPageInner() {
       })
       .catch(console.error)
       .finally(() => setLoadingProjects(false));
-  }, [workspaceId, urlProjectId, isDesignMode]);
+  }, [workspaceId, wsLoading, urlProjectId, isDesignMode]);
 
   const project = projects.find((p) => p.id === activeProjectId);
 
   if (loadingProjects) {
     return (
       <div className="p-5 flex items-center justify-center h-full">
-        <div className="text-sm text-[#57606a]">Loading projects…</div>
+        <div className="text-sm text-[#475569]">Loading projects…</div>
       </div>
     );
   }
@@ -866,45 +838,38 @@ function ProjectSettingsPageInner() {
   if (!project) {
     return (
       <div className="p-5 flex items-center justify-center h-full">
-        <div className="text-sm text-[#57606a]">No projects found.</div>
+        <div className="text-sm text-[#475569]">No projects found.</div>
       </div>
     );
   }
 
   return (
-    <div className="p-5 overflow-y-auto h-full">
-      <div className="flex items-center gap-2.5 mb-5">
-        <div className="text-[15px] font-bold text-[#24292f]">Project Settings</div>
-        <ProjectSelector
-          projects={projects}
-          activeId={activeProjectId}
-          onChange={setActiveProjectId}
-        />
+    <div className="px-6 py-5 overflow-y-auto h-full bg-[#F8FAFC]">
+      {/* Header */}
+      <div className="mb-1">
+        <div className="text-[20px] font-bold text-[#0F172A] leading-tight">Project Settings</div>
+        <div className="text-[13px] text-[#64748B] mt-0.5">{project.projectName}</div>
       </div>
 
-      <div className="flex gap-4">
-        <div className="w-36 shrink-0 pt-1">
-          {(["General", "Contractors", "Team"] as SidebarItem[]).map((item) => (
-            <button
-              key={item}
-              onClick={() => setSidebar(item)}
-              className={`w-full text-left px-3 py-1.5 rounded-md text-[13px] mb-0.5 transition ${
-                sidebar === item
-                  ? "bg-[#ddf4ff] text-[#0969da] font-semibold"
-                  : "text-[#57606a] hover:bg-[#f6f8fa]"
-              }`}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex-1">
-          {sidebar === "General" && <GeneralTab project={project} isMock={isDesignMode} onSettingsUpdated={handleSettingsUpdated} />}
-          {sidebar === "Contractors" && <ContractorsTab project={project} isMock={isDesignMode} onSettingsUpdated={handleSettingsUpdated} />}
-          {sidebar === "Team" && <TeamTab project={project} isMock={isDesignMode} onSettingsUpdated={handleSettingsUpdated} />}
-        </div>
+      {/* Underline tabs */}
+      <div className="flex border-b border-[#E2E8F0] mt-4 mb-5">
+        {(["General", "Contractors"] as SidebarItem[]).map((item) => (
+          <button
+            key={item}
+            onClick={() => setSidebar(item)}
+            className={`px-4 py-2.5 text-[14px] font-medium border-b-2 -mb-px transition-colors ${
+              sidebar === item
+                ? "border-[#2563EB] text-[#2563EB]"
+                : "border-transparent text-[#64748B] hover:text-[#0F172A]"
+            }`}
+          >
+            {item}
+          </button>
+        ))}
       </div>
+
+      {sidebar === "General" && <GeneralTab project={project} isMock={useMock} onSettingsUpdated={handleSettingsUpdated} />}
+      {sidebar === "Contractors" && <ContractorsTab project={project} isMock={useMock} onSettingsUpdated={handleSettingsUpdated} />}
     </div>
   );
 }

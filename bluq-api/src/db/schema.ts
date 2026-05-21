@@ -23,6 +23,26 @@ export const users = pgTable("users", {
 	unique("users_phone_key").on(table.phone),
 ]);
 
+// Permissions shape stored in the JSONB column:
+// { overview: "none"|"view"|"edit", schedule: "...", reports: "...",
+//   documents: "...", siteUpdates: "...", team: "...", settings: "..." }
+export const workspaceRoles = pgTable("workspace_roles", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	workspaceId: uuid("workspace_id").notNull(),
+	name: text().notNull(),
+	description: text(),
+	permissions: jsonb().notNull().default({}),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	index("idx_wr_workspace").using("btree", table.workspaceId.asc().nullsLast().op("uuid_ops")),
+	foreignKey({
+		columns: [table.workspaceId],
+		foreignColumns: [orgs.id],
+		name: "workspace_roles_workspace_id_fkey",
+	}).onDelete("cascade"),
+	unique("workspace_roles_workspace_id_name_key").on(table.workspaceId, table.name),
+]);
+
 export const workspaceMembers = pgTable("workspace_members", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	workspaceId: uuid("workspace_id").notNull(),
@@ -314,6 +334,7 @@ export const tasks = pgTable("tasks", {
 	percentComplete: numeric("percent_complete", { precision: 5, scale: 2 }).default('0'),
 	contractor: text(),
 	area: text(),
+	phase: text(),
 	isMilestone: boolean("is_milestone").default(false),
 	parentTaskId: uuid("parent_task_id"),
 	sortOrder: integer("sort_order").default(0),
@@ -423,6 +444,8 @@ export const scheduleVersions = pgTable("schedule_versions", {
 	isBaseline: boolean("is_baseline").default(false),
 	isLocked: boolean("is_locked").default(false),
 	generatedBy: text("generated_by").default('ai').notNull(),
+	uploadedBy: text("uploaded_by"),
+	sourceFileName: text("source_file_name"),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 }, (table) => [
 	index("idx_sv_project").using("btree", table.projectId.asc().nullsLast().op("uuid_ops")),
@@ -517,6 +540,32 @@ export const verification = pgTable("verification", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 });
+
+export const gapCheckFeedback = pgTable("gap_check_feedback", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	scheduleVersionId: uuid("schedule_version_id").notNull(),
+	workspaceId: uuid("workspace_id").notNull(),
+	projectId: uuid("project_id").notNull(),
+	taskName: text("task_name").notNull(),
+	phase: text().notNull(),
+	reason: text(),
+	action: text().notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	index("idx_gcf_schedule_version").using("btree", table.scheduleVersionId.asc().nullsLast().op("uuid_ops")),
+	index("idx_gcf_workspace").using("btree", table.workspaceId.asc().nullsLast().op("uuid_ops")),
+	foreignKey({
+		columns: [table.scheduleVersionId],
+		foreignColumns: [scheduleVersions.id],
+		name: "gap_check_feedback_schedule_version_id_fkey",
+	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.workspaceId],
+		foreignColumns: [orgs.id],
+		name: "gap_check_feedback_workspace_id_fkey",
+	}).onDelete("cascade"),
+	check("gap_check_feedback_action_check", sql`action = ANY (ARRAY['accepted'::text, 'dismissed'::text])`),
+]);
 
 export const demoRequests = pgTable("demo_requests", {
 	id: uuid().defaultRandom().primaryKey().notNull(),

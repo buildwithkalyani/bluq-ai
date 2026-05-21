@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { authClient } from "@/lib/auth-client";
@@ -10,12 +10,33 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const redirect = searchParams.get("redirect") || "/dashboard/overview";
 
+  const { data: session, isPending } = authClient.useSession();
+
   const [otpStep, setOtpStep] = useState<"email" | "verify">("email");
   const [otpEmail, setOtpEmail] = useState("");
   const [otp, setOtp] = useState("");
+  const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+
+  const [isNewUser, setIsNewUser] = useState(false);
+  const isInviteFlow = redirect.startsWith("/invite");
+
+  // Already logged in → skip login form
+  useEffect(() => {
+    if (!isPending && session?.user) {
+      router.replace(redirect);
+    }
+  }, [session, isPending, redirect, router]);
+
+  if (isPending || session?.user) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <div className="w-5 h-5 border-2 border-[#3A4EA2] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,11 +51,14 @@ function LoginForm() {
         body: JSON.stringify({ email: otpEmail }),
       });
       const { exists } = await checkRes.json();
-      if (!exists) {
+
+      if (!exists && !isInviteFlow) {
         setError("No account found with this email. Please sign up first.");
         setLoading(false);
         return;
       }
+
+      if (!exists) setIsNewUser(true);
 
       const { error: sendError } = await authClient.emailOtp.sendVerificationOtp({
         email: otpEmail,
@@ -64,6 +88,7 @@ function LoginForm() {
       const { error: verifyError } = await authClient.signIn.emailOtp({
         email: otpEmail,
         otp,
+        ...(rememberMe ? {} : { dontRememberMe: true }),
       });
 
       if (verifyError) {
@@ -99,6 +124,18 @@ function LoginForm() {
               className="w-full bg-white border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] text-[#24292f] placeholder:text-[#8C959F] focus:outline-none focus:ring-2 focus:ring-[#3A4EA2] focus:border-transparent"
             />
           </div>
+          <div className="flex items-center gap-2 mb-3.5">
+            <input
+              id="rememberMe"
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              className="w-3.5 h-3.5 accent-[#3A4EA2] cursor-pointer"
+            />
+            <label htmlFor="rememberMe" className="text-[12px] text-[#57606a] cursor-pointer select-none">
+              Keep me logged in for 30 days
+            </label>
+          </div>
           <button
             type="submit"
             disabled={loading}
@@ -109,7 +146,12 @@ function LoginForm() {
         </form>
       ) : (
         <form onSubmit={handleVerifyOtp}>
-          {success && (
+          {isNewUser && (
+            <div className="mb-3 text-[12px] text-[#0969da] bg-[#ddf4ff] border border-[#0969da30] rounded-md px-3 py-2">
+              Creating your account — enter the OTP sent to {otpEmail}.
+            </div>
+          )}
+          {success && !isNewUser && (
             <div className="mb-3 text-[12px] text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">
               {success}
             </div>
@@ -132,13 +174,23 @@ function LoginForm() {
               className="w-full bg-white border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] text-[#24292f] placeholder:text-[#8C959F] focus:outline-none focus:ring-2 focus:ring-[#3A4EA2] focus:border-transparent tracking-widest font-mono"
             />
           </div>
-          <button
-            type="button"
-            onClick={() => { setOtpStep("email"); setOtp(""); setError(""); setSuccess(""); }}
-            className="text-[11px] text-[#3A4EA2] hover:underline mb-3.5 block"
-          >
-            Resend OTP
-          </button>
+          <div className="flex items-center gap-3 mb-3.5">
+            <button
+              type="button"
+              onClick={() => { setOtpStep("email"); setOtp(""); setError(""); setSuccess(""); }}
+              className="text-[11px] text-[#3A4EA2] hover:underline"
+            >
+              Resend OTP
+            </button>
+            <span className="text-[#D0D7DE] text-[11px]">·</span>
+            <button
+              type="button"
+              onClick={() => { setOtpStep("email"); setOtpEmail(""); setOtp(""); setError(""); setSuccess(""); setIsNewUser(false); }}
+              className="text-[11px] text-[#57606a] hover:underline"
+            >
+              Use a different account
+            </button>
+          </div>
           <button
             type="submit"
             disabled={loading || otp.length < 6}

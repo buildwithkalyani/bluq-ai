@@ -49,18 +49,22 @@ function getFileExtension(fileName: string): string {
 }
 
 function isValidStoragePath(fileUrl: string, workspaceId: string, projectId: string): boolean {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  if (!supabaseUrl) return false;
-  // Must start with our Supabase URL and contain the correct workspace/project path
-  const prefix = `${supabaseUrl}/storage/v1/object/`;
-  if (!fileUrl.startsWith(prefix)) return false;
-  // Must contain the expected path segment to prevent path traversal
   const encodedWorkspace = encodeURIComponent(workspaceId);
   const encodedProject = encodeURIComponent(projectId);
-  return (
+  const hasCorrectPath =
     fileUrl.includes(`/${workspaceId}/${projectId}/`) ||
-    fileUrl.includes(`/${encodedWorkspace}/${encodedProject}/`)
-  );
+    fileUrl.includes(`/${encodedWorkspace}/${encodedProject}/`) ||
+    fileUrl.startsWith(`${workspaceId}/${projectId}/`) ||
+    fileUrl.startsWith(`${encodedWorkspace}/${encodedProject}/`);
+  if (!hasCorrectPath) return false;
+  // If it's a full URL, verify it points to our Supabase instance
+  if (fileUrl.startsWith("http")) {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    if (!supabaseUrl) return false;
+    return fileUrl.startsWith(`${supabaseUrl}/storage/v1/object/`);
+  }
+  // Bare storage path (e.g. "workspaceId/projectId/timestamp-file.pdf") — accepted
+  return true;
 }
 
 const DOCUMENTS_BUCKET = "documents";

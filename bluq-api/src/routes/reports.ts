@@ -12,11 +12,12 @@
 
 import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
-import { reports } from "../db/schema.js";
+import { reports, projects, dprs, tasks } from "../db/schema.js";
 import { eq, and, desc } from "drizzle-orm";
 import { pdfQueue } from "../lib/queues.js";
 import { verifySession } from "../lib/verifySession.js";
 import type { PdfJobData } from "../workers/pdf.worker.js";
+import { buildPdfBuffer } from "../lib/pdf-builder.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -32,6 +33,77 @@ const VALID_SECTIONS = [
 ] as const;
 
 export async function reportsRoute(app: FastifyInstance) {
+
+  // =========================================================================
+  // GET /reports/download — synchronous PDF generation, streams back directly
+  // No queuing, no polling. Works even with no DPR data (generates template).
+  // =========================================================================
+  app.get("/reports/download", { preHandler: verifySession }, async (request, reply) => {
+    const { projectId, workspaceId, reportDate, sections: sectionsParam } = request.query as {
+      projectId: string;
+      workspaceId: string;
+      reportDate?: string;
+      sections?: string;
+    };
+
+    if (!projectId || !workspaceId) {
+      return reply.status(400).send({ error: "projectId and workspaceId are required" });
+    }
+    if (!UUID_REGEX.test(projectId) || !UUID_REGEX.test(workspaceId)) {
+      return reply.status(400).send({ error: "Invalid UUIDs" });
+    }
+
+    const date = reportDate ?? new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+
+    const [project] = await db.select().from(projects)
+      .where(and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId)));
+    if (!project) return reply.status(404).send({ error: "Project not found" });
+
+    const dprRows = await db.select().from(dprs)
+      .where(and(eq(dprs.projectId, projectId), eq(dprs.workspaceId, workspaceId), eq(dprs.reportDate, date)));
+
+    const taskRows = await db.select().from(tasks)
+      .where(and(eq(tasks.projectId, projectId), eq(tasks.workspaceId, workspaceId)));
+
+    const enabledSections = sectionsParam
+      ? (sectionsParam.split(",").filter(s => VALID_SECTIONS.includes(s as any)) as PdfJobData["sections"])
+      : [...VALID_SECTIONS];
+
+    const pdfBuffer = await buildPdfBuffer({
+      projectName: project.projectName,
+      clientName: project.clientName,
+      address: project.address,
+      projectCode: project.projectCode,
+      reportDate: date,
+      sections: enabledSections,
+      dprRows,
+      taskRows,
+    });
+
+    // Save a snapshot record so DPR history tracks generated reports by date
+    const totalTasks = taskRows.length;
+    const doneTasks = taskRows.filter(t => t.status === "completed").length;
+    const avgPct = totalTasks > 0 ? Math.round(doneTasks / totalTasks * 100) : 0;
+    const existingSnapshot = await db.select({ id: dprs.id }).from(dprs)
+      .where(and(eq(dprs.projectId, projectId), eq(dprs.workspaceId, workspaceId), eq(dprs.reportDate, date), eq(dprs.source, "generated")))
+      .limit(1);
+    if (existingSnapshot.length === 0) {
+      await db.insert(dprs).values({
+        workspaceId,
+        projectId,
+        reportDate: date,
+        source: "generated",
+        workDone: `PDF report generated. Tasks: ${doneTasks}/${totalTasks} complete.`,
+        percentComplete: String(avgPct),
+      }).catch(() => {});
+    }
+
+    reply
+      .header("Content-Type", "application/pdf")
+      .header("Content-Disposition", `attachment; filename="DPR-${project.projectName}-${date}.pdf"`)
+      .header("Content-Length", pdfBuffer.length);
+    return reply.send(pdfBuffer);
+  });
 
   // =========================================================================
   // POST /reports/generate — queue a PDF report generation job

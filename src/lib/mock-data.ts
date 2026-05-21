@@ -9,11 +9,11 @@
 export type ProjectStatus = "completed" | "inProgress" | "runningLate" | "delayed" | "notStarted";
 
 export const STATUS_CONFIG: Record<ProjectStatus, { color: string; bg: string; label: string }> = {
-  completed:   { color: "#1A7F37", bg: "#dafbe1", label: "Completed" },
-  inProgress:  { color: "#3A4EA2", bg: "#ddf4ff", label: "In Progress" },
-  runningLate: { color: "#9A6700", bg: "#fff8c5", label: "Running Late" },
-  delayed:     { color: "#CF222E", bg: "#ffebe9", label: "Delayed" },
-  notStarted:  { color: "#8C959F", bg: "#f0f1f3", label: "Not Started" },
+  completed:   { color: "#059669", bg: "#ECFDF5", label: "Completed" },
+  inProgress:  { color: "#2563EB", bg: "#EFF6FF", label: "In Progress" },
+  runningLate: { color: "#D97706", bg: "#FFFBEB", label: "Running Late" },
+  delayed:     { color: "#DC2626", bg: "#FEF2F2", label: "Delayed" },
+  notStarted:  { color: "#6366f1", bg: "#EEF2FF", label: "Not Started" },
 };
 
 // ─── PROJECTS ────────────────────────────────────────────────
@@ -31,6 +31,7 @@ export interface Project {
   startDate: string;
   endDate: string;
   address: string;
+  settingsJson?: Record<string, unknown>;
 }
 
 const PROJECTS: Project[] = [

@@ -57,6 +57,24 @@ export async function sendButtons(
   });
 }
 
+export async function sendTemplate(
+  to: string,
+  templateName: string,
+  languageCode: string,
+  components: object[]
+): Promise<void> {
+  await post({
+    messaging_product: "whatsapp",
+    to,
+    type: "template",
+    template: {
+      name: templateName,
+      language: { code: languageCode },
+      components,
+    },
+  });
+}
+
 export async function sendList(
   to: string,
   body: string,

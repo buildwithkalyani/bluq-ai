@@ -16,7 +16,7 @@ export default function ProjectDetailPage({ params }: { params: { projectID: str
     });
   }, [params.projectID]);
 
-  if (!project) return <div className="p-6 text-sm text-[#8C959F]">Loading...</div>;
+  if (!project) return <div className="p-6 text-sm text-[#94A3B8]">Loading...</div>;
 
   return <ProjectDetailView project={project} onBack={() => router.push("/dashboard/overview")} />;
 }

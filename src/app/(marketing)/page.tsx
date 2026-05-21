@@ -1,5 +1,8 @@
 import DemoForm from "./components/DemoForm";
 import HowSteps from "./components/HowSteps";
+import MobileNav from "./components/MobileNav";
+import MobileAccordion from "./components/MobileAccordion";
+import MobileAudienceTabs from "./components/MobileAudienceTabs";
 
 export default function Home() {
   return (
@@ -25,6 +28,15 @@ export default function Home() {
             <a href="/contact">contact</a>
             <a href="#demo" className="m-btn demo-nav">book demo <span className="m-btn-arrow">→</span></a>
           </div>
+          <MobileNav links={[
+            { href: "#home", label: "home" },
+            { href: "#problem", label: "problems" },
+            { href: "#product", label: "product" },
+            { href: "#features", label: "features" },
+            { href: "/about", label: "about" },
+            { href: "/contact", label: "contact" },
+            { href: "#demo", label: "book demo →" },
+          ]} />
         </div>
       </nav>
 
@@ -48,7 +60,7 @@ export default function Home() {
               </p>
               <div className="m-hero-cta">
                 <a href="#demo" className="m-btn big">book a 30-min demo <span className="m-btn-arrow">→</span></a>
-                <a href="https://bluq.ai/login" className="m-btn ghost big">login</a>
+                <a href="/login" className="m-btn ghost big">login</a>
                 <span className="m-hero-meta">12 projects live now</span>
               </div>
             </div>
@@ -184,6 +196,12 @@ export default function Home() {
               <p>The Gantt your PM made on day one hasn&apos;t been touched since. Nobody has time to update it. So nobody trusts it. Decisions get made on gut feel and contractor promises.</p>
             </div>
           </div>
+          <MobileAccordion variant="problems" items={[
+            { label: "failure / 01", heading: "you find out too late.", body: "By the time you know a floor is delayed, your contractor has already moved on. You're negotiating yesterday's problem with no proof and no leverage." },
+            { label: "failure / 02", heading: "you fund delays you could've stopped.", body: "Labour short on Tuesday. You find out Friday. Those 3 days don't come back — but they show up in your final bill." },
+            { label: "failure / 03", heading: "your schedule is fiction by week 3.", body: "The Gantt your PM made on day one hasn't been touched since. Nobody has time to update it. So nobody trusts it. Decisions get made on gut feel and contractor promises." },
+          ]} />
+
           {/* SITE LOG */}
           <div className="m-sitelog-wrap">
             <div className="m-sitelog-copy">
@@ -438,6 +456,15 @@ export default function Home() {
             </div>
           </div>
 
+          <MobileAccordion variant="features" items={[
+            { label: "01 / 06", heading: "drawings in. schedule out.", body: "Drop your DWG, SOW, and BOQ. BluQ reads the scope and builds a complete Gantt in minutes. Tasks, durations, critical path. Your baseline is ready before your first site meeting.", icon: <svg viewBox="0 0 24 24" fill="none" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 8h18M8 3v18"/></svg> },
+            { label: "02 / 06", heading: "MPP. XLSX. one click.", body: "Already on MS Project or running everything in Excel? Import your .mpp or .xlsx file. BluQ keeps every task, resource, and baseline in sync. Export back anytime.", icon: <svg viewBox="0 0 24 24" fill="none" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16v4H4zM4 10h12v4H4zM4 16h8v4H4z"/></svg> },
+            { label: "03 / 06", heading: "whatsapp is already your field system.", body: "Your engineer sends one message at 6 PM. BluQ reads it, updates the live schedule, logs the delay, and pings the supplier. Automatically. No app. No training. Nothing changes on site.", icon: <svg viewBox="0 0 24 24" fill="none" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg> },
+            { label: "04 / 06", heading: "stopped before they cost you.", body: "The moment a task slips, BluQ calculates the cost to your critical path and tells your team exactly what to do. Shift the crew, call the supplier, reschedule the pour. Not a warning. A decision.", icon: <svg viewBox="0 0 24 24" fill="none" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01"/></svg> },
+            { label: "05 / 06", heading: "an 8-day delay becomes 1.", body: "When a task slips, BluQ redoes the downstream plan automatically. New critical path, new finish date, recovery options ranked. All before your morning chai. Your contingency stays intact.", icon: <svg viewBox="0 0 24 24" fill="none" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.22-8.56"/><path d="M21 4v5h-5"/></svg> },
+            { label: "06 / 06", heading: "DPRs that write themselves.", body: "Every evening, your client receives a branded DPR without your PM typing a single word. Two hours saved per site, per day. Across 10 sites, that is a full-time salary back in your pocket.", icon: <svg viewBox="0 0 24 24" fill="none" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6M9 9h1"/></svg> },
+          ]} />
+
           {/* 06 */}
           <div className="m-feat">
             <div className="m-feat-num">
@@ -480,6 +507,8 @@ export default function Home() {
             <div className="eyebrow">built for</div>
             <h2>three teams.<br /><span className="serif-it">one real problem.</span></h2>
           </div>
+          <MobileAudienceTabs />
+
           <div className="m-aud-grid">
             <div className="m-aud">
               <div className="m-aud-top"><div className="r">PMC firms</div><div className="i">/ 01</div></div>
@@ -577,18 +606,18 @@ export default function Home() {
             <div className="m-foot-col">
               <h4>product</h4>
               <ul>
-                <li><a href="#features">auto_scheduling</a></li>
-                <li><a href="#features">schedule_import</a></li>
-                <li><a href="#features">field_updates</a></li>
-                <li><a href="#features">delay_flagging</a></li>
-                <li><a href="#features">auto_dpr</a></li>
+                <li><a href="#features">auto scheduling</a></li>
+                <li><a href="#features">schedule import</a></li>
+                <li><a href="#features">field updates</a></li>
+                <li><a href="#features">delay flagging</a></li>
+                <li><a href="#features">auto dpr</a></li>
               </ul>
             </div>
             <div className="m-foot-col">
               <h4>built for</h4>
               <ul>
-                <li><a href="#audience">pmc_firms</a></li>
-                <li><a href="#audience">epc_turnkey</a></li>
+                <li><a href="#audience">pmc firms</a></li>
+                <li><a href="#audience">epc · turnkey contractors</a></li>
                 <li><a href="#audience">developers</a></li>
               </ul>
             </div>
@@ -597,7 +626,7 @@ export default function Home() {
               <ul>
                 <li><a href="/about">about</a></li>
                 <li><a href="/contact">contact</a></li>
-                <li><a href="#">early_access</a></li>
+                <li><a href="#">early access</a></li>
                 <li><a href="#">privacy</a></li>
                 <li><a href="#">terms</a></li>
               </ul>

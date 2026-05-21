@@ -1,8 +1,8 @@
 import { FastifyInstance } from "fastify";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { db } from "../db/client.js";
-import { users, workspaceMembers, projects, orgs } from "../db/schema.js";
-import { eq, and } from "drizzle-orm";
+import { users, workspaceMembers, projects, orgs, projectMembers } from "../db/schema.js";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { verifySession } from "../lib/verifySession.js";
 
 const SECRET = () => process.env.BETTER_AUTH_SECRET ?? "bluq-invite-secret";
@@ -127,6 +127,150 @@ export async function teamRoute(app: FastifyInstance) {
     };
   });
 
+  // GET /team/invite-link — general workspace invite link (no email required)
+  app.get("/team/invite-link", { preHandler: verifySession }, async (request, reply) => {
+    const { workspaceId } = request.query as { workspaceId: string };
+    if (!workspaceId) return reply.status(400).send({ error: "workspaceId required" });
+
+    const [org] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, workspaceId)).limit(1);
+    const token = signToken({
+      workspaceId,
+      orgName: org?.name ?? "your organisation",
+      general: true,
+      exp: Date.now() + 7 * 24 * 60 * 60 * 1000,
+    });
+
+    const frontendUrl = process.env.FRONTEND_URL ?? "https://bluq.ai";
+    return { inviteUrl: `${frontendUrl}/invite?token=${token}` };
+  });
+
+  // GET /team/members?workspaceId=xxx — list workspace members with user info
+  app.get("/team/members", { preHandler: verifySession }, async (request, reply) => {
+    const { workspaceId } = request.query as { workspaceId: string };
+    if (!workspaceId) return reply.status(400).send({ error: "workspaceId required" });
+
+    const [myMembership] = await db.select({ id: workspaceMembers.id })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, request.userId)))
+      .limit(1);
+    if (!myMembership) return reply.status(403).send({ error: "Not a member" });
+
+    const members = await db
+      .select({
+        id: workspaceMembers.id,
+        userId: workspaceMembers.userId,
+        role: workspaceMembers.role,
+        status: workspaceMembers.status,
+        joinedAt: workspaceMembers.joinedAt,
+        invitedAt: workspaceMembers.invitedAt,
+        name: users.name,
+        email: users.email,
+      })
+      .from(workspaceMembers)
+      .innerJoin(users, eq(workspaceMembers.userId, users.id))
+      .where(eq(workspaceMembers.workspaceId, workspaceId));
+
+    // Attach project access counts
+    const userIds = members.map(m => m.userId);
+    const projectCounts = userIds.length > 0
+      ? await db
+          .select({ userId: projectMembers.userId, cnt: sql<number>`count(*)::int` })
+          .from(projectMembers)
+          .where(and(eq(projectMembers.workspaceId, workspaceId), inArray(projectMembers.userId, userIds)))
+          .groupBy(projectMembers.userId)
+      : [];
+
+    const countMap = Object.fromEntries(projectCounts.map(r => [r.userId, r.cnt]));
+    return members.map(m => ({ ...m, projectCount: countMap[m.userId] ?? 0 }));
+  });
+
+  // DELETE /team/members/:memberId?workspaceId=xxx — remove a workspace member
+  app.delete("/team/members/:memberId", { preHandler: verifySession }, async (request, reply) => {
+    const { memberId } = request.params as { memberId: string };
+    const { workspaceId } = request.query as { workspaceId: string };
+    if (!workspaceId) return reply.status(400).send({ error: "workspaceId required" });
+
+    const [myMembership] = await db.select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, request.userId)))
+      .limit(1);
+    if (!myMembership || !["admin", "super admin", "superadmin"].includes(myMembership.role.toLowerCase())) {
+      return reply.status(403).send({ error: "Only admins can remove members" });
+    }
+
+    await db.delete(workspaceMembers).where(eq(workspaceMembers.id, memberId));
+    return { ok: true };
+  });
+
+  // PATCH /team/members/:memberId/role — update a member's role
+  app.patch("/team/members/:memberId/role", { preHandler: verifySession }, async (request, reply) => {
+    const { memberId } = request.params as { memberId: string };
+    const { role, workspaceId } = request.body as { role: string; workspaceId: string };
+
+    const [myMembership] = await db.select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, request.userId)))
+      .limit(1);
+    if (!myMembership || !["admin", "super admin", "superadmin"].includes(myMembership.role.toLowerCase())) {
+      return reply.status(403).send({ error: "Only admins can change roles" });
+    }
+
+    await db.update(workspaceMembers).set({ role }).where(eq(workspaceMembers.id, memberId));
+    return { ok: true };
+  });
+
+  // GET /team/members/:userId/projects?workspaceId=xxx — project access for one user
+  app.get("/team/members/:userId/projects", { preHandler: verifySession }, async (request, reply) => {
+    const { userId } = request.params as { userId: string };
+    const { workspaceId } = request.query as { workspaceId: string };
+    if (!workspaceId) return reply.status(400).send({ error: "workspaceId required" });
+
+    const rows = await db.select({ projectId: projectMembers.projectId })
+      .from(projectMembers)
+      .where(and(eq(projectMembers.workspaceId, workspaceId), eq(projectMembers.userId, userId)));
+
+    return rows.map(r => r.projectId);
+  });
+
+  // PUT /team/members/:userId/projects — set full project access for one user
+  app.put("/team/members/:userId/projects", { preHandler: verifySession }, async (request, reply) => {
+    const { userId } = request.params as { userId: string };
+    const { workspaceId, projectIds } = request.body as { workspaceId: string; projectIds: string[] };
+
+    const [myMembership] = await db.select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, request.userId)))
+      .limit(1);
+    if (!myMembership || !["admin", "super admin", "superadmin"].includes(myMembership.role.toLowerCase())) {
+      return reply.status(403).send({ error: "Only admins can manage project access" });
+    }
+
+    // Get the member's workspace_member row to find their role
+    const [member] = await db.select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+      .limit(1);
+
+    // Delete all existing and re-insert
+    await db.delete(projectMembers).where(
+      and(eq(projectMembers.workspaceId, workspaceId), eq(projectMembers.userId, userId))
+    );
+
+    if (projectIds.length > 0) {
+      await db.insert(projectMembers).values(
+        projectIds.map(projectId => ({
+          workspaceId,
+          projectId,
+          userId,
+          role: member?.role ?? "member",
+          access: "editor" as const,
+        }))
+      );
+    }
+
+    return { ok: true };
+  });
+
   // POST /team/invite/accept
   // Called after the user is logged in. Adds them to the workspace.
   app.post("/team/invite/accept", { preHandler: verifySession }, async (request, reply) => {
@@ -138,13 +282,16 @@ export async function teamRoute(app: FastifyInstance) {
 
     const { workspaceId, role } = payload;
 
-    // Verify the logged-in user's email matches the invite
     const [user] = await db.select({ email: users.email, name: users.name })
       .from(users).where(eq(users.id, request.userId)).limit(1);
 
     if (!user) return reply.status(404).send({ error: "User not found" });
-    if (user.email.toLowerCase() !== payload.email.toLowerCase()) {
-      return reply.status(403).send({ error: "This invite was sent to a different email address" });
+
+    // Email-specific invites: verify the logged-in user matches
+    if (!payload.general && payload.email) {
+      if (user.email.toLowerCase() !== payload.email.toLowerCase()) {
+        return reply.status(403).send({ error: "This invite was sent to a different email address" });
+      }
     }
 
     // Add to workspace if not already a member
