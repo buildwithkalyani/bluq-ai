@@ -50,6 +50,13 @@ function LoginForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: otpEmail }),
       });
+
+      if (!checkRes.ok) {
+        setError("Unable to reach the server. Please try again later.");
+        setLoading(false);
+        return;
+      }
+
       const { exists } = await checkRes.json();
 
       if (!exists && !isInviteFlow) {
@@ -217,7 +224,7 @@ export default function LoginClient() {
       <div className="bg-white border border-[#D0D7DE] rounded-lg w-[400px] p-8 shadow-sm">
         <div className="text-center mb-6">
           <a href="/" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <img src="/bluq-logo.png" alt="BluQ" style={{ height: "15px", width: "auto" }} />
+            <img src="/bluQ-logo (1).svg" alt="BluQ" style={{ height: "20px", width: "auto" }} />
           </a>
           <div className="text-[13px] text-[#57606a] mt-1">Project intelligence for construction</div>
         </div>
