@@ -13,7 +13,7 @@ export const STATUS_CONFIG: Record<ProjectStatus, { color: string; bg: string; l
   inProgress:  { color: "#2563EB", bg: "#EFF6FF", label: "In Progress" },
   runningLate: { color: "#D97706", bg: "#FFFBEB", label: "Running Late" },
   delayed:     { color: "#DC2626", bg: "#FEF2F2", label: "Delayed" },
-  notStarted:  { color: "#94A3B8", bg: "#F8FAFC", label: "Not Started" },
+  notStarted:  { color: "#6366f1", bg: "#EEF2FF", label: "Not Started" },
 };
 
 // ─── PROJECTS ────────────────────────────────────────────────
