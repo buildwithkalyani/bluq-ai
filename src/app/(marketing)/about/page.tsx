@@ -1,224 +1,264 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import MobileNav from "../components/MobileNav";
-import MobileAccordion from "../components/MobileAccordion";
+import ScrollReveal from "../components/ScrollReveal";
+import CountUp from "../components/CountUp";
+import ExpandableCard from "../components/ExpandableCard";
 
 export const metadata: Metadata = {
-  title: "about · bluq",
-  description: "Why we're building BluQ. The story behind the real-time audit and delay platform for construction.",
+  title: "About · BluQ — AI-powered construction intelligence",
+  description: "Why we're building BluQ. The story behind the platform that prevents construction delays before they happen.",
 };
+
+const Logo = () => (
+  <a href="/" className="n-logo">
+    <Image src="/bluq-logo.png" alt="BluQ" width={120} height={32} style={{ height: 32, width: "auto" }} />
+  </a>
+);
 
 export default function About() {
   return (
     <>
-      {/* NAV */}
-      <nav className="m-nav">
-        <div className="m-nav-inner">
-          <a href="/" className="m-logo">
-            <span className="m-logo-mark">
-              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M4 20 L4 10 L12 4 L20 10 L20 20" stroke="#F4F1E8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M9 20 L9 14 L15 14 L15 20" stroke="#F4F1E8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </span>
-            <span className="m-logo-text">blu<span className="q">Q</span></span>
-          </a>
-          <div className="m-nav-links">
-            <a href="/">home</a>
-            <a href="/#problem">problems</a>
-            <a href="/#product">product</a>
-            <a href="/#features">features</a>
-            <a href="/about" className="active">about</a>
-            <a href="/contact">contact</a>
-            <a href="/#demo" className="m-btn demo-nav">book demo <span className="m-btn-arrow">→</span></a>
+      {/* ── NAV ──────────────────────────────────────────────────────────── */}
+      <nav className="n-nav">
+        <div className="n-nav-inner">
+          <Logo />
+          <div className="n-nav-links">
+            <a href="/">Home</a>
+            <a href="/#problem">Problem</a>
+            <a href="/#product">Product</a>
+            <a href="/#built-for">Who it&apos;s for</a>
+            <a href="/about" style={{ color: "var(--text)" }}>About</a>
+            <a href="/contact">Contact us</a>
+            <a href="/#demo" className="n-nav-cta">Get a Demo →</a>
           </div>
           <MobileNav links={[
-            { href: "/", label: "home" },
-            { href: "/#problem", label: "problems" },
-            { href: "/#product", label: "product" },
-            { href: "/#features", label: "features" },
-            { href: "/about", label: "about", active: true },
-            { href: "/contact", label: "contact" },
-            { href: "/#demo", label: "book demo →" },
+            { href: "/",          label: "Home" },
+            { href: "/#problem",  label: "Problem" },
+            { href: "/#product",  label: "Product" },
+            { href: "/#built-for",label: "Who it's for" },
+            { href: "/about",     label: "About" },
+            { href: "/contact",   label: "Contact us" },
+            { href: "/#demo",     label: "Get a Demo →" },
           ]} />
         </div>
       </nav>
 
-      {/* HERO */}
-      <section className="m-about-hero">
-        <div className="m-wrap">
-          <div className="eyebrow">about</div>
-          <h1>construction runs the world.<br /><span className="serif-it">its software should catch up.</span></h1>
-          <p className="m-about-hero-sub">
-            BluQ is being built to close a very real gap. The tools running construction today were not designed for the pace and pressure of modern projects. We are building the one that is.
+      {/* ── HERO ─────────────────────────────────────────────────────────── */}
+      <section className="n-hero n-about-hero">
+        <div className="n-orb n-orb-1" />
+        <div className="n-orb n-orb-2" />
+        <div className="n-orb n-orb-3" />
+        <div className="n-wrap" style={{ position: "relative", zIndex: 2 }}>
+          <div className="n-hero-badge">
+            <span className="n-badge-dot" />
+            OUR STORY
+          </div>
+          <h1 className="n-hero-h1">
+            Construction runs the world.<br />
+            <span className="n-accent">Its software should catch up.</span>
+          </h1>
+          <p className="n-hero-sub">
+            98% of major projects run over time or over budget. Most of those delays aren&apos;t bad luck.
+            They&apos;re information arriving too late. We&apos;re building the platform that fixes that.
           </p>
         </div>
       </section>
 
-      {/* STORY */}
-      <section className="m-story">
-        <div className="m-wrap">
-          <div className="m-story-row">
-            <div className="label">the gap</div>
-            <div className="body">
-              <span className="story-desktop">
-                <p>98% of major construction projects run over time or over budget. Most of those delays are not bad luck. They are information arriving too late.</p>
-                <p>A delay that will hit you on Friday is already visible in your site data on Wednesday. Most tools wait for it to show up in a report. BluQ reads the signals 48 hours early and tells you exactly how to stop it before it ever touches your schedule.</p>
-              </span>
-              <span className="story-mobile">
-                <p>98% of construction projects run over time or budget. Not bad luck. Information arriving too late. A Friday delay is visible in your site data on Wednesday. BluQ reads it 48 hours early.</p>
-              </span>
+      {/* ── STATS ────────────────────────────────────────────────────────── */}
+      <section className="n-section n-about-stats-section">
+        <div className="n-wrap">
+          <div className="n-about-stats">
+            <div className="n-about-stat">
+              <div className="n-about-stat-num"><CountUp to={12} /></div>
+              <div className="n-about-stat-label">Active projects</div>
+              <div className="n-about-stat-sub">running on BluQ across India and the Gulf</div>
             </div>
-          </div>
-          <div className="m-story-row">
-            <div className="label">what we&apos;re building</div>
-            <div className="body">
-              <span className="story-desktop">
-                <p>Your site engineer sends his evening WhatsApp update, the same way he always has. By end of day, your schedule is updated, your delay is caught, and the DPR is already on its way to your client. Nobody typed a report. Nobody filled a form.</p>
-                <p>We built BluQ because delays that formed on Tuesday were only showing up in reports on Friday. By then, three days of budget were already gone.</p>
-                <p>Most delays are stoppable. But only if you know about them while there is still time to act. BluQ gives you that time.</p>
-              </span>
-              <span className="story-mobile">
-                <p>Your engineer sends his evening WhatsApp. By end of day, your schedule is updated, your delay is caught, and the DPR is with your client. Nobody typed a report. Nobody filled a form.</p>
-              </span>
+            <div className="n-about-stat-div" />
+            <div className="n-about-stat">
+              <div className="n-about-stat-num"><CountUp to={842} /></div>
+              <div className="n-about-stat-label">Tasks tracked daily</div>
+              <div className="n-about-stat-sub">updated automatically from WhatsApp check-ins</div>
             </div>
-          </div>
-        </div>
-      </section>
-
-      {/* BELIEFS */}
-      <section className="m-beliefs">
-        <div className="m-wrap">
-          <div className="m-beliefs-head">
-            <div className="eye">what we believe</div>
-            <h2>six beliefs. <span className="serif-it">one obsession.</span></h2>
-          </div>
-          <MobileAccordion variant="beliefs" items={[
-            { label: "/ 01", heading: "site data is the main thing.", body: "Not a spreadsheet afterthought. If BluQ cannot read what is happening on site in real time, nothing else we build matters." },
-            { label: "/ 02", heading: "no new apps. ever.", body: "Your site engineer is not downloading a new app. He is replying on WhatsApp. BluQ works inside that habit, not against it. Zero behavior change on site, full intelligence in your office." },
-            { label: "/ 03", heading: "a delay caught early costs nothing.", body: "The hour after slippage is where cost and time are actually saved. So BluQ does not just detect the delay. It tells you exactly what to move, who to call, and what to reschedule. Before it touches your budget." },
-            { label: "/ 04", heading: "proof, not argument.", body: "When the penalty notice arrives, the side with the timestamped trail wins. We build BluQ so that side is always yours." },
-            { label: "/ 05", heading: "built on construction sites.", body: "Every feature in BluQ came from a real site, a real delay, and a real person who needed a better answer. We do not guess what the industry needs. We have seen it." },
-            { label: "/ 06", heading: "complexity is the enemy.", body: "Your site already has enough moving parts. BluQ removes friction, not adds it. If it takes more than one WhatsApp message to update your schedule, we have failed." },
-          ]} />
-
-          <div className="m-belief-grid">
-            <div className="m-belief">
-              <div className="n">/ 01</div>
-              <h3>site data is the <span className="serif-it">main thing.</span></h3>
-              <p>Not a spreadsheet afterthought. If BluQ cannot read what is happening on site in real time, nothing else we build matters.</p>
+            <div className="n-about-stat-div" />
+            <div className="n-about-stat">
+              <div className="n-about-stat-num"><CountUp to={19} /><span className="n-about-stat-unit">hr/wk</span></div>
+              <div className="n-about-stat-label">Saved per engineer</div>
+              <div className="n-about-stat-sub">on DPRs, status calls, and manual reporting</div>
             </div>
-            <div className="m-belief">
-              <div className="n">/ 02</div>
-              <h3>no new apps. <span className="serif-it">ever.</span></h3>
-              <p>Your site engineer is not downloading a new app. He is replying on WhatsApp. BluQ works inside that habit, not against it. Zero behavior change on site, full intelligence in your office.</p>
-            </div>
-            <div className="m-belief">
-              <div className="n">/ 03</div>
-              <h3>a delay caught early <span className="serif-it">costs nothing.</span></h3>
-              <p>The hour after slippage is where cost and time are actually saved. So BluQ does not just detect the delay. It tells you exactly what to move, who to call, and what to reschedule. Before it touches your budget.</p>
-            </div>
-          </div>
-          <div className="m-belief-grid" style={{marginTop:"2px"}}>
-            <div className="m-belief">
-              <div className="n">/ 04</div>
-              <h3>proof, <span className="serif-it">not argument.</span></h3>
-              <p>When the penalty notice arrives, the side with the timestamped trail wins. We build BluQ so that side is always yours.</p>
-            </div>
-            <div className="m-belief">
-              <div className="n">/ 05</div>
-              <h3>built on <span className="serif-it">construction sites.</span></h3>
-              <p>Every feature in BluQ came from a real site, a real delay, and a real person who needed a better answer. We do not guess what the industry needs. We have seen it.</p>
-            </div>
-            <div className="m-belief">
-              <div className="n">/ 06</div>
-              <h3>complexity is <span className="serif-it">the enemy.</span></h3>
-              <p>Your site already has enough moving parts. BluQ removes friction, not adds it. If it takes more than one WhatsApp message to update your schedule, we have failed.</p>
+            <div className="n-about-stat-div" />
+            <div className="n-about-stat">
+              <div className="n-about-stat-num">₹<CountUp to={4} />Cr+</div>
+              <div className="n-about-stat-label">Average savings</div>
+              <div className="n-about-stat-sub">in overruns identified and prevented per project</div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* NUMBERS */}
-      <div className="m-wrap">
-        <div className="m-nums">
-          <div className="m-num">
-            <div className="r">active projects</div>
-            <div className="n">12</div>
-            <div className="l">running on BluQ across India and the Gulf.</div>
-          </div>
-          <div className="m-num">
-            <div className="r">tasks tracked</div>
-            <div className="n">842</div>
-            <div className="l">updated automatically, every day.</div>
-          </div>
-          <div className="m-num">
-            <div className="r">hours saved</div>
-            <div className="n">19<sup>/wk</sup></div>
-            <div className="l">per engineer on DPRs and manual updates.</div>
-          </div>
-        </div>
-      </div>
-
-      {/* CTA */}
-      <section className="m-cta-c">
-        <div className="m-wrap">
-          <h2>want to know more?<br /><span className="serif-it">just ask.</span></h2>
-          <p className="m-cta-c-sub">We&apos;re easy to reach. No long sales calls, no forms with 20 fields. Email, WhatsApp, or book a 30-minute demo.</p>
-          <div className="m-cta-c-btns">
-            <a href="/#demo" className="m-btn big">book a demo <span className="m-btn-arrow">→</span></a>
-            <a href="/contact" className="m-btn ghost big">contact us</a>
+      {/* ── STORY ────────────────────────────────────────────────────────── */}
+      <section className="n-section" id="story">
+        <div className="n-wrap">
+          <div className="n-eyebrow">THE GAP</div>
+          <div className="n-about-story">
+            <ScrollReveal>
+            <ExpandableCard
+              className="n-about-story-row"
+              trigger={<div className="n-about-story-label">why now</div>}
+            >
+              <div className="n-about-story-body">
+                <p>A delay that will hit you on Friday is already visible in your site data on Wednesday. Most tools wait for it to appear in a weekly report. By then, three days of budget and schedule are already gone.</p>
+                <p>BluQ reads those signals 48 hours early and tells you exactly how to stop it, before it ever touches your budget or handover date.</p>
+              </div>
+            </ExpandableCard>
+            </ScrollReveal>
+            <ScrollReveal delay={100}>
+            <ExpandableCard
+              className="n-about-story-row"
+              trigger={<div className="n-about-story-label">what we built</div>}
+            >
+              <div className="n-about-story-body">
+                <p>Your site engineer sends his evening WhatsApp update, the same way he always has. By end of day, your schedule is updated, your delay is flagged, and the DPR is already on its way to your client.</p>
+                <p>Nobody typed a report. Nobody filled a form. Zero behavior change on site. Full intelligence in your office.</p>
+              </div>
+            </ExpandableCard>
+            </ScrollReveal>
+            <ScrollReveal delay={200}>
+            <ExpandableCard
+              className="n-about-story-row"
+              trigger={<div className="n-about-story-label">who we are</div>}
+            >
+              <div className="n-about-story-body">
+                <p>We&apos;re builders who got tired of watching construction projects fail for the same preventable reason: delayed information. Every feature in BluQ came from a real site, a real delay, and a real person who needed a better answer.</p>
+                <p>We don&apos;t guess what the industry needs. We&apos;ve seen it.</p>
+              </div>
+            </ExpandableCard>
+            </ScrollReveal>
           </div>
         </div>
       </section>
 
-      {/* FOOTER */}
-      <footer className="m-footer">
-        <div className="m-wrap">
-          <div className="m-foot-grid">
-            <div className="m-foot-brand">
-              <a href="/" className="m-logo">
-                <span className="m-logo-mark" style={{background:"#F4F1E8"}}>
-                  <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M4 20 L4 10 L12 4 L20 10 L20 20" stroke="#111113" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M9 20 L9 14 L15 14 L15 20" stroke="#111113" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                </span>
-                <span className="m-logo-text">blu<span className="q">Q</span></span>
-              </a>
-              <p>the real-time audit &amp; delay platform for construction projects.</p>
+      {/* ── BELIEFS ──────────────────────────────────────────────────────── */}
+      <section className="n-section" id="beliefs">
+        <div className="n-wrap">
+          <div className="n-section-head">
+            <div className="n-eyebrow">WHAT WE BELIEVE</div>
+            <h2 className="n-section-h2">Six principles.<br /><span className="n-accent">One obsession.</span></h2>
+            <p className="n-section-sub">Prevent the delay. Not chase it.</p>
+          </div>
+          <div className="n-beliefs-grid">
+            {[
+              {
+                n: "01",
+                title: "Site data is the main thing.",
+                body: "Not a spreadsheet afterthought. If BluQ can't read what's happening on site in real time, nothing else we build matters.",
+              },
+              {
+                n: "02",
+                title: "No new apps. Ever.",
+                body: "Your site engineer is not downloading a new app. He's replying on WhatsApp. BluQ works inside that habit, not against it.",
+              },
+              {
+                n: "03",
+                title: "A delay caught early costs nothing.",
+                body: "The hour after slippage is where cost and time are actually saved. BluQ doesn't just detect the delay. It tells you exactly what to move and who to call.",
+              },
+              {
+                n: "04",
+                title: "Proof, not argument.",
+                body: "When the penalty notice arrives, the side with the timestamped trail wins. We build BluQ so that side is always yours.",
+              },
+              {
+                n: "05",
+                title: "Built on construction sites.",
+                body: "Every feature came from a real site, a real delay, a real person who needed a better answer. We don't guess what the industry needs.",
+              },
+              {
+                n: "06",
+                title: "Complexity is the enemy.",
+                body: "If it takes more than one WhatsApp message to update your schedule, we've failed. BluQ removes friction, not adds it.",
+              },
+            ].map((b) => (
+              <ExpandableCard
+                key={b.n}
+                className="n-belief-card"
+                trigger={
+                  <>
+                    <div className="n-belief-n">{b.n}</div>
+                    <h3 className="n-belief-title">{b.title}</h3>
+                  </>
+                }
+              >
+                <p className="n-belief-body">{b.body}</p>
+              </ExpandableCard>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── CTA ──────────────────────────────────────────────────────────── */}
+      <section className="n-cta" id="demo">
+        <div className="n-orb n-orb-cta" />
+        <div className="n-wrap" style={{ position: "relative", zIndex: 2, textAlign: "center" }}>
+          <div className="n-eyebrow" style={{ marginBottom: 18 }}>WANT TO KNOW MORE?</div>
+          <h2 className="n-cta-h2" style={{ maxWidth: 600, margin: "0 auto 18px" }}>
+            See it on your<br />
+            <span className="n-accent">own project.</span>
+          </h2>
+          <p className="n-cta-sub" style={{ maxWidth: 440, margin: "0 auto 36px" }}>
+            Bring a project file. We&apos;ll show you exactly what BluQ would have caught and what it would have saved.
+          </p>
+          <div style={{ display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap" }}>
+            <a href="/#demo" className="n-btn-primary n-btn-large">Book a Free Demo →</a>
+            <a href="/contact" className="n-btn-ghost" style={{ padding: "16px 24px", fontSize: 15 }}>Contact us</a>
+          </div>
+        </div>
+      </section>
+
+      {/* ── FOOTER ───────────────────────────────────────────────────────── */}
+      <footer className="n-footer">
+        <div className="n-wrap">
+          <div className="n-footer-grid">
+            <div className="n-footer-brand">
+              <Logo />
+              <p className="n-footer-tagline">The AI-powered construction intelligence platform. Prevent delays before they happen.</p>
             </div>
-            <div className="m-foot-col">
-              <h4>product</h4>
+            <div className="n-footer-col">
+              <h4>Product</h4>
               <ul>
-                <li><a href="/#features">auto scheduling</a></li>
-                <li><a href="/#features">schedule import</a></li>
-                <li><a href="/#features">field updates</a></li>
-                <li><a href="/#features">delay flagging</a></li>
-                <li><a href="/#features">auto dpr</a></li>
+                <li><a href="/#product">Daily Task Tracking</a></li>
+                <li><a href="/#product">Gantt &amp; Critical Path</a></li>
+                <li><a href="/#product">AI Delay Analytics</a></li>
+                <li><a href="/#product">Schedule Import</a></li>
+                <li><a href="/#product">WhatsApp Bot</a></li>
               </ul>
             </div>
-            <div className="m-foot-col">
-              <h4>built for</h4>
+            <div className="n-footer-col">
+              <h4>Built for</h4>
               <ul>
-                <li><a href="/#audience">pmc firms</a></li>
-                <li><a href="/#audience">epc · turnkey contractors</a></li>
-                <li><a href="/#audience">developers</a></li>
+                <li><a href="/#built-for">PMC Firms</a></li>
+                <li><a href="/#built-for">EPC &amp; Contractors</a></li>
+                <li><a href="/#built-for">Developers</a></li>
               </ul>
             </div>
-            <div className="m-foot-col">
-              <h4>company</h4>
+            <div className="n-footer-col">
+              <h4>Company</h4>
               <ul>
-                <li><a href="/about">about</a></li>
-                <li><a href="/contact">contact</a></li>
-                <li><a href="#">early access</a></li>
-                <li><a href="#">privacy</a></li>
-                <li><a href="#">terms</a></li>
+                <li><a href="/about">About</a></li>
+                <li><a href="/#demo">Book a Demo</a></li>
+                <li><a href="/contact">Contact</a></li>
+                <li><a href="#">Privacy Policy</a></li>
+                <li><a href="#">Terms of Service</a></li>
               </ul>
             </div>
           </div>
-          <div className="m-foot-bottom">
-            <div>© 2026 bluq technologies</div>
-            <div>building in public</div>
+          <div className="n-footer-bottom">
+            <span className="n-footer-copy">© 2026 BluQ Technologies. Building in public.</span>
+            <div className="n-footer-legal">
+              <a href="#">Privacy</a>
+              <a href="#">Terms</a>
+              <a href="/contact">Support</a>
+            </div>
           </div>
         </div>
       </footer>

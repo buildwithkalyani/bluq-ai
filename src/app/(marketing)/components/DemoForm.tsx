@@ -3,15 +3,17 @@
 import { useState } from "react";
 
 export default function DemoForm() {
+  const [name, setName] = useState("");
   const [firm, setFirm] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [errors, setErrors] = useState<{ firm?: string; email?: string; phone?: string }>({});
+  const [errors, setErrors] = useState<{ name?: string; firm?: string; email?: string; phone?: string }>({});
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
   function validate() {
     const e: typeof errors = {};
+    if (!name.trim()) e.name = "required";
     if (!firm.trim()) e.firm = "required";
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) e.email = "valid email required";
     if (!/^\+?[0-9]{7,15}$/.test(phone.replace(/[\s\-()]/g, ""))) e.phone = "valid number required";
@@ -27,7 +29,7 @@ export default function DemoForm() {
       const res = await fetch("/api/demo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ companyName: firm, email, phone }),
+        body: JSON.stringify({ name, companyName: firm, email, phone }),
       });
       if (!res.ok) throw new Error("failed");
       setSubmitted(true);
@@ -38,53 +40,70 @@ export default function DemoForm() {
     }
   }
 
-  return (
-    <div className="m-demo-panel">
-      <div className="dp-tag">/ book a demo</div>
-      <h3>see BluQ on your <span className="serif-it">own project.</span></h3>
+  if (submitted) {
+    return (
+      <div className="df-success">
+        <div className="df-success-icon">✓</div>
+        <h3 className="df-success-title">You&apos;re booked!</h3>
+        <p className="df-success-body">We&apos;ll reach out to <strong>{email}</strong> to confirm your 30-min session.</p>
+      </div>
+    );
+  }
 
-      {submitted ? (
-        <div className="dp-success">
-          ✓ you&apos;re booked. we&apos;ll reach out to <strong>{email}</strong> to confirm the session.
+  return (
+    <form className="n-demo-form" onSubmit={handleSubmit}>
+      <div className="df-row">
+        <div className="df-field">
+          <label className="df-label">Your name</label>
+          <input
+            className="df-input"
+            type="text"
+            placeholder="Rahul Verma"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          {errors.name && <span className="df-err">{errors.name}</span>}
         </div>
-      ) : (
-        <form onSubmit={handleSubmit}>
-          <div className="dp-field">
-            <label>firm name</label>
-            <input
-              type="text"
-              placeholder="your company"
-              value={firm}
-              onChange={(e) => setFirm(e.target.value)}
-            />
-            {errors.firm && <div className="dp-err">{errors.firm}</div>}
-          </div>
-          <div className="dp-field">
-            <label>work email</label>
-            <input
-              type="email"
-              placeholder="you@company.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            {errors.email && <div className="dp-err">{errors.email}</div>}
-          </div>
-          <div className="dp-field">
-            <label>mobile number</label>
-            <input
-              type="tel"
-              placeholder="+91 98765 43210"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-            />
-            {errors.phone && <div className="dp-err">{errors.phone}</div>}
-          </div>
-          <button type="submit" className="m-btn big dp-submit" disabled={loading}>
-            {loading ? "submitting..." : <>book my demo <span className="m-btn-arrow">→</span></>}
-          </button>
-          <div className="dp-note">30 min · bring your own schedule file · free</div>
-        </form>
-      )}
-    </div>
+        <div className="df-field">
+          <label className="df-label">Company / firm</label>
+          <input
+            className="df-input"
+            type="text"
+            placeholder="Larsen & Toubro"
+            value={firm}
+            onChange={(e) => setFirm(e.target.value)}
+          />
+          {errors.firm && <span className="df-err">{errors.firm}</span>}
+        </div>
+      </div>
+      <div className="df-row">
+        <div className="df-field">
+          <label className="df-label">Work email</label>
+          <input
+            className="df-input"
+            type="email"
+            placeholder="you@company.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          {errors.email && <span className="df-err">{errors.email}</span>}
+        </div>
+        <div className="df-field">
+          <label className="df-label">Mobile number</label>
+          <input
+            className="df-input"
+            type="tel"
+            placeholder="+91 98765 43210"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+          />
+          {errors.phone && <span className="df-err">{errors.phone}</span>}
+        </div>
+      </div>
+      <button type="submit" className="df-submit" disabled={loading}>
+        {loading ? "Submitting…" : "Book My Free Demo →"}
+      </button>
+      <p className="df-note">30 min · bring your own schedule file · completely free</p>
+    </form>
   );
 }

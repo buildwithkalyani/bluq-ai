@@ -1,8 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import MobileNav from "../components/MobileNav";
-import MobileAccordion from "../components/MobileAccordion";
+import ExpandableCard from "../components/ExpandableCard";
+
+const Logo = () => (
+  <a href="/" className="n-logo">
+    <Image src="/bluq-logo.png" alt="BluQ" width={120} height={32} style={{ height: 32, width: "auto" }} />
+  </a>
+);
 
 export default function Contact() {
   const [success, setSuccess] = useState(false);
@@ -31,187 +38,248 @@ export default function Contact() {
 
   return (
     <>
-      {/* NAV */}
-      <nav className="m-nav">
-        <div className="m-nav-inner">
-          <a href="/" className="m-logo">
-            <span className="m-logo-mark">
-              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M4 20 L4 10 L12 4 L20 10 L20 20" stroke="#F4F1E8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M9 20 L9 14 L15 14 L15 20" stroke="#F4F1E8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </span>
-            <span className="m-logo-text">blu<span className="q">Q</span></span>
-          </a>
-          <div className="m-nav-links">
-            <a href="/">home</a>
-            <a href="/#problem">problems</a>
-            <a href="/#product">product</a>
-            <a href="/#features">features</a>
-            <a href="/about">about</a>
-            <a href="/contact" className="active">contact</a>
-            <a href="/#demo" className="m-btn demo-nav">book demo <span className="m-btn-arrow">→</span></a>
+      {/* ── NAV ──────────────────────────────────────────────────────────── */}
+      <nav className="n-nav">
+        <div className="n-nav-inner">
+          <Logo />
+          <div className="n-nav-links">
+            <a href="/">Home</a>
+            <a href="/#problem">Problem</a>
+            <a href="/#product">Product</a>
+            <a href="/#built-for">Who it&apos;s for</a>
+            <a href="/about">About</a>
+            <a href="/contact" style={{ color: "var(--text)" }}>Contact us</a>
+            <a href="/#demo" className="n-nav-cta">Get a Demo →</a>
           </div>
           <MobileNav links={[
-            { href: "/", label: "home" },
-            { href: "/#problem", label: "problems" },
-            { href: "/#product", label: "product" },
-            { href: "/#features", label: "features" },
-            { href: "/about", label: "about" },
-            { href: "/contact", label: "contact", active: true },
-            { href: "/#demo", label: "book demo →" },
+            { href: "/",          label: "Home" },
+            { href: "/#problem",  label: "Problem" },
+            { href: "/#product",  label: "Product" },
+            { href: "/#built-for",label: "Who it's for" },
+            { href: "/about",     label: "About" },
+            { href: "/contact",   label: "Contact us" },
+            { href: "/#demo",     label: "Get a Demo →" },
           ]} />
         </div>
       </nav>
 
-      {/* HERO */}
-      <section className="m-contact-hero">
-        <div className="m-wrap">
-          <div className="eyebrow">contact</div>
-          <h1>let&apos;s build<br />something <span className="serif-it">together.</span></h1>
-          <p className="m-contact-hero-sub">
-            Book a demo, ask a question, or talk to the founders directly. We reply fast. Usually within the same day.
+      {/* ── HERO ─────────────────────────────────────────────────────────── */}
+      <section className="n-hero n-contact-hero">
+        <div className="n-orb n-orb-1" />
+        <div className="n-orb n-orb-2" />
+        <div className="n-wrap" style={{ position: "relative", zIndex: 2 }}>
+          <div className="n-hero-badge">
+            <span className="n-badge-dot" />
+            TALK TO US
+          </div>
+          <h1 className="n-hero-h1">
+            Let&apos;s build something<br />
+            <span className="n-accent">together.</span>
+          </h1>
+          <p className="n-hero-sub">
+            Book a demo, ask a question, or talk to the founders directly. We reply fast, usually within the same day.
           </p>
         </div>
       </section>
 
-      {/* CONTACT FORM */}
-      <section className="m-contact-section">
-        <div className="m-wrap">
-          <div className="m-form-wrap">
-            <div className="m-form-card">
-              <div className="form-title">send us a note</div>
-              <h3>tell us what you&apos;re <span className="serif-it">working on.</span></h3>
-              {success && (
-                <div className="m-form-success show">
-                  ✓ got it. we&apos;ll be in touch within a day.
-                </div>
-              )}
-              <form onSubmit={handleSubmit}>
-                <div className="m-field-row">
-                  <div className="m-field">
-                    <label>your name<span className="req">*</span></label>
-                    <input type="text" name="name" required placeholder="Rajesh Kumar" />
-                  </div>
-                  <div className="m-field">
-                    <label>your role<span className="req">*</span></label>
-                    <select name="role" required defaultValue="">
-                      <option value="" disabled>select...</option>
-                      <option>PMC / Project Manager</option>
-                      <option>EPC / Contractor</option>
-                      <option>Developer</option>
-                      <option>Site Engineer</option>
-                      <option>Other</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="m-field-row">
-                  <div className="m-field">
-                    <label>work email<span className="req">*</span></label>
-                    <input type="email" name="email" required placeholder="you@company.com" />
-                  </div>
-                  <div className="m-field">
-                    <label>company</label>
-                    <input type="text" name="company" placeholder="your firm name" />
-                  </div>
-                </div>
-                <div className="m-field">
-                  <label>what&apos;s on your mind?<span className="req">*</span></label>
-                  <textarea name="message" required placeholder="Tell us about your project, the delays you're dealing with, or just say hi..."></textarea>
-                </div>
-                <button type="submit" className="m-btn big m-form-submit" disabled={loading}>
-                  {loading ? "sending..." : <>send message <span className="m-btn-arrow">→</span></>}
-                </button>
-                <div className="m-form-foot">we reply within one working day</div>
-              </form>
-            </div>
-          </div>
-        </div>
-      </section>
+      {/* ── CONTACT SECTION ──────────────────────────────────────────────── */}
+      <section className="n-section n-contact-section">
+        <div className="n-wrap">
+          <div className="n-contact-grid">
 
-      {/* FAQ */}
-      <section className="m-faq">
-        <div className="m-wrap">
-          <div className="m-faq-head">
-            <div className="eye">quick answers</div>
-            <h2>before you <span className="serif-it">write to us.</span></h2>
-          </div>
-          <MobileAccordion variant="beliefs" items={[
-            { label: "Q1", heading: "how long is a demo?", body: "30 minutes. Bring your actual project file and we walk through BluQ on your real schedule, not a sandbox. You leave knowing exactly what changes on day one." },
-            { label: "Q2", heading: "what file formats can we import?", body: "MS Project (.mpp) and Excel (.xlsx). All tasks, baselines, and resources preserved. Or drop your drawings and BOQ and BluQ will build the schedule from scratch." },
-            { label: "Q3", heading: "how fast can we go live?", body: "One afternoon. 10 minutes to import your schedule, 30 minutes to connect your site team on WhatsApp, first DPR sent to your client that evening." },
-            { label: "Q4", heading: "what does early access mean?", body: "Direct line to the product team. Priority onboarding. Pricing locked for life. And a real say in what we build next. Early access clients have shaped every major feature so far." },
-          ]} />
+            {/* Left — info */}
+            <div className="n-contact-info">
+              <div className="n-eyebrow" style={{ marginBottom: 28 }}>GET IN TOUCH</div>
 
-          <div className="m-faq-grid">
-            <div className="m-faq-item">
-              <h4>how long is a demo?</h4>
-              <p>30 minutes. Bring your actual project file and we walk through BluQ on your real schedule, not a sandbox. You leave knowing exactly what changes on day one.</p>
-            </div>
-            <div className="m-faq-item">
-              <h4>what file formats can we import?</h4>
-              <p>MS Project (.mpp) and Excel (.xlsx). All tasks, baselines, and resources preserved. Or drop your drawings and BOQ and BluQ will build the schedule from scratch.</p>
-            </div>
-            <div className="m-faq-item">
-              <h4>how fast can we go live?</h4>
-              <p>One afternoon. 10 minutes to import your schedule, 30 minutes to connect your site team on WhatsApp, first DPR sent to your client that evening.</p>
-            </div>
-            <div className="m-faq-item">
-              <h4>what does early access mean?</h4>
-              <p>Direct line to the product team. Priority onboarding. Pricing locked for life. And a real say in what we build next. Early access clients have shaped every major feature so far.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* FOOTER */}
-      <footer className="m-footer">
-        <div className="m-wrap">
-          <div className="m-foot-grid">
-            <div className="m-foot-brand">
-              <a href="/" className="m-logo">
-                <span className="m-logo-mark" style={{background:"#F4F1E8"}}>
-                  <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M4 20 L4 10 L12 4 L20 10 L20 20" stroke="#111113" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M9 20 L9 14 L15 14 L15 20" stroke="#111113" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <div className="n-contact-channel">
+                <div className="n-channel-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                    <polyline points="22,6 12,13 2,6"/>
                   </svg>
-                </span>
-                <span className="m-logo-text">blu<span className="q">Q</span></span>
-              </a>
-              <p>the real-time audit &amp; delay platform for construction projects.</p>
+                </div>
+                <div>
+                  <div className="n-channel-label">Email us</div>
+                  <a href="mailto:aishna@bluq.ai" className="n-channel-value">aishna@bluq.ai</a>
+                  <br />
+                  <a href="mailto:kalyani@bluq.ai" className="n-channel-value">kalyani@bluq.ai</a>
+                </div>
+              </div>
+
+              <div className="n-contact-channel">
+                <div className="n-channel-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                  </svg>
+                </div>
+                <div>
+                  <div className="n-channel-label">Response time</div>
+                  <div className="n-channel-value">Within one working day</div>
+                </div>
+              </div>
+
+              <div className="n-contact-divider" />
+
+              <div className="n-contact-quickfacts">
+                <div className="n-eyebrow" style={{ marginBottom: 16 }}>DEMO DETAILS</div>
+                <ul className="n-contact-facts">
+                  <li><span className="n-check-accent">✓</span> 30 min session, no sales pitch</li>
+                  <li><span className="n-check-accent">✓</span> Bring your own project file</li>
+                  <li><span className="n-check-accent">✓</span> We show what BluQ would have caught</li>
+                  <li><span className="n-check-accent">✓</span> Completely free</li>
+                </ul>
+              </div>
             </div>
-            <div className="m-foot-col">
-              <h4>product</h4>
+
+            {/* Right — form */}
+            <div className="n-contact-form-wrap">
+              {success ? (
+                <div className="df-success">
+                  <div className="df-success-icon">✓</div>
+                  <h3 className="df-success-title">Message received!</h3>
+                  <p className="df-success-body">We&apos;ll get back to you within one working day.</p>
+                </div>
+              ) : (
+                <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  <div className="df-row">
+                    <div className="df-field">
+                      <label className="df-label">Your name <span style={{ color: "var(--red)" }}>*</span></label>
+                      <input className="df-input" type="text" name="name" required placeholder="Rajesh Kumar" />
+                    </div>
+                    <div className="df-field">
+                      <label className="df-label">Your role <span style={{ color: "var(--red)" }}>*</span></label>
+                      <select className="df-input" name="role" required defaultValue="">
+                        <option value="" disabled>Select...</option>
+                        <option>PMC / Project Manager</option>
+                        <option>EPC / Contractor</option>
+                        <option>Developer</option>
+                        <option>Site Engineer</option>
+                        <option>Other</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="df-row">
+                    <div className="df-field">
+                      <label className="df-label">Work email <span style={{ color: "var(--red)" }}>*</span></label>
+                      <input className="df-input" type="email" name="email" required placeholder="you@company.com" />
+                    </div>
+                    <div className="df-field">
+                      <label className="df-label">Company</label>
+                      <input className="df-input" type="text" name="company" placeholder="Your firm name" />
+                    </div>
+                  </div>
+                  <div className="df-field">
+                    <label className="df-label">What&apos;s on your mind? <span style={{ color: "var(--red)" }}>*</span></label>
+                    <textarea
+                      className="df-input"
+                      name="message"
+                      required
+                      rows={5}
+                      placeholder="Tell us about your project, delays you're dealing with, or just say hi..."
+                      style={{ resize: "vertical" }}
+                    />
+                  </div>
+                  <button type="submit" className="df-submit" disabled={loading}>
+                    {loading ? "Sending…" : "Send Message →"}
+                  </button>
+                  <p className="df-note">We reply within one working day</p>
+                </form>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── FAQ ──────────────────────────────────────────────────────────── */}
+      <section className="n-section" id="faq">
+        <div className="n-wrap">
+          <div className="n-section-head n-head-center">
+            <div className="n-eyebrow">QUICK ANSWERS</div>
+            <h2 className="n-section-h2">Before you write to us.</h2>
+          </div>
+          <div className="n-faq-grid">
+            {[
+              {
+                q: "How long is a demo?",
+                a: "30 minutes. Bring your actual project file and we walk through BluQ on your real schedule, not a sandbox. You leave knowing exactly what changes on day one.",
+              },
+              {
+                q: "What file formats can we import?",
+                a: "MS Project (.mpp), Primavera P6 (.xer), and Excel (.xlsx). All tasks, baselines, and dependencies carry over. Or drop your drawings and BOQ and BluQ builds the schedule from scratch.",
+              },
+              {
+                q: "How fast can we go live?",
+                a: "One afternoon. 10 minutes to import your schedule, 30 minutes to connect your site team on WhatsApp, first DPR sent to your client that evening.",
+              },
+              {
+                q: "What does early access mean?",
+                a: "Direct line to the product team. Priority onboarding. Pricing locked for life. And a real say in what we build next. Early access clients have shaped every major feature so far.",
+              },
+              {
+                q: "Do site engineers need to learn a new tool?",
+                a: "No. They reply on WhatsApp exactly as they do today. BluQ's bot parses those messages and structures the data automatically. Zero behavior change on site.",
+              },
+              {
+                q: "Is our project data secure?",
+                a: "Yes. Data is encrypted at rest and in transit. We're hosted on enterprise-grade infrastructure in India with role-based access controls for every user.",
+              },
+            ].map((item) => (
+              <ExpandableCard
+                key={item.q}
+                className="n-faq-card"
+                trigger={<h4 className="n-faq-q">{item.q}</h4>}
+              >
+                <p className="n-faq-a">{item.a}</p>
+              </ExpandableCard>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── FOOTER ───────────────────────────────────────────────────────── */}
+      <footer className="n-footer">
+        <div className="n-wrap">
+          <div className="n-footer-grid">
+            <div className="n-footer-brand">
+              <Logo />
+              <p className="n-footer-tagline">The AI-powered construction intelligence platform. Prevent delays before they happen.</p>
+            </div>
+            <div className="n-footer-col">
+              <h4>Product</h4>
               <ul>
-                <li><a href="/#features">auto scheduling</a></li>
-                <li><a href="/#features">schedule import</a></li>
-                <li><a href="/#features">field updates</a></li>
-                <li><a href="/#features">delay flagging</a></li>
-                <li><a href="/#features">auto dpr</a></li>
+                <li><a href="/#product">Daily Task Tracking</a></li>
+                <li><a href="/#product">Gantt &amp; Critical Path</a></li>
+                <li><a href="/#product">AI Delay Analytics</a></li>
+                <li><a href="/#product">Schedule Import</a></li>
+                <li><a href="/#product">WhatsApp Bot</a></li>
               </ul>
             </div>
-            <div className="m-foot-col">
-              <h4>built for</h4>
+            <div className="n-footer-col">
+              <h4>Built for</h4>
               <ul>
-                <li><a href="/#audience">pmc firms</a></li>
-                <li><a href="/#audience">epc · turnkey contractors</a></li>
-                <li><a href="/#audience">developers</a></li>
+                <li><a href="/#built-for">PMC Firms</a></li>
+                <li><a href="/#built-for">EPC &amp; Contractors</a></li>
+                <li><a href="/#built-for">Developers</a></li>
               </ul>
             </div>
-            <div className="m-foot-col">
-              <h4>company</h4>
+            <div className="n-footer-col">
+              <h4>Company</h4>
               <ul>
-                <li><a href="/about">about</a></li>
-                <li><a href="/contact">contact</a></li>
-                <li><a href="#">early access</a></li>
-                <li><a href="#">privacy</a></li>
-                <li><a href="#">terms</a></li>
+                <li><a href="/about">About</a></li>
+                <li><a href="/#demo">Book a Demo</a></li>
+                <li><a href="/contact">Contact</a></li>
+                <li><a href="#">Privacy Policy</a></li>
+                <li><a href="#">Terms of Service</a></li>
               </ul>
             </div>
           </div>
-          <div className="m-foot-bottom">
-            <div>© 2026 bluq technologies</div>
-            <div>building in public</div>
+          <div className="n-footer-bottom">
+            <span className="n-footer-copy">© 2026 BluQ Technologies. Building in public.</span>
+            <div className="n-footer-legal">
+              <a href="#">Privacy</a>
+              <a href="#">Terms</a>
+              <a href="/contact">Support</a>
+            </div>
           </div>
         </div>
       </footer>

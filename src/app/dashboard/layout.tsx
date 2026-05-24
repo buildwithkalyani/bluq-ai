@@ -838,14 +838,8 @@ function TopNav() {
   return (
     <div className="flex items-center justify-between px-5 h-[52px] border-b border-[#E2E8F0] bg-white flex-shrink-0">
       <div className="flex items-center gap-3">
-        <a href="/" style={{ display: "flex", alignItems: "center", gap: "7px", textDecoration: "none" }}>
-          <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "24px", height: "24px", background: "#0C0E18", borderRadius: "6px" }}>
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14">
-              <path d="M4 20 L4 10 L12 4 L20 10 L20 20" stroke="#F8FAFC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d="M9 20 L9 14 L15 14 L15 20" stroke="#F8FAFC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </span>
-          <span style={{ fontWeight: 700, fontSize: "14px", color: "#0F172A", letterSpacing: "-0.04em" }}>blu<span style={{ color: "#2563EB" }}>Q</span></span>
+        <a href="/" style={{ display: "flex", alignItems: "center", textDecoration: "none" }}>
+          <img src="/bluQ-logo (1).svg" alt="BluQ" style={{ height: "22px", width: "auto" }} />
         </a>
         <div className="w-px h-4 bg-[#E2E8F0]" />
         <span className="text-[13px] font-medium text-[#64748B]">{today}</span>
