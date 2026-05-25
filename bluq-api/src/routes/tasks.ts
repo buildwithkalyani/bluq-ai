@@ -4,6 +4,7 @@ import { tasks, taskDependencies } from "../db/schema.js";
 import { eq, and, ne, lte, gte } from "drizzle-orm";
 import { verifySession } from "../lib/verifySession.js";
 import { detectPhase } from "../lib/detect-phase.js";
+import { logAudit } from "../lib/audit.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -246,6 +247,15 @@ export async function tasksRoute(app: FastifyInstance) {
       }
       if (!body.phase) body.phase = detectPhase(body.title) ?? undefined;
       const [newTask] = await db.insert(tasks).values(body).returning();
+      logAudit({
+        workspaceId: newTask.workspaceId,
+        projectId: newTask.projectId,
+        eventType: "task.created",
+        entityType: "task",
+        entityId: newTask.id,
+        actorId: request.userId,
+        payload: { title: newTask.title },
+      });
       return reply.status(201).send(newTask);
     } catch (err: any) {
       console.error("POST /tasks error:", err.message, err.cause);
@@ -265,6 +275,15 @@ export async function tasksRoute(app: FastifyInstance) {
       const body = request.body as Record<string, any>;
       const [updated] = await db.update(tasks).set(body).where(eq(tasks.id, id)).returning();
       if (!updated) return reply.status(404).send({ error: "Task not found" });
+      logAudit({
+        workspaceId: updated.workspaceId,
+        projectId: updated.projectId,
+        eventType: "task.updated",
+        entityType: "task",
+        entityId: updated.id,
+        actorId: request.userId,
+        payload: { changes: body },
+      });
       return updated;
     } catch (err: any) {
       console.error("PATCH /tasks error:", err.message, err.cause);
@@ -283,6 +302,15 @@ export async function tasksRoute(app: FastifyInstance) {
       }
       const [deleted] = await db.delete(tasks).where(eq(tasks.id, id)).returning();
       if (!deleted) return reply.status(404).send({ error: "Task not found" });
+      logAudit({
+        workspaceId: deleted.workspaceId,
+        projectId: deleted.projectId,
+        eventType: "task.deleted",
+        entityType: "task",
+        entityId: deleted.id,
+        actorId: request.userId,
+        payload: { title: deleted.title },
+      });
       return { success: true };
     } catch (err: any) {
       console.error("DELETE /tasks error:", err.message, err.cause);

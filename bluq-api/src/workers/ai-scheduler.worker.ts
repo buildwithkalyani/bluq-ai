@@ -41,12 +41,14 @@ import { eq, and } from "drizzle-orm";
 
 // Pipeline modules
 import { parseFiles, fetchFileBuffer } from "../lib/parsers.js";
+import { type Phase, type ContractorType } from "../lib/task-library.js";
 import { extractParameters, type ProjectParameters } from "../lib/parameter-extractor.js";
-import { selectTasks, printTaskSummary, type RulesEngineResult } from "../lib/rules-engine.js";
+import { selectTasks, printTaskSummary, type RulesEngineResult, type SelectedTask } from "../lib/rules-engine.js";
 import { calculateSchedule, type ScheduleResult, type ScheduledTask } from "../lib/duration-calculator.js";
 import { generateNovelTasks } from "../lib/novel-task-generator.js";
 import { checkTaskGaps, type GapCheckResult } from "../lib/gap-checker.js";
 import { getIO } from "../lib/socket.js";
+import { logAudit } from "../lib/audit.js";
 
 // ---------------------------------------------------------------------------
 // JOB TYPES
@@ -276,9 +278,6 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
   }
   console.log(`[worker] Step 4 completed in ${Date.now() - step4Start}ms`);
 
-  // Kick off gap check in parallel with duration calculation — does not add to wall-clock time
-  const gapCheckPromise = checkTaskGaps(rulesResult.tasks, params, apiKey);
-
   // =========================================================================
   // STEP 5: Calculate durations and schedule
   // =========================================================================
@@ -331,8 +330,39 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     }
   }
 
-  // Collect gap check result (was running in parallel since Step 4)
-  const gapCheck: GapCheckResult = await gapCheckPromise;
+  // Run gap check on full task list (library + novel) so it sees the complete picture
+  const allForGapCheck: SelectedTask[] = [
+    ...rulesResult.tasks,
+    ...novelTasks.map((t): SelectedTask => ({
+      code: t.code,
+      originalCode: t.originalCode,
+      phase: t.phase as Phase,
+      name: t.name,
+      fullName: t.fullName,
+      unit: t.unit,
+      floorNumber: t.floorNumber,
+      floorLabel: t.floorLabel,
+      wingCode: t.wingCode,
+      wingLabel: t.wingLabel,
+      productivityRateMin: 0,
+      productivityRateMax: 0,
+      productivityUnit: "",
+      monsoonImpactFactor: t.monsoonImpactFactor,
+      crew: t.crew,
+      predecessors: t.predecessors,
+      isCodeRef: [],
+      dsrRef: "",
+      safetyChecks: [],
+      remarks: "",
+      source: "library",
+      isPerFloor: t.isPerFloor,
+      isPerFlat: t.isPerFlat,
+      contractorType: t.contractorType as ContractorType,
+      regionalAdjustments: t.regionalAdjustments,
+    })),
+  ];
+
+  const gapCheck: GapCheckResult = await checkTaskGaps(allForGapCheck, params, apiKey);
   console.log(`[worker] Step 6 completed in ${Date.now() - step6Start}ms`);
 
   // =========================================================================
@@ -486,6 +516,16 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     });
     insertedTasks.push(...inserted);
   }
+
+  logAudit({
+    workspaceId,
+    projectId,
+    eventType: "schedule.generated",
+    entityType: "schedule",
+    actorId: userId !== "system" ? userId : null,
+    actorType: "ai",
+    payload: { taskCount: insertedTasks.length },
+  });
 
   // Build a map from sortOrder → database task ID for dependency insertion
   const sortOrderToId = new Map<number, string>();

@@ -3,6 +3,7 @@ import { db } from "../db/client.js";
 import { projects, tasks } from "../db/schema.js";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { verifySession } from "../lib/verifySession.js";
+import { logAudit } from "../lib/audit.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -261,6 +262,15 @@ Write a professional morning briefing. Be direct and actionable — highlight wh
         return reply.status(400).send({ error: "workspaceId must be a valid UUID" });
       }
       const [newProject] = await db.insert(projects).values(body).returning();
+      logAudit({
+        workspaceId: newProject.workspaceId,
+        projectId: newProject.id,
+        eventType: "project.created",
+        entityType: "project",
+        entityId: newProject.id,
+        actorId: request.userId,
+        payload: { projectName: newProject.projectName },
+      });
       return reply.status(201).send(newProject);
     } catch (err: any) {
       console.error("POST /projects error:", err.message, err.cause);
@@ -292,6 +302,15 @@ Write a professional morning briefing. Be direct and actionable — highlight wh
       if (Object.keys(set).length === 0) return reply.status(400).send({ error: "No fields to update" });
       const [updated] = await db.update(projects).set(set).where(eq(projects.id, id)).returning();
       if (!updated) return reply.status(404).send({ error: "Project not found" });
+      logAudit({
+        workspaceId: updated.workspaceId,
+        projectId: updated.id,
+        eventType: "project.updated",
+        entityType: "project",
+        entityId: updated.id,
+        actorId: request.userId,
+        payload: { changes: set },
+      });
       return updated;
     } catch (err: any) {
       console.error("PATCH /projects error:", err.message, err.cause);
