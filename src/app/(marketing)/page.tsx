@@ -52,7 +52,7 @@ export default function Home() {
             AI-POWERED CONSTRUCTION INTELLIGENCE
           </div>
           <h1 className="n-hero-h1">
-            Prevent construction delays<br />
+            Prevent construction delays{' '}<br />
             <span className="n-accent">before they happen.</span>
           </h1>
           <p className="n-hero-sub">
