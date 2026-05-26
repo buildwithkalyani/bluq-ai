@@ -47,10 +47,6 @@ export default function Home() {
         <div className="n-orb n-orb-2" />
         <div className="n-orb n-orb-3" />
         <div className="n-wrap" style={{ position: "relative", zIndex: 2 }}>
-          <div className="n-hero-badge">
-            <span className="n-badge-dot" />
-            AI-POWERED CONSTRUCTION INTELLIGENCE
-          </div>
           <h1 className="n-hero-h1">
             Prevent construction delays{' '}<br />
             <span className="n-accent">before they happen.</span>
