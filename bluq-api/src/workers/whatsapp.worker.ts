@@ -34,7 +34,6 @@ import { redisConnection } from "../lib/redis.js";
 import { sendText, sendButtons, sendList } from "../lib/whatsapp-send.js";
 import { parseWhatsappMessage, matchTaskId } from "../lib/whatsapp-parser.js";
 import { emitTaskUpdate } from "../lib/socket.js";
-import { logAudit } from "../lib/audit.js";
 
 // ---------------------------------------------------------------------------
 // TYPES
@@ -422,7 +421,7 @@ async function writeEodToDb(state: WaState, waUpdateId: string | null): Promise<
       : materialSummary ?? `${pct}% complete`;
 
   // Insert DPR
-  const [eodDpr] = await db.insert(dprs).values({
+  await db.insert(dprs).values({
     workspaceId: state.workspaceId,
     projectId: state.projectId,
     taskId: state.taskId,
@@ -436,16 +435,6 @@ async function writeEodToDb(state: WaState, waUpdateId: string | null): Promise<
     delayDays: completionStatus === "not_started" ? 1 : null,
     source: "whatsapp",
     whatsappUpdateId: waUpdateId ?? undefined,
-  }).returning();
-  logAudit({
-    workspaceId: state.workspaceId,
-    projectId: state.projectId,
-    eventType: "dpr.created",
-    entityType: "dpr",
-    entityId: eodDpr?.id,
-    actorId: state.userId,
-    actorType: "whatsapp",
-    payload: { percentComplete: pct, taskId: state.taskId, waUpdateId },
   });
 
   console.log(
@@ -839,7 +828,7 @@ async function parseAndUpdateFromFreeText(
   }
 
   // 5. Create DPR
-  const [morningDpr] = await db.insert(dprs).values({
+  await db.insert(dprs).values({
     workspaceId: state.workspaceId,
     projectId: state.projectId,
     taskId: matchedTaskId ?? undefined,
@@ -853,16 +842,6 @@ async function parseAndUpdateFromFreeText(
     delayDays: parsed.delayDays,
     source: "whatsapp",
     whatsappUpdateId: waUpdateId ?? undefined,
-  }).returning();
-  logAudit({
-    workspaceId: state.workspaceId,
-    projectId: state.projectId,
-    eventType: "dpr.created",
-    entityType: "dpr",
-    entityId: morningDpr?.id,
-    actorId: state.userId,
-    actorType: "whatsapp",
-    payload: { percentComplete: pct, taskId: matchedTaskId, waUpdateId },
   });
 
   // 6. Update matched task

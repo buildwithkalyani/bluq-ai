@@ -46,7 +46,7 @@ function InvitePage() {
     acceptTeamInvite(token)
       .then(({ workspaceId }) => {
         // Mark onboarding done so workspace context doesn't redirect to /onboarding
-        localStorage.setItem(`onboarding_done_${session.user.id}`, "true");
+        localStorage.setItem("onboarding_done", "true");
         // Clear any stale workspace cache so context re-fetches with new membership
         localStorage.removeItem("bluq_workspace");
         // Hard reload so workspace context re-fetches /orgs/mine with the new membership
