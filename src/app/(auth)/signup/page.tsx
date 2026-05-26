@@ -61,7 +61,7 @@ export default function SignupPage() {
         {/* Header */}
         <div className="text-center mb-6">
           <a href="/" className="logo" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
-            <img src="/bluq-logo.png" alt="BluQ" style={{ height: "15px", width: "auto" }} />
+            <img src="/bluQ-logo (1).svg" alt="BluQ" style={{ height: "20px", width: "auto" }} />
           </a>
           <div className="text-[13px] text-[#57606a] mt-1">
             Project intelligence for construction
