@@ -3,7 +3,6 @@ import { db } from "../db/client.js";
 import { dprs } from "../db/schema.js";
 import { eq, and, desc } from "drizzle-orm";
 import { verifySession } from "../lib/verifySession.js";
-import { logAudit } from "../lib/audit.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -46,15 +45,6 @@ export async function dprsRoute(app: FastifyInstance) {
         return reply.status(400).send({ error: "workspaceId and projectId must be valid UUIDs" });
       }
       const [newDpr] = await db.insert(dprs).values(body).returning();
-      logAudit({
-        workspaceId: newDpr.workspaceId,
-        projectId: newDpr.projectId,
-        eventType: "dpr.created",
-        entityType: "dpr",
-        entityId: newDpr.id,
-        actorId: request.userId,
-        payload: { reportDate: newDpr.reportDate, source: newDpr.source },
-      });
       return reply.status(201).send(newDpr);
     } catch (err: any) {
       console.error("POST /dprs error:", err.message, err.cause);
@@ -71,15 +61,6 @@ export async function dprsRoute(app: FastifyInstance) {
       const body = request.body as Record<string, any>;
       const [updated] = await db.update(dprs).set(body).where(eq(dprs.id, id)).returning();
       if (!updated) return reply.status(404).send({ error: "DPR not found" });
-      logAudit({
-        workspaceId: updated.workspaceId,
-        projectId: updated.projectId,
-        eventType: "dpr.updated",
-        entityType: "dpr",
-        entityId: updated.id,
-        actorId: request.userId,
-        payload: { changes: body },
-      });
       return updated;
     } catch (err: any) {
       console.error("PATCH /dprs error:", err.message, err.cause);

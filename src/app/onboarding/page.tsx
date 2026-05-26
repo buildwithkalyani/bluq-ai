@@ -108,7 +108,7 @@ export default function OnboardingPage() {
       return;
     }
 
-    const savedStep = parseInt(localStorage.getItem(`onboarding_step_${session.user.id}`) ?? "0") || 0;
+    const savedStep = parseInt(localStorage.getItem("onboarding_step") ?? "0") || 0;
     const fetchOrg = async () => {
       try {
         const token = await getAuthToken();
@@ -200,7 +200,7 @@ const apiPost = async (path: string, body: unknown) => {
         }
 
         setStep(1);
-        localStorage.setItem(`onboarding_step_${session?.user?.id}`, "1");
+        localStorage.setItem("onboarding_step", "1");
       } catch (err: any) {
         setApiError(err.message);
       } finally {
@@ -357,8 +357,8 @@ const apiPost = async (path: string, body: unknown) => {
         }
       }
 
-      localStorage.removeItem(`onboarding_step_${session?.user?.id}`);
-      localStorage.setItem(`onboarding_done_${session?.user?.id}`, "true");
+      localStorage.removeItem("onboarding_step");
+      localStorage.setItem("onboarding_done", "true");
       localStorage.removeItem("ob_workspaceId");
       const params = new URLSearchParams();
       if (createdProjectId) params.set("projectId", createdProjectId);
@@ -373,13 +373,13 @@ const apiPost = async (path: string, body: unknown) => {
     if (step > 0) {
       const prev = step - 1;
       setStep(prev);
-      localStorage.setItem(`onboarding_step_${session?.user?.id}`, prev.toString());
+      localStorage.setItem("onboarding_step", prev.toString());
     }
   };
   const finishOnboarding = () => {
     setApiError("");
-    localStorage.removeItem(`onboarding_step_${session?.user?.id}`);
-    localStorage.setItem(`onboarding_done_${session?.user?.id}`, "true");
+    localStorage.removeItem("onboarding_step");
+    localStorage.setItem("onboarding_done", "true");
     ["ob_orgName","ob_projectName","ob_projectAddress","ob_projectStage","ob_projectType",
      "ob_startDate","ob_endDate","ob_projectCode","ob_invites","ob_eodTime","ob_projectId","ob_workspaceId"]
       .forEach(k => localStorage.removeItem(k));
@@ -397,7 +397,7 @@ const apiPost = async (path: string, body: unknown) => {
       finishOnboarding();
     } else {
       setStep(step + 1);
-      localStorage.setItem(`onboarding_step_${session?.user?.id}`, String(step + 1));
+      localStorage.setItem("onboarding_step", String(step + 1));
     }
   };
 

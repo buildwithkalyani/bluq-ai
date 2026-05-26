@@ -11,7 +11,7 @@ import {
   type TaskDependency,
 } from "@/lib/mock-data";
 import { Card, StatusBadge, Btn } from "@/components/ui/bluq-ui";
-import { fetchTasks, fetchProject, isRealProject, createTask, updateTask, deleteTask } from "@/lib/api-client";
+import { fetchTasks, isRealProject, createTask, updateTask, deleteTask } from "@/lib/api-client";
 import { useWorkspace } from "@/context/workspace";
 
 const PHASE_ORDER = ["Site Preparation", "Foundation", "Structure", "MEP", "Finishing", "Handover"];
@@ -53,7 +53,6 @@ function ListViewPageContent() {
   const [filterStatus, setFilterStatus] = useState<StatusFilter>("All");
   const [isExporting, setIsExporting] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
-  const [projectDates, setProjectDates] = useState<{ startDate: string | null; endDate: string | null }>({ startDate: null, endDate: null });
 
   const openAddModal = (ctx?: { phase?: string; space?: string }) => {
     setEditingTaskId(null);
@@ -93,10 +92,7 @@ function ListViewPageContent() {
     const depLoader = real || !isDesignMode
       ? Promise.resolve([])
       : getScheduleDeps(Number(projectIdParam));
-    const projectLoader = real
-      ? fetchProject(projectIdParam).then(p => setProjectDates({ startDate: p.startDate, endDate: p.endDate })).catch(() => {})
-      : Promise.resolve();
-    Promise.all([taskLoader, depLoader, projectLoader]).then(([t, d]) => {
+    Promise.all([taskLoader, depLoader]).then(([t, d]) => {
       setTasks(t); setDeps(d); setLoading(false); setSelectedTask(null);
       setCollapsedPhases(new Set());
       setCollapsedAreas(new Set());
@@ -648,18 +644,12 @@ function ListViewPageContent() {
               <div className="flex gap-3">
                 <div className="flex-1">
                   <label className="block text-[11px] font-bold text-[#475569] mb-1.5 uppercase tracking-wider">Start Date *</label>
-                  <input type="date" value={newTask.startDate}
-                    min={projectDates.startDate || undefined}
-                    max={newTask.endDate || projectDates.endDate || undefined}
-                    onChange={e => setNewTask({ ...newTask, startDate: e.target.value })}
+                  <input type="date" value={newTask.startDate} max={newTask.endDate || undefined} onChange={e => setNewTask({ ...newTask, startDate: e.target.value })}
                     className="w-full bg-white border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#2563EB] text-[#0F172A]" />
                 </div>
                 <div className="flex-1">
                   <label className="block text-[11px] font-bold text-[#475569] mb-1.5 uppercase tracking-wider">End Date *</label>
-                  <input type="date" value={newTask.endDate}
-                    min={newTask.startDate || projectDates.startDate || undefined}
-                    max={projectDates.endDate || undefined}
-                    onChange={e => setNewTask({ ...newTask, endDate: e.target.value })}
+                  <input type="date" value={newTask.endDate} min={newTask.startDate || undefined} onChange={e => setNewTask({ ...newTask, endDate: e.target.value })}
                     className="w-full bg-white border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#2563EB] text-[#0F172A]" />
                 </div>
               </div>
@@ -703,8 +693,6 @@ function ListViewPageContent() {
                   if (!newTask.phase) return setModalError("Phase is required.");
                   if (!newTask.startDate || !newTask.endDate) return setModalError("Start and end dates are required.");
                   if (newTask.endDate < newTask.startDate) return setModalError("End date must be after start date.");
-                  if (projectDates.startDate && newTask.startDate < projectDates.startDate) return setModalError(`Start date cannot be before project start (${projectDates.startDate}).`);
-                  if (projectDates.endDate && newTask.endDate > projectDates.endDate) return setModalError(`End date cannot be after project end (${projectDates.endDate}).`);
 
                   const days = Math.round((new Date(newTask.endDate).getTime() - new Date(newTask.startDate).getTime()) / 86400000);
 

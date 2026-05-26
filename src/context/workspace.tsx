@@ -128,8 +128,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             if (first.logoUrl) setOrgLogoUrl(first.logoUrl);
             writeWorkspaceCache(first.id, first.name, userId);
             // Redirect to resume onboarding only if user hasn't explicitly skipped/finished
-            const done = localStorage.getItem(`onboarding_done_${userId}`) === "true";
-            const savedStep = parseInt(localStorage.getItem(`onboarding_step_${userId}`) ?? "0") || 0;
+            const done = localStorage.getItem("onboarding_done") === "true";
+            const savedStep = parseInt(localStorage.getItem("onboarding_step") ?? "0") || 0;
             if (!done && savedStep > 0 && pathname !== "/onboarding") {
               router.replace("/onboarding");
               return;
@@ -137,7 +137,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           } else {
             clearWorkspaceCache();
             // No workspace at all → must onboard (unless already skipped/done)
-            const done = localStorage.getItem(`onboarding_done_${userId}`) === "true";
+            const done = localStorage.getItem("onboarding_done") === "true";
             if (!done && pathname !== "/onboarding" && !pathname.startsWith("/invite")) {
               router.replace("/onboarding");
             }
