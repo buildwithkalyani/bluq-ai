@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState, Suspense } from "react";
-import { LayoutDashboard, CalendarDays, MessageCircle, Layers, Settings, LogOut, Users, ChevronDown, MoreHorizontal, ClipboardList, User, type LucideIcon } from "lucide-react";
+import { useEffect, useState, useRef, useCallback, Suspense } from "react";
+import { LayoutDashboard, CalendarDays, MessageCircle, Layers, Settings, LogOut, Users, ChevronDown, MoreHorizontal, ClipboardList, User, MapPin, CheckCircle2, type LucideIcon } from "lucide-react";
 import { getProjects, Project } from "@/lib/mock-data";
 import { WorkspaceProvider, useWorkspace } from "@/context/workspace";
 import { ActivityFeedProvider } from "@/context/activity-feed";
@@ -121,11 +121,63 @@ function NewProjectModal({
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [address, setAddress] = useState("");
+  const [addressValidated, setAddressValidated] = useState(false);
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [suggestions, setSuggestions] = useState<{ place_id: number; display_name: string; lat: string; lon: string }[]>([]);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [category, setCategory] = useState("Residential");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setSuggestionsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const fetchSuggestions = useCallback(async (query: string) => {
+    if (query.length < 4) { setSuggestions([]); setSuggestionsOpen(false); return; }
+    setLoadingSuggestions(true);
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&addressdetails=0`,
+        { headers: { "Accept-Language": "en", "User-Agent": "BLUQ-ConstructionPM/1.0" } }
+      );
+      const data = await res.json();
+      setSuggestions(data);
+      setSuggestionsOpen(true);
+    } catch {
+      setSuggestions([]);
+      setSuggestionsOpen(true);
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  }, []);
+
+  const handleAddressChange = (val: string) => {
+    setAddress(val);
+    setAddressValidated(false);
+    setCoords(null);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => fetchSuggestions(val), 500);
+  };
+
+  const selectSuggestion = (s: { place_id: number; display_name: string; lat: string; lon: string }) => {
+    setAddress(s.display_name);
+    setCoords({ lat: parseFloat(s.lat), lng: parseFloat(s.lon) });
+    setAddressValidated(true);
+    setSuggestionsOpen(false);
+    setSuggestions([]);
+  };
 
   // Auto-generate code from name
   useEffect(() => {
@@ -147,6 +199,17 @@ function NewProjectModal({
     if (workspaceId) {
       // Real backend
       try {
+        let resolvedCoords = coords;
+        if (!resolvedCoords && address.trim().length >= 4) {
+          try {
+            const res = await fetch(
+              `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address.trim())}&format=json&limit=1`,
+              { headers: { "Accept-Language": "en", "User-Agent": "BLUQ-ConstructionPM/1.0" } }
+            );
+            const data = await res.json();
+            if (data[0]) resolvedCoords = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+          } catch { /* proceed without coords */ }
+        }
         const p = await createProject({
           workspaceId,
           projectName: name.trim(),
@@ -155,6 +218,7 @@ function NewProjectModal({
           category: category || undefined,
           startDate: startDate || undefined,
           endDate: endDate || undefined,
+          settingsJson: resolvedCoords ? { lat: resolvedCoords.lat, lng: resolvedCoords.lng } : undefined,
         });
         onCreated({
           id: p.id as any,
@@ -234,17 +298,54 @@ function NewProjectModal({
             />
           </div>
 
-          <div>
+          <div ref={dropdownRef} className="relative">
             <label className="block text-[11px] font-semibold text-[#94A3B8] uppercase tracking-[0.06em] mb-1.5">
               Project Address
             </label>
-            <input
-              type="text"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="e.g. Andheri East, Mumbai"
-              className="w-full border border-[#E2E8F0] rounded-lg px-3.5 py-2.5 text-[14px] text-[#0F172A] placeholder:text-[#CBD5E1] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] transition-all"
-            />
+            <div className="relative">
+              <input
+                type="text"
+                value={address}
+                onChange={(e) => handleAddressChange(e.target.value)}
+                onFocus={() => { if (suggestions.length > 0) setSuggestionsOpen(true); }}
+                placeholder="Start typing an address…"
+                autoComplete="off"
+                className={`w-full border rounded-lg px-3.5 py-2.5 pr-8 text-[14px] text-[#0F172A] placeholder:text-[#CBD5E1] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] transition-all ${addressValidated ? "border-[#059669] ring-[#059669]/20" : "border-[#E2E8F0]"}`}
+              />
+              {addressValidated && (
+                <CheckCircle2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#059669]" />
+              )}
+              {loadingSuggestions && !addressValidated && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 border-2 border-[#2563EB] border-t-transparent rounded-full animate-spin" />
+              )}
+            </div>
+            {suggestionsOpen && !loadingSuggestions && (
+              <div className="absolute z-[200] left-0 right-0 mt-1 bg-white border border-[#E2E8F0] rounded-lg shadow-xl overflow-hidden">
+                {suggestions.map((s) => (
+                  <button
+                    key={s.place_id}
+                    type="button"
+                    onMouseDown={() => selectSuggestion(s)}
+                    className="w-full text-left px-3 py-2.5 text-[12px] text-[#0F172A] hover:bg-[#F8FAFC] flex items-start gap-2 transition-colors border-b border-[#F1F5F9] last:border-0"
+                  >
+                    <MapPin size={11} className="text-[#94A3B8] shrink-0 mt-0.5" />
+                    <span className="line-clamp-2">{s.display_name}</span>
+                  </button>
+                ))}
+                {suggestions.length === 0 && (
+                  <div className="px-3 py-2">
+                    <p className="text-[11px] text-[#94A3B8] mb-1.5">No suggestions found.</p>
+                    <button
+                      type="button"
+                      onMouseDown={() => { setAddressValidated(true); setCoords(null); setSuggestionsOpen(false); }}
+                      className="text-[12px] font-semibold text-[#2563EB] hover:underline"
+                    >
+                      Use "{address}" as typed
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div>
