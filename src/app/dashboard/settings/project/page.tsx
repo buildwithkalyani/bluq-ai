@@ -313,11 +313,18 @@ function ContractorsTab({ project, isMock = false, onSettingsUpdated }: { projec
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [newPhoneError, setNewPhoneError] = useState("");
+
+  const isValidPhone = (digits: string) => digits.replace(/\D/g, "").length === 10;
 
   const dirty = JSON.stringify(contractors) !== JSON.stringify(saved);
 
   const handleAdd = () => {
     if (!newName.trim() || !newPhone.trim()) return;
+    if (!isValidPhone(newPhone)) {
+      setNewPhoneError("Please enter a valid 10-digit phone number.");
+      return;
+    }
     const digits = newPhone.trim().replace(/\D/g, "");
     const fullPhone = `${newCountryCode}${digits}`;
     const entry: Contractor = {
@@ -331,6 +338,7 @@ function ContractorsTab({ project, isMock = false, onSettingsUpdated }: { projec
     setNewPhone("");
     setNewCountryCode("+91");
     setNewTrade("Civil");
+    setNewPhoneError("");
     setAdding(false);
   };
 
@@ -416,7 +424,7 @@ function ContractorsTab({ project, isMock = false, onSettingsUpdated }: { projec
               </div>
               <div>
                 <label className="block text-[10px] font-semibold text-[#475569] mb-1">WHATSAPP NUMBER *</label>
-                <div className="flex border border-[#E2E8F0] rounded-md overflow-hidden focus-within:border-[#0969da] focus-within:ring-2 focus-within:ring-[#0969da]/20 bg-white">
+                <div className={`flex border rounded-md overflow-hidden focus-within:ring-2 bg-white ${newPhoneError ? "border-red-400 focus-within:border-red-400 focus-within:ring-red-400/20" : "border-[#E2E8F0] focus-within:border-[#0969da] focus-within:ring-[#0969da]/20"}`}>
                   <select
                     value={newCountryCode}
                     onChange={(e) => setNewCountryCode(e.target.value)}
@@ -428,11 +436,14 @@ function ContractorsTab({ project, isMock = false, onSettingsUpdated }: { projec
                   </select>
                   <input
                     value={newPhone}
-                    onChange={(e) => setNewPhone(e.target.value.replace(/\D/g, ""))}
+                    onChange={(e) => { setNewPhone(e.target.value.replace(/\D/g, "")); setNewPhoneError(""); }}
                     placeholder="98765 43210"
                     className="flex-1 px-2.5 py-1.5 text-xs text-[#0F172A] bg-white outline-none min-w-0"
                   />
                 </div>
+                {newPhoneError && (
+                  <p className="text-red-500 text-[11px] mt-1">{newPhoneError}</p>
+                )}
               </div>
               <div>
                 <label className="block text-[10px] font-semibold text-[#475569] mb-1">TRADE</label>
@@ -448,13 +459,13 @@ function ContractorsTab({ project, isMock = false, onSettingsUpdated }: { projec
             <div className="flex gap-2">
               <button
                 onClick={handleAdd}
-                disabled={!newName.trim() || !newPhone.trim()}
+                disabled={!newName.trim() || !newPhone.trim() || (newPhone.trim().length > 0 && !isValidPhone(newPhone))}
                 className="px-3 py-1.5 text-xs font-semibold text-white bg-[#2563EB] rounded-lg hover:bg-[#2d3d8a] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 Add
               </button>
               <button
-                onClick={() => { setAdding(false); setNewName(""); setNewPhone(""); setNewCountryCode("+91"); setNewTrade("Civil"); }}
+                onClick={() => { setAdding(false); setNewName(""); setNewPhone(""); setNewCountryCode("+91"); setNewTrade("Civil"); setNewPhoneError(""); }}
                 className="px-3 py-1.5 text-xs font-semibold text-[#0F172A] bg-white border border-[#E2E8F0] rounded-lg hover:bg-[#F1F5F9] transition-colors"
               >
                 Cancel
@@ -511,7 +522,11 @@ function ContractorsTab({ project, isMock = false, onSettingsUpdated }: { projec
         )}
         {dirty && (
           <div className="mt-4">
-            <SaveButton onClick={handleSave} loading={saving} dirty={dirty} />
+            <SaveButton
+              onClick={handleSave}
+              loading={saving}
+              dirty={dirty && !(adding && newPhone.trim().length > 0 && !isValidPhone(newPhone))}
+            />
           </div>
         )}
       </Card>

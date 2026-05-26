@@ -1,9 +1,17 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Btn } from "@/components/ui/bluq-ui";
 import { authClient } from "@/lib/auth-client";
+import { MapPin, CheckCircle2 } from "lucide-react";
+
+interface NominatimResult {
+  place_id: number;
+  display_name: string;
+  lat: string;
+  lon: string;
+}
 
 const WORK_AREAS = [
   { id: "excavation",    label: "Excavation & Earthwork" },
@@ -61,6 +69,14 @@ export default function OnboardingPage() {
   const [startDate, setStartDate] = useState(() => ls("ob_startDate") ?? "");
   const [endDate, setEndDate] = useState(() => ls("ob_endDate") ?? "");
   const [projectCode, setProjectCode] = useState(() => ls("ob_projectCode") ?? "");
+  const [addressValidated, setAddressValidated] = useState(false);
+  const [addressCoords, setAddressCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [addressSuggestions, setAddressSuggestions] = useState<NominatimResult[]>([]);
+  const [addressSuggestionsOpen, setAddressSuggestionsOpen] = useState(false);
+  const [addressLoadingSuggestions, setAddressLoadingSuggestions] = useState(false);
+  const addressDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const addressDropdownRef = useRef<HTMLDivElement>(null);
+
   const [inviteEmail, setInviteEmail] = useState("");
   const [invites, setInvites] = useState<string[]>(() => {
     try { return JSON.parse(ls("ob_invites") ?? "[]"); } catch { return []; }
@@ -99,6 +115,49 @@ export default function OnboardingPage() {
       else endDateRef.current.removeAttribute("min");
     }
   }, [startDate]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (addressDropdownRef.current && !addressDropdownRef.current.contains(e.target as Node)) {
+        setAddressSuggestionsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const fetchAddressSuggestions = useCallback(async (query: string) => {
+    if (query.length < 4) { setAddressSuggestions([]); setAddressSuggestionsOpen(false); return; }
+    setAddressLoadingSuggestions(true);
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&addressdetails=0`;
+      const res = await fetch(url, { headers: { "Accept-Language": "en", "User-Agent": "BLUQ-ConstructionPM/1.0" } });
+      const data: NominatimResult[] = await res.json();
+      setAddressSuggestions(data);
+      setAddressSuggestionsOpen(true);
+    } catch {
+      setAddressSuggestions([]);
+      setAddressSuggestionsOpen(true);
+    } finally {
+      setAddressLoadingSuggestions(false);
+    }
+  }, []);
+
+  const handleAddressChange = (val: string) => {
+    setProjectAddress(val);
+    setAddressValidated(false);
+    setAddressCoords(null);
+    if (addressDebounceRef.current) clearTimeout(addressDebounceRef.current);
+    addressDebounceRef.current = setTimeout(() => fetchAddressSuggestions(val), 500);
+  };
+
+  const selectAddressSuggestion = (s: NominatimResult) => {
+    setProjectAddress(s.display_name);
+    setAddressCoords({ lat: parseFloat(s.lat), lng: parseFloat(s.lon) });
+    setAddressValidated(true);
+    setAddressSuggestionsOpen(false);
+    setAddressSuggestions([]);
+  };
 
   // Wait for session then restore step + org data
   useEffect(() => {
@@ -228,6 +287,19 @@ const apiPost = async (path: string, body: unknown) => {
           }
           if (!wsId) throw new Error("No workspace found. Please complete step 1 first.");
           setCreatedWorkspaceId(wsId);
+          let resolvedCoords = addressCoords;
+          if (!resolvedCoords && projectAddress.trim().length >= 4) {
+            try {
+              const geoRes = await fetch(
+                `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(projectAddress.trim())}&format=json&limit=1`,
+                { headers: { "Accept-Language": "en", "User-Agent": "BLUQ-ConstructionPM/1.0" } }
+              );
+              const geoData: NominatimResult[] = await geoRes.json();
+              if (geoData[0]) resolvedCoords = { lat: parseFloat(geoData[0].lat), lng: parseFloat(geoData[0].lon) };
+            } catch { /* proceed without coords */ }
+          }
+          const settingsJson = resolvedCoords ? { lat: resolvedCoords.lat, lng: resolvedCoords.lng } : undefined;
+
           const project = await apiPost("/projects", {
             workspaceId: wsId,
             projectName: projectName.trim(),
@@ -238,6 +310,7 @@ const apiPost = async (path: string, body: unknown) => {
             startDate: startDate || undefined,
             endDate: endDate || undefined,
             status: "active",
+            ...(settingsJson ? { settingsJson } : {}),
           });
           if (project?.id) {
             setCreatedProjectId(project.id);
@@ -504,9 +577,53 @@ const apiPost = async (path: string, body: unknown) => {
             <FormField label="Project Name *">
               <input type="text" placeholder="Al Nakheel Tower" value={projectName} onChange={(e) => setProjectName(e.target.value)} className="form-input" />
             </FormField>
-            <FormField label="Project Address *">
-              <input type="text" placeholder="Dubai Marina, Dubai, UAE" value={projectAddress} onChange={(e) => setProjectAddress(e.target.value)} className="form-input" />
-            </FormField>
+            <div ref={addressDropdownRef} className="relative mb-3.5">
+              <label className="block text-xs font-semibold text-[#57606a] mb-1">Project Address *</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Start typing an address…"
+                  value={projectAddress}
+                  onChange={(e) => handleAddressChange(e.target.value)}
+                  onFocus={() => { if (addressSuggestions.length > 0) setAddressSuggestionsOpen(true); }}
+                  autoComplete="off"
+                  className={`form-input pr-8 ${addressValidated ? "border-[#059669] ring-2 ring-[#059669]/20" : ""}`}
+                />
+                {addressValidated && (
+                  <CheckCircle2 size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#059669]" />
+                )}
+                {addressLoadingSuggestions && !addressValidated && (
+                  <div className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 border-2 border-[#3A4EA2] border-t-transparent rounded-full animate-spin" />
+                )}
+              </div>
+              {addressSuggestionsOpen && !addressLoadingSuggestions && (
+                <div className="absolute z-[200] left-0 right-0 mt-1 bg-white border border-[#D0D7DE] rounded-lg shadow-xl overflow-hidden">
+                  {addressSuggestions.map((s) => (
+                    <button
+                      key={s.place_id}
+                      type="button"
+                      onMouseDown={() => selectAddressSuggestion(s)}
+                      className="w-full text-left px-3 py-2.5 text-[12px] text-[#24292f] hover:bg-[#f6f8fa] flex items-start gap-2 transition-colors border-b border-[#F1F5F9] last:border-0"
+                    >
+                      <MapPin size={11} className="text-[#8C959F] shrink-0 mt-0.5" />
+                      <span className="line-clamp-2">{s.display_name}</span>
+                    </button>
+                  ))}
+                  {addressSuggestions.length === 0 && (
+                    <div className="px-3 py-2 border-b border-[#F1F5F9]">
+                      <p className="text-[11px] text-[#8C959F] mb-1.5">No suggestions found for this address.</p>
+                      <button
+                        type="button"
+                        onMouseDown={() => { setAddressValidated(true); setAddressCoords(null); setAddressSuggestionsOpen(false); }}
+                        className="text-[12px] font-semibold text-[#3A4EA2] hover:underline"
+                      >
+                        Use &quot;{projectAddress}&quot; as typed
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
             <div className="flex gap-3">
               <FormField label="Stage *" className="flex-1">
                 <select value={projectStage} onChange={(e) => setProjectStage(e.target.value)} className="form-input">
@@ -753,6 +870,7 @@ const apiPost = async (path: string, body: unknown) => {
               (step === 1 && (
                 !projectName.trim() ||
                 !projectAddress.trim() ||
+                !addressValidated ||
                 !startDate ||
                 !endDate ||
                 !projectCode.trim()

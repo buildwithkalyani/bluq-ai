@@ -24,11 +24,22 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [submitted, setSubmitted] = useState(false);
-
+  const [phoneError, setPhoneError] = useState("");
+  const isValidPhone = (number: string) => {
+  const digitsOnly = number.replace(/\D/g, "");
+  return digitsOnly.length === 10;
+};
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError("");
+    if (phone && !isValidPhone(phone)) {
+      setPhoneError("Please enter a valid 10-digit phone number.");
+      setLoading(false);
+      return;
+    }
+    setPhoneError("");
+
 
     try {
       const res = await fetch(`/api/demo`, {
@@ -50,6 +61,7 @@ export default function SignupPage() {
       setSubmitted(true);
     } catch (err: any) {
       setError(err.message || "Something went wrong. Please try again.");
+      
     } finally {
       setLoading(false);
     }
@@ -139,11 +151,17 @@ export default function SignupPage() {
                     type="tel"
                     placeholder="98765 43210"
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
+                    onChange={(e) => {
+  setPhone(e.target.value);
+  if (phoneError) setPhoneError("");
+}}
                     className="flex-1 bg-white border border-[#D0D7DE] rounded-md px-3 py-2 text-[13px] text-[#24292f] placeholder:text-[#8C959F] focus:outline-none focus:ring-2 focus:ring-[#3A4EA2] focus:border-transparent"
                   />
                 </div>
               </div>
+              {phoneError && (
+  <p className="text-red-500 text-[11px] mt-1">{phoneError}</p>
+)}
 
               <div className="mb-4">
                 <label className="block text-xs font-semibold text-[#57606a] mb-1">
