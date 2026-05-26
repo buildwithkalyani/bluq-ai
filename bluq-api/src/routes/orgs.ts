@@ -28,19 +28,21 @@ export async function orgsRoute(app: FastifyInstance) {
         return reply.status(400).send({ error: "name is required" });
       }
 
-      // Create the org
-      const [org] = await db
-        .insert(orgs)
-        .values({ name: name.trim() })
-        .returning();
+      const org = await db.transaction(async (tx) => {
+        const [newOrg] = await tx
+          .insert(orgs)
+          .values({ name: name.trim() })
+          .returning();
 
-      // Add creator as admin (active, no invite flow)
-      await db.insert(workspaceMembers).values({
-        workspaceId: org.id,
-        userId: request.userId,
-        role: "admin",
-        status: "active",
-        joinedAt: new Date().toISOString(),
+        await tx.insert(workspaceMembers).values({
+          workspaceId: newOrg.id,
+          userId: request.userId,
+          role: "admin",
+          status: "active",
+          joinedAt: new Date().toISOString(),
+        });
+
+        return newOrg;
       });
 
       return reply.status(201).send(org);
