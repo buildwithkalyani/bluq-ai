@@ -236,6 +236,45 @@ export async function documentsRoute(app: FastifyInstance) {
   });
 
   // =========================================================================
+  // PATCH /documents/:id — update approval status
+  // =========================================================================
+  app.patch("/documents/:id", { preHandler: verifySession }, async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const body = request.body as { approvalStatus: string; workspaceId: string };
+
+      if (!UUID_REGEX.test(id)) {
+        return reply.status(400).send({ error: "id must be a valid UUID" });
+      }
+      if (!body.workspaceId || !UUID_REGEX.test(body.workspaceId)) {
+        return reply.status(400).send({ error: "workspaceId required" });
+      }
+      if (!["approved", "rejected", "pending"].includes(body.approvalStatus)) {
+        return reply.status(400).send({ error: "approvalStatus must be approved, rejected, or pending" });
+      }
+
+      const [updated] = await db
+        .update(documents)
+        .set({
+          approvalStatus: body.approvalStatus,
+          approvedBy: request.userId ?? null,
+          approvedAt: new Date().toISOString(),
+        })
+        .where(and(eq(documents.id, id), eq(documents.workspaceId, body.workspaceId)))
+        .returning();
+
+      if (!updated) {
+        return reply.status(404).send({ error: "Document not found" });
+      }
+
+      return updated;
+    } catch (err: any) {
+      console.error("PATCH /documents/:id error:", err.message);
+      return reply.status(500).send({ error: "Failed to update document" });
+    }
+  });
+
+  // =========================================================================
   // DELETE /documents/:id — remove a document reference
   // =========================================================================
   app.delete("/documents/:id", { preHandler: verifySession }, async (request, reply) => {
