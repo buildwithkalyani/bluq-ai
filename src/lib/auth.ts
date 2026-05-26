@@ -62,6 +62,7 @@ export const auth = betterAuth({
   },
   plugins: [
     emailOTP({
+      disableSignUp: true,
       sendVerificationOTP: async ({ email, otp }) => {
         const apiKey = process.env.RESEND_API_KEY;
         const from = process.env.RESEND_FROM_EMAIL || "BluQ <no-reply@bluq.ai>";
