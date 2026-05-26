@@ -527,6 +527,9 @@ export interface BackendDocument {
   folder: string | null;
   description: string | null;
   uploadedBy: string | null;
+  approvalStatus: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
   createdAt: string;
 }
 
@@ -871,6 +874,14 @@ export async function registerDocument(data: {
   uploadedBy?: string;
 }): Promise<BackendDocument> {
   return apiPost<BackendDocument>("/documents", data);
+}
+
+export async function updateDocumentApproval(
+  id: string,
+  workspaceId: string,
+  approvalStatus: "approved" | "rejected" | "pending",
+): Promise<BackendDocument> {
+  return apiPatch<BackendDocument>(`/documents/${id}`, { approvalStatus, workspaceId });
 }
 
 // ---------------------------------------------------------------------------
