@@ -764,7 +764,7 @@ function DonutRing({ pct, size = 20, color = "#2563EB" }: { pct: number; size?: 
   );
 }
 
-function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete, defaultPhase, defaultArea }: any) {
+function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete, defaultPhase, defaultArea, projectStartDate, projectEndDate }: any) {
   const emptyForm = { name: "", phase: "", contractor: "", space: "", startDate: "", endDate: "", status: "notStarted" as StatusKey, pct: 0 };
   const [formData, setFormData] = useState(emptyForm);
   const [selectedPreds, setSelectedPreds] = useState<{id: string, type: string}[]>([]);
@@ -806,6 +806,8 @@ function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete,
     if (!f.startDate)      return setError("Start date is required.");
     if (!f.endDate)        return setError("End date is required.");
     if (f.endDate < f.startDate) return setError("End date must be after start date.");
+    if (projectStartDate && f.startDate < projectStartDate) return setError(`Start date cannot be before project start (${projectStartDate}).`);
+    if (projectEndDate && f.endDate > projectEndDate) return setError(`End date cannot be after project end (${projectEndDate}).`);
     onSave(formData, selectedPreds);
     onClose();
   };
@@ -860,11 +862,11 @@ function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete,
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Start date *</label>
-              <input type="date" value={f.startDate} max={f.endDate || undefined} onChange={e => set("startDate", e.target.value)} className={inputCls + " text-[#0F172A]"} />
+              <input type="date" value={f.startDate} min={projectStartDate || undefined} max={f.endDate || projectEndDate || undefined} onChange={e => set("startDate", e.target.value)} className={inputCls + " text-[#0F172A]"} />
             </div>
             <div>
               <label className={labelCls}>End date *</label>
-              <input type="date" value={f.endDate} min={f.startDate || undefined} onChange={e => set("endDate", e.target.value)} className={inputCls + " text-[#0F172A]"} />
+              <input type="date" value={f.endDate} min={f.startDate || projectStartDate || undefined} max={projectEndDate || undefined} onChange={e => set("endDate", e.target.value)} className={inputCls + " text-[#0F172A]"} />
             </div>
           </div>
 
@@ -984,9 +986,11 @@ function GanttChartContent() {
   const urlWs = searchParams.get("workspaceId");
   const workspaceId = (urlWs && urlWs !== "null") ? urlWs : ctxWorkspaceId;
   const urlProjectEndDate = searchParams.get("projectEndDate") ?? null;
+  const urlProjectStartDate = searchParams.get("projectStartDate") ?? null;
   const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
 
   const [projectEndDate, setProjectEndDate] = useState<string | null>(urlProjectEndDate);
+  const [projectStartDate, setProjectStartDate] = useState<string | null>(urlProjectStartDate);
   const [tasks, setTasks] = useState<ScheduleTask[]>([]);
   const [deps, setDeps] = useState<TaskDependency[]>([]);
   const [depIds, setDepIds] = useState<Record<string, string>>({});
@@ -1004,9 +1008,9 @@ function GanttChartContent() {
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Resolve project end date: URL param → projects localStorage cache → API
+  // Resolve project start/end dates: URL param → projects localStorage cache → API
   useEffect(() => {
-    if (urlProjectEndDate) return; // already have it
+    if (urlProjectEndDate && urlProjectStartDate) return; // already have both
     // Try localStorage cache first (written by overview page)
     if (workspaceId) {
       try {
@@ -1014,17 +1018,24 @@ function GanttChartContent() {
         if (raw) {
           const cache = JSON.parse(raw);
           const proj = cache?.data?.find((p: any) => String(p.id) === projectIdParam);
-          if (proj?.endDate) { setProjectEndDate(proj.endDate); return; }
+          if (proj?.endDate && proj?.startDate) {
+            if (!urlProjectEndDate) setProjectEndDate(proj.endDate);
+            if (!urlProjectStartDate) setProjectStartDate(proj.startDate);
+            return;
+          }
         }
       } catch {}
     }
     // Fall back to API
     if (real) {
       fetchProject(projectIdParam)
-        .then(p => { if (p.endDate) setProjectEndDate(p.endDate); })
+        .then(p => {
+          if (p.endDate && !urlProjectEndDate) setProjectEndDate(p.endDate);
+          if (p.startDate && !urlProjectStartDate) setProjectStartDate(p.startDate);
+        })
         .catch(() => {});
     }
-  }, [real, projectIdParam, workspaceId, urlProjectEndDate]);
+  }, [real, projectIdParam, workspaceId, urlProjectEndDate, urlProjectStartDate]);
 
   useEffect(() => {
     if (real) {
@@ -1615,15 +1626,23 @@ const handleSaveModal = (data: any, newPreds: any) => {
               <span className="text-[14px] font-bold text-[#2563EB] tabular-nums">{headerStats.overall}%</span>
             </div>
             <div className="w-px h-4 bg-[#E2E8F0]" />
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-semibold text-[#94A3B8] uppercase tracking-wide">
-                {tasks.filter(t => !t.parentTaskId).length > 0 ? "Projected Handover" : "Planned Handover"}
-              </span>
-              <span className="text-[14px] font-bold text-[#0F172A]">
-                {headerStats.projectedEnd
-                  ? new Date(headerStats.projectedEnd).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })
-                  : "—"}
-              </span>
+            <div className="flex flex-col items-end gap-0.5">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-semibold text-[#94A3B8] uppercase tracking-wide">
+                  {tasks.filter(t => !t.parentTaskId).length > 0 ? "Projected Handover" : "Planned Handover"}
+                </span>
+                <span className="text-[14px] font-bold text-[#0F172A]">
+                  {headerStats.projectedEnd
+                    ? new Date(headerStats.projectedEnd).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })
+                    : "—"}
+                </span>
+              </div>
+              {headerStats.projectedEnd && projectEndDate && (() => {
+                const diff = diffDays(projectEndDate, headerStats.projectedEnd);
+                if (diff > 0) return <span className="text-[11px] font-semibold text-[#DC2626]">+{diff} days behind</span>;
+                if (diff < 0) return <span className="text-[11px] font-semibold text-[#059669]">{diff} days ahead</span>;
+                return <span className="text-[11px] font-semibold text-[#94A3B8]">On track</span>;
+              })()}
             </div>
           </div>
         </div>
@@ -2130,7 +2149,7 @@ const handleSaveModal = (data: any, newPreds: any) => {
       )}
 
       {/* Modal */}
-      <TaskModal isOpen={modalConfig.isOpen} mode={modalConfig.mode} task={tasks.find(t => t.id === modalConfig.taskId)} tasks={filteredTasks} deps={deps} defaultPhase={modalConfig.defaultPhase} defaultArea={modalConfig.defaultArea} onClose={() => setModalConfig({ ...modalConfig, isOpen: false })} onSave={handleSaveModal} onDelete={handleDeleteTask} />
+      <TaskModal isOpen={modalConfig.isOpen} mode={modalConfig.mode} task={tasks.find(t => t.id === modalConfig.taskId)} tasks={filteredTasks} deps={deps} defaultPhase={modalConfig.defaultPhase} defaultArea={modalConfig.defaultArea} projectStartDate={projectStartDate} projectEndDate={projectEndDate} onClose={() => setModalConfig({ ...modalConfig, isOpen: false })} onSave={handleSaveModal} onDelete={handleDeleteTask} />
     </div>
   );
 }
