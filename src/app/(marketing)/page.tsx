@@ -417,7 +417,7 @@ export default function Home() {
             </div>
           </div>
           <div className="n-footer-bottom">
-            <span className="n-footer-copy">© 2026 BluQ Technologies. Building in public.</span>
+            <span className="n-footer-copy">© 2026 BluQ Technologies Pvt Ltd. Building in public.</span>
             <div className="n-footer-legal">
               <a href="#">Privacy</a>
               <a href="#">Terms</a>
