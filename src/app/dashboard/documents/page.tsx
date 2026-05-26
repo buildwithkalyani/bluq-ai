@@ -12,7 +12,7 @@ import { useSearchParams } from "next/navigation";
 import { useWorkspace } from "@/context/workspace";
 import {
   fetchProjects, fetchDocuments, isRealProject, registerDocument,
-  type BackendProject,
+  updateDocumentApproval, type BackendProject,
 } from "@/lib/api-client";
 import { uploadFileToStorage } from "@/lib/supabase-storage";
 
@@ -20,6 +20,7 @@ type ApprovalStatus = "pending" | "approved" | "rejected";
 
 interface FileRecord {
   id: number;
+  backendId?: string;
   folderId: string;
   name: string;
   date: string;
@@ -242,10 +243,11 @@ function DocumentsPageContent() {
           docType: d.fileType ?? "Other",
           format: d.fileName.split(".").pop()?.toUpperCase() ?? "—",
           uploadedBy: d.uploadedBy ?? "Unknown",
-          approvedBy: null,
-          approvalStatus: "pending" as ApprovalStatus,
+          approvedBy: d.approvedBy ?? null,
+          approvalStatus: (d.approvalStatus ?? "pending") as ApprovalStatus,
           ver: "v1",
           url: d.fileUrl,
+          backendId: d.id,
         })));
       }).catch(console.error);
     }
@@ -301,14 +303,30 @@ function DocumentsPageContent() {
 
   const handleApprove = (id: number) => {
     const f = files.find(x => x.id === id);
+    // Optimistic update
     setFiles(prev => prev.map(x => x.id === id ? { ...x, approvalStatus: "approved", approvedBy: "Current User" } : x));
     if (f) addAudit("approved", f.name, f.folderId, "Current User");
+    // Persist to backend
+    if (f?.backendId && workspaceId) {
+      updateDocumentApproval(f.backendId, workspaceId, "approved").catch(() => {
+        // Revert on failure
+        setFiles(prev => prev.map(x => x.id === id ? { ...x, approvalStatus: "pending", approvedBy: null } : x));
+      });
+    }
   };
 
   const handleReject = (id: number) => {
     const f = files.find(x => x.id === id);
+    // Optimistic update
     setFiles(prev => prev.map(x => x.id === id ? { ...x, approvalStatus: "rejected", approvedBy: "Current User" } : x));
     if (f) addAudit("rejected", f.name, f.folderId, "Current User");
+    // Persist to backend
+    if (f?.backendId && workspaceId) {
+      updateDocumentApproval(f.backendId, workspaceId, "rejected").catch(() => {
+        // Revert on failure
+        setFiles(prev => prev.map(x => x.id === id ? { ...x, approvalStatus: "pending", approvedBy: null } : x));
+      });
+    }
   };
 
   const openUploadModal = () => {
@@ -391,7 +409,7 @@ function DocumentsPageContent() {
       });
       const uploader = saved.uploadedBy ?? "Current User";
       setFiles(prev => [{
-        id: Date.now(), folderId: activeFolderId, name: saved.fileName,
+        id: Date.now(), backendId: saved.id, folderId: activeFolderId, name: saved.fileName,
         date: new Date(saved.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
         docType: saved.fileType ?? uploadDocType, format: fmt,
         size: uploadFile.size > 1024 * 1024
@@ -469,6 +487,28 @@ function DocumentsPageContent() {
     { label: "Status",       key: "approvalStatus", width: "160px" },
     { label: "",             key: null,             width: "52px"  },
   ];
+
+  if (!wsLoading && !isDesignMode && !activeProjectId && backendProjects.length === 0 && workspaceId) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full bg-[#F8FAFC]">
+        <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-10 flex flex-col items-center max-w-sm text-center">
+          <div className="w-14 h-14 rounded-2xl bg-[#EFF6FF] flex items-center justify-center mb-4">
+            <FileText size={26} className="text-[#2563EB]" />
+          </div>
+          <div className="text-[16px] font-bold text-[#0F172A] mb-2">No project selected</div>
+          <p className="text-[13px] text-[#64748B] mb-6">
+            Documents are organised per project. Create a project first or select one from the top menu.
+          </p>
+          <a
+            href="/dashboard/overview"
+            className="bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg px-5 py-2.5 text-[13px] font-bold transition-colors"
+          >
+            Go to Overview
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 overflow-y-auto h-full bg-[#F8FAFC]" onClick={() => { setMenuOpenId(null); setFolderMenuOpenId(null); }}>
