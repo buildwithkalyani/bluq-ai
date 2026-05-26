@@ -193,7 +193,7 @@ function OverviewContent() {
         <div className="animate-pulse space-y-4">
           <div className="h-6 w-48 bg-[#E2E8F0] rounded" />
           <div className="flex gap-3">
-            {[1, 2, 3, 4].map((i) => (
+            {[1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="flex-1 h-20 bg-[#E2E8F0] rounded-lg" />
             ))}
           </div>
@@ -282,6 +282,12 @@ function OverviewContent() {
               value={projects.filter((p) => p.status === "delayed").length}
               color="#DC2626"
               onClick={() => toggleStatusFilter("delayed")}
+            />
+            <MetricCard
+              label="Not Started"
+              value={projects.filter((p) => p.status === "notStarted").length}
+              color="#6366F1"
+              onClick={() => toggleStatusFilter("notStarted")}
             />
           </div>
 
@@ -478,7 +484,7 @@ function OverviewSkeleton() {
     <div className="p-5 animate-pulse space-y-4">
       <div className="h-6 w-48 bg-[#E2E8F0] rounded" />
       <div className="flex gap-3">
-        {[1, 2, 3, 4].map((i) => <div key={i} className="flex-1 h-20 bg-[#E2E8F0] rounded-lg" />)}
+        {[1, 2, 3, 4, 5].map((i) => <div key={i} className="flex-1 h-20 bg-[#E2E8F0] rounded-lg" />)}
       </div>
       <div className="grid grid-cols-2 gap-3.5">
         {[1, 2, 3, 4].map((i) => <div key={i} className="h-48 bg-[#E2E8F0] rounded-lg" />)}
