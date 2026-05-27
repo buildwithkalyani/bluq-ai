@@ -1277,7 +1277,7 @@ function RealImport({
                 return (
                   <div key={i} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${entry.status === "error" ? "bg-[#FFFBEB] border-[#FCD34D]" : "bg-[#F8FAFC] border-[#E2E8F0]"}`}>
                     {entry.status === "done" ? <CheckCircle size={12} className="text-[#059669] shrink-0" />
-                      : entry.status === "error" ? <AlertTriangle size={12} className="text-[#D97706] shrink-0" title={entry.error} />
+                      : entry.status === "error" ? <AlertTriangle size={12} className="text-[#D97706] shrink-0" />
                       : entry.status === "uploading" ? <Loader size={12} className="animate-spin text-[#4F46E5] shrink-0" />
                       : <FileText size={12} className="text-[#94A3B8] shrink-0" />}
                     <div className="flex-1 min-w-0">
