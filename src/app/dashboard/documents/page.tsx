@@ -214,6 +214,7 @@ function DocumentsPageContent() {
   const [folders, setFolders] = useState<Folder[]>(INITIAL_FOLDERS);
   const [addingFolder, setAddingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
+  const [newFolderError, setNewFolderError] = useState("");
   const [folderMenuOpenId, setFolderMenuOpenId] = useState<string | null>(null);
   const [confirmDeleteFolderId, setConfirmDeleteFolderId] = useState<string | null>(null);
 
@@ -475,11 +476,17 @@ function DocumentsPageContent() {
   const handleAddFolder = () => {
     const name = newFolderName.trim();
     if (!name) return;
+    const duplicate = folders.some(f => f.name.toLowerCase() === name.toLowerCase());
+    if (duplicate) {
+      setNewFolderError("A folder with this name already exists.");
+      return;
+    }
     const id = name.toLowerCase().replace(/\s+/g, "_") + "_" + Date.now();
     const palette = CUSTOM_FOLDER_PALETTE[(folders.length - INITIAL_FOLDERS.length) % CUSTOM_FOLDER_PALETTE.length];
     setFolders(prev => [...prev, { id, name, description: "Custom folder", Icon: FolderOpen, ...palette }]);
     setActiveFolderId(id);
     setNewFolderName("");
+    setNewFolderError("");
     setAddingFolder(false);
   };
 
@@ -659,11 +666,14 @@ function DocumentsPageContent() {
               <input
                 autoFocus
                 value={newFolderName}
-                onChange={e => setNewFolderName(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter") handleAddFolder(); if (e.key === "Escape") { setAddingFolder(false); setNewFolderName(""); } }}
+                onChange={e => { setNewFolderName(e.target.value); setNewFolderError(""); }}
+                onKeyDown={e => { if (e.key === "Enter") handleAddFolder(); if (e.key === "Escape") { setAddingFolder(false); setNewFolderName(""); setNewFolderError(""); } }}
                 placeholder="Folder name"
-                className="text-[13px] border border-[#BFDBFE] rounded-lg px-2 py-1.5 outline-none focus:border-[#2563EB] bg-white w-full"
+                className={`text-[13px] border rounded-lg px-2 py-1.5 outline-none focus:border-[#2563EB] bg-white w-full ${newFolderError ? "border-red-400" : "border-[#BFDBFE]"}`}
               />
+              {newFolderError && (
+                <p className="text-red-500 text-[11px] -mt-1">{newFolderError}</p>
+              )}
               <div className="flex gap-1.5">
                 <button
                   onClick={handleAddFolder}
@@ -674,7 +684,7 @@ function DocumentsPageContent() {
                   Create
                 </button>
                 <button
-                  onClick={() => { setAddingFolder(false); setNewFolderName(""); }}
+                  onClick={() => { setAddingFolder(false); setNewFolderName(""); setNewFolderError(""); }}
                   className="flex-1 py-1 text-[12px] font-bold text-[#64748B] border border-[#E2E8F0] rounded-lg hover:bg-[#F1F5F9]"
                 >
                   Cancel
