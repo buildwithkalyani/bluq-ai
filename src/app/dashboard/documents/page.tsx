@@ -86,10 +86,11 @@ const FOLDER_DOC_TYPES: Record<string, string[]> = {
 };
 
 const INITIAL_FOLDERS: Folder[] = [
-  { id: "drawings", name: "Drawings",  description: "Architectural, Structural, MEP", Icon: Ruler,      color: "#2563EB", bg: "#EFF6FF", isBuiltin: true },
-  { id: "reports",  name: "Reports",   description: "Progress, Geo, Environmental",   Icon: FileText,   color: "#7C3AED", bg: "#F5F3FF", isBuiltin: true },
-  { id: "permits",  name: "Permits",   description: "Building, NOC, Safety",           Icon: ScrollText, color: "#0891B2", bg: "#ECFEFF", isBuiltin: true },
-  { id: "boqs",     name: "BOQs",      description: "Master, Civil, MEP, Structural",  Icon: BarChart2,  color: "#059669", bg: "#ECFDF5", isBuiltin: true },
+  { id: "drawings",  name: "Drawings",  description: "Architectural, Structural, MEP", Icon: Ruler,      color: "#2563EB", bg: "#EFF6FF", isBuiltin: true },
+  { id: "reports",   name: "Reports",   description: "Progress, Geo, Environmental",   Icon: FileText,   color: "#7C3AED", bg: "#F5F3FF", isBuiltin: true },
+  { id: "permits",   name: "Permits",   description: "Building, NOC, Safety",           Icon: ScrollText, color: "#0891B2", bg: "#ECFEFF", isBuiltin: true },
+  { id: "boqs",      name: "BOQs",      description: "Master, Civil, MEP, Structural",  Icon: BarChart2,  color: "#059669", bg: "#ECFDF5", isBuiltin: true },
+  { id: "schedules", name: "Schedules", description: "AI-generated schedule source docs", Icon: Archive, color: "#4F46E5", bg: "#EEF2FF", isBuiltin: true },
 ];
 
 const CUSTOM_FOLDER_PALETTE: Array<{ color: string; bg: string }> = [
@@ -172,6 +173,7 @@ function DocumentsPageContent() {
   const projectIdParam = searchParams.get("projectId") ?? "0";
   const urlWorkspaceId = searchParams.get("workspaceId");
   const workspaceId = urlWorkspaceId ?? ctxWorkspaceId;
+  const folderParam = searchParams.get("folder");
 
   const [backendProjects, setBackendProjects] = useState<BackendProject[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(
@@ -184,7 +186,13 @@ function DocumentsPageContent() {
 
   const real = !isDesignMode && isRealProject(activeProjectId ?? "") && !!workspaceId;
   const [files, setFiles] = useState<FileRecord[]>(isDesignMode ? INITIAL_FILES : []);
-  const [activeFolderId, setActiveFolderId] = useState<string>("drawings");
+  const [activeFolderId, setActiveFolderId] = useState<string>(() => {
+    if (!folderParam) return "drawings";
+    const normalized = folderParam.toLowerCase();
+    if (normalized.startsWith("schedules")) return "schedules";
+    const known = ["drawings", "reports", "permits", "boqs", "schedules"];
+    return known.includes(normalized) ? normalized : "drawings";
+  });
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: null, direction: "asc" });
 
@@ -237,7 +245,11 @@ function DocumentsPageContent() {
       fetchDocuments(activeProjectId, workspaceId).then(docs => {
         setFiles(docs.map((d, i) => ({
           id: i + 1,
-          folderId: d.folder ?? "drawings",
+          folderId: (() => {
+            const f = d.folder ?? "drawings";
+            if (f.toLowerCase().startsWith("schedules")) return "schedules";
+            return f;
+          })(),
           name: d.fileName,
           date: new Date(d.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
           docType: d.fileType ?? "Other",
