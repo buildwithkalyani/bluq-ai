@@ -411,6 +411,9 @@ export const documents = pgTable("documents", {
 	fileSize: integer("file_size"),
 	version: integer().default(1),
 	description: text(),
+	approvalStatus: text("approval_status").default("pending").notNull(),
+	approvedBy: uuid("approved_by"),
+	approvedAt: timestamp("approved_at", { withTimezone: true, mode: 'string' }),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 }, (table) => [
 	index("idx_docs_folder").using("btree", table.projectId.asc().nullsLast().op("text_ops"), table.folder.asc().nullsLast().op("uuid_ops")),

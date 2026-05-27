@@ -650,7 +650,7 @@ function ListViewPageContent() {
                   <label className="block text-[11px] font-bold text-[#475569] mb-1.5 uppercase tracking-wider">Start Date *</label>
                   <input type="date" value={newTask.startDate}
                     min={projectDates.startDate || undefined}
-                    max={newTask.endDate || projectDates.endDate || undefined}
+                    max={newTask.endDate || undefined}
                     onChange={e => setNewTask({ ...newTask, startDate: e.target.value })}
                     className="w-full bg-white border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#2563EB] text-[#0F172A]" />
                 </div>
@@ -658,7 +658,6 @@ function ListViewPageContent() {
                   <label className="block text-[11px] font-bold text-[#475569] mb-1.5 uppercase tracking-wider">End Date *</label>
                   <input type="date" value={newTask.endDate}
                     min={newTask.startDate || projectDates.startDate || undefined}
-                    max={projectDates.endDate || undefined}
                     onChange={e => setNewTask({ ...newTask, endDate: e.target.value })}
                     className="w-full bg-white border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#2563EB] text-[#0F172A]" />
                 </div>
@@ -704,7 +703,6 @@ function ListViewPageContent() {
                   if (!newTask.startDate || !newTask.endDate) return setModalError("Start and end dates are required.");
                   if (newTask.endDate < newTask.startDate) return setModalError("End date must be after start date.");
                   if (projectDates.startDate && newTask.startDate < projectDates.startDate) return setModalError(`Start date cannot be before project start (${projectDates.startDate}).`);
-                  if (projectDates.endDate && newTask.endDate > projectDates.endDate) return setModalError(`End date cannot be after project end (${projectDates.endDate}).`);
 
                   const days = Math.round((new Date(newTask.endDate).getTime() - new Date(newTask.startDate).getTime()) / 86400000);
 

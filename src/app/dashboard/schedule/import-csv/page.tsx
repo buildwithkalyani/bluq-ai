@@ -347,11 +347,15 @@ function ImportMethodPicker({ projectName, onSelect, onBack }: { projectName: st
 
 function ScheduleLanding({
   projectName,
+  projectId,
+  workspaceId,
   versions,
   loading,
   onSetup,
 }: {
   projectName: string;
+  projectId: string;
+  workspaceId: string;
   versions: ScheduleVersion[];
   loading: boolean;
   onSetup: () => void;
@@ -456,7 +460,7 @@ function ScheduleLanding({
               </div>
               {activeBaseline.generatedBy === "ai" ? (
                 <button
-                  onClick={() => router.push("/dashboard/documents?folder=Schedules")}
+                  onClick={() => router.push(`/dashboard/documents?folder=Schedules&projectId=${projectId}&workspaceId=${workspaceId}`)}
                   className="text-[13px] font-semibold text-[#2563EB] hover:underline cursor-pointer text-left"
                 >
                   View source documents
@@ -526,7 +530,7 @@ function ScheduleLanding({
               <div className="truncate pr-2">
                 {v.generatedBy === "ai" ? (
                   <button
-                    onClick={() => router.push("/dashboard/documents?folder=Schedules")}
+                    onClick={() => router.push(`/dashboard/documents?folder=Schedules&projectId=${projectId}&workspaceId=${workspaceId}`)}
                     className="text-[#2563EB] hover:underline font-medium cursor-pointer text-left text-[12px]"
                   >
                     View docs
@@ -557,7 +561,7 @@ function ScheduleLanding({
           <FolderOpen size={14} className="text-[#64748B] shrink-0" />
           <span className="text-[12px] text-[#475569]">Source files saved in</span>
           <button
-            onClick={() => router.push("/dashboard/documents")}
+            onClick={() => router.push(`/dashboard/documents?folder=Schedules&projectId=${projectId}&workspaceId=${workspaceId}`)}
             className="text-[12px] font-semibold text-[#2563EB] hover:underline cursor-pointer"
           >
             Documents / Schedules
@@ -1271,12 +1275,17 @@ function RealImport({
               {files.map((entry, i) => {
                 const cat = DOC_CATEGORIES.find(c => c.id === entry.docCategory);
                 return (
-                  <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0]">
+                  <div key={i} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${entry.status === "error" ? "bg-[#FFFBEB] border-[#FCD34D]" : "bg-[#F8FAFC] border-[#E2E8F0]"}`}>
                     {entry.status === "done" ? <CheckCircle size={12} className="text-[#059669] shrink-0" />
-                      : entry.status === "error" ? <X size={12} className="text-[#DC2626] shrink-0" />
+                      : entry.status === "error" ? <AlertTriangle size={12} className="text-[#D97706] shrink-0" />
                       : entry.status === "uploading" ? <Loader size={12} className="animate-spin text-[#4F46E5] shrink-0" />
                       : <FileText size={12} className="text-[#94A3B8] shrink-0" />}
-                    <span className="flex-1 text-[11px] text-[#0F172A] truncate">{entry.file.name}</span>
+                    <div className="flex-1 min-w-0">
+                      <span className="block text-[11px] text-[#0F172A] truncate">{entry.file.name}</span>
+                      {entry.status === "error" && entry.error && (
+                        <span className="block text-[10px] text-[#D97706] truncate">{entry.error}</span>
+                      )}
+                    </div>
                     {entry.status === "uploading" && (
                       <div className="w-16 h-1 bg-[#E2E8F0] rounded-full overflow-hidden shrink-0">
                         <div className="h-full bg-[#4F46E5] rounded-full" style={{ width: `${entry.progress}%` }} />
@@ -2087,6 +2096,8 @@ function ImportCSVContent() {
     return (
       <ScheduleLanding
         projectName={projectName}
+        projectId={projectIdParam}
+        workspaceId={workspaceId ?? ""}
         versions={versions ?? []}
         loading={versionsLoading}
         onSetup={() => setShowNewBaselinePicker(true)}
