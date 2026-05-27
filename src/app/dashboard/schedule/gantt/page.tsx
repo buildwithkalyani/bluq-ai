@@ -807,7 +807,6 @@ function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete,
     if (!f.endDate)        return setError("End date is required.");
     if (f.endDate < f.startDate) return setError("End date must be after start date.");
     if (projectStartDate && f.startDate < projectStartDate) return setError(`Start date cannot be before project start (${projectStartDate}).`);
-    if (projectEndDate && f.endDate > projectEndDate) return setError(`End date cannot be after project end (${projectEndDate}).`);
     onSave(formData, selectedPreds);
     onClose();
   };
@@ -862,11 +861,11 @@ function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete,
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Start date *</label>
-              <input type="date" value={f.startDate} min={projectStartDate || undefined} max={f.endDate || projectEndDate || undefined} onChange={e => set("startDate", e.target.value)} className={inputCls + " text-[#0F172A]"} />
+              <input type="date" value={f.startDate} min={projectStartDate || undefined} max={f.endDate || undefined} onChange={e => set("startDate", e.target.value)} className={inputCls + " text-[#0F172A]"} />
             </div>
             <div>
               <label className={labelCls}>End date *</label>
-              <input type="date" value={f.endDate} min={f.startDate || projectStartDate || undefined} max={projectEndDate || undefined} onChange={e => set("endDate", e.target.value)} className={inputCls + " text-[#0F172A]"} />
+              <input type="date" value={f.endDate} min={f.startDate || projectStartDate || undefined} onChange={e => set("endDate", e.target.value)} className={inputCls + " text-[#0F172A]"} />
             </div>
           </div>
 
