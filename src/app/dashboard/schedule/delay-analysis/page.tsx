@@ -112,31 +112,39 @@ function DelayAnalyticsPageContent() {
   const prevProjectIdParam = useRef(projectIdParam);
 
   useEffect(() => {
-    if (real && wsId) {
-      fetchProjects(wsId).then(projects => {
-        const p = projects.find(p => p.id === projectIdParam);
-        if (p?.endDate) setProjectEndDate(p.endDate);
-      });
-    }
-  }, [projectIdParam, wsId]);
-
-  useEffect(() => {
     prevProjectIdParam.current = projectIdParam;
     if (real) {
-      fetchTasks(projectIdParam, wsId!).then(tasks => {
-        const today = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD in local time
+      Promise.all([
+        fetchProjects(wsId!),
+        fetchTasks(projectIdParam, wsId!),
+      ]).then(([projects, tasks]) => {
+        const p = projects.find(proj => proj.id === projectIdParam);
+        const projEnd = p?.endDate ?? null;
+        if (projEnd) setProjectEndDate(projEnd);
 
-        // Derive delay the same way Gantt does: DB status OR date-based
+        const today = new Date().toLocaleDateString("en-CA");
+
+        // Delayed = DB status OR task extends past project deadline OR already past today
         const delayedTasks = tasks.filter(t =>
           t.status === "delayed" || t.status === "runningLate" ||
-          (t.pct < 100 && t.endDate && t.endDate < today)
+          (t.pct < 100 && t.endDate && (
+            (projEnd && t.endDate > projEnd) ||
+            t.endDate < today
+          ))
         );
 
-        // Days slipped = today − task endDate
-        const calcSlip = (endDate: string) =>
-          Math.max(1, Math.round((Date.now() - new Date(endDate + "T00:00:00").getTime()) / 86400000));
+        // Slippage = days beyond project end (preferred); fallback = days past today
+        const calcSlip = (endDate: string): number => {
+          if (projEnd && endDate > projEnd) {
+            return Math.max(1, Math.round(
+              (new Date(endDate + "T00:00:00").getTime() - new Date(projEnd + "T00:00:00").getTime()) / 86400000
+            ));
+          }
+          return Math.max(1, Math.round(
+            (Date.now() - new Date(endDate + "T00:00:00").getTime()) / 86400000
+          ));
+        };
 
-        // Group by contractor (groupBy=0) or space (groupBy=1)
         const groupKey = (t: (typeof tasks)[0]) =>
           groupBy === 0
             ? (t.contractor && t.contractor !== "—" ? t.contractor : "Unassigned")
@@ -153,9 +161,8 @@ function DelayAnalyticsPageContent() {
           const slips = ts.map(t => t.endDate ? calcSlip(t.endDate) : 1);
           const avgSlip = Math.round(slips.reduce((a, b) => a + b, 0) / slips.length);
           const maxSlip = Math.max(...slips);
-          const criticalCount = ts.filter(t =>
-            t.status === "delayed" || (t.endDate && t.endDate < today && t.pct < 100)
-          ).length;
+          // Critical = tasks directly pushing past project deadline
+          const criticalCount = ts.filter(t => projEnd && t.endDate && t.endDate > projEnd).length;
           return {
             id: i + 1,
             name: key,
@@ -184,9 +191,10 @@ function DelayAnalyticsPageContent() {
     if (!real) getDelayDeepDive(selected).then(d => setDeepDive(d ?? null));
   }, [selected, real]);
 
-  const totalSlipDays = rows.reduce((sum, r) => {
+  // Total slippage = worst single task overrun (matches Gantt's "N days behind" = max(task.endDate) - projectEndDate)
+  const totalSlipDays = rows.reduce((max, r) => {
     const match = r.impact.match(/\+(\d+)/);
-    return sum + (match ? Number(match[1]) : 0);
+    return Math.max(max, match ? Number(match[1]) : 0);
   }, 0);
 
   const predictedEndDate = (() => {
