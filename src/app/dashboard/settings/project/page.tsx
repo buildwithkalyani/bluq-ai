@@ -436,7 +436,7 @@ function ContractorsTab({ project, isMock = false, onSettingsUpdated }: { projec
                   </select>
                   <input
                     value={newPhone}
-                    onChange={(e) => { setNewPhone(e.target.value.replace(/\D/g, "")); setNewPhoneError(""); }}
+                    onChange={(e) => { const val = e.target.value.replace(/\D/g, ""); setNewPhone(val); setNewPhoneError(val.length > 0 && !isValidPhone(val) ? "Please enter a valid 10-digit phone number." : ""); }}
                     placeholder="98765 43210"
                     className="flex-1 px-2.5 py-1.5 text-xs text-[#0F172A] bg-white outline-none min-w-0"
                   />
