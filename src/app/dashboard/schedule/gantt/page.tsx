@@ -421,10 +421,6 @@ function GanttRow({ t, selected, chartStart, pixelsPerDay, onSelect, onUpdateDat
           </div>
           <div onMouseDown={handleMouseDown("left")}  className="absolute left-0  top-0 bottom-0 w-2 cursor-col-resize z-10" />
           <div onMouseDown={handleMouseDown("right")} className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize z-10" />
-          {widthPx < 36 && (
-            <span className="absolute top-1/2 -translate-y-1/2 text-[10px] font-bold pointer-events-none whitespace-nowrap"
-              style={{ left: widthPx + 4, color: barColor }}>{t.pct}%</span>
-          )}
         </div>
 
         {/* Right port — large hit area with arrow icon, drag from here to create dependency */}
@@ -442,6 +438,28 @@ function GanttRow({ t, selected, chartStart, pixelsPerDay, onSelect, onUpdateDat
 
 const DEP_LABELS: Record<string, string> = { FS: "Finish → Start", SS: "Start → Start", FF: "Finish → Finish", SF: "Start → Finish" };
 
+function curvedPath(pts: [number, number][], r = 10): string {
+  if (pts.length < 2) return "";
+  let d = `M ${pts[0][0]},${pts[0][1]}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [px, py] = pts[i - 1];
+    const [cx, cy] = pts[i];
+    const [nx, ny] = pts[i + 1];
+    const len1 = Math.hypot(cx - px, cy - py);
+    const len2 = Math.hypot(nx - cx, ny - cy);
+    if (len1 < 0.01 || len2 < 0.01) { d += ` L ${cx},${cy}`; continue; }
+    const rc = Math.min(r, len1 / 2, len2 / 2);
+    const bx = cx - (cx - px) / len1 * rc;
+    const by = cy - (cy - py) / len1 * rc;
+    const ax = cx + (nx - cx) / len2 * rc;
+    const ay = cy + (ny - cy) / len2 * rc;
+    d += ` L ${bx},${by} Q ${cx},${cy} ${ax},${ay}`;
+  }
+  const last = pts[pts.length - 1];
+  d += ` L ${last[0]},${last[1]}`;
+  return d;
+}
+
 function SVGArrows({ deps, tasks, taskYMap, chartStart, pixelsPerDay, totalH, showCriticalPath, criticalPathTasks, onDeleteDep, onChangeDep, drawingDep, movingDep, onStartEndpointMove, mousePos }: any) {
   const [hoveredDep, setHoveredDep] = useState<number | null>(null);
   const [editingDep, setEditingDep] = useState<number | null>(null);
@@ -450,10 +468,10 @@ function SVGArrows({ deps, tasks, taskYMap, chartStart, pixelsPerDay, totalH, sh
   return (
     <svg className="absolute top-0 overflow-visible" style={{ left: 0, width: "100%", height: totalH, zIndex: 25, pointerEvents: "none" }}>
       <defs>
-        <marker id="arr-crit"  markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M1,1 L5,3 L1,5 Z" fill="#ef4444" /></marker>
-        <marker id="arr-norm"  markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M1,1 L5,3 L1,5 Z" fill="#64748b" /></marker>
-        <marker id="arr-hover" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M1,1 L5,3 L1,5 Z" fill="#3b82f6" /></marker>
-        <marker id="arr-draw"  markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M1,1 L5,3 L1,5 Z" fill="#3b82f6" /></marker>
+        <marker id="arr-crit"  markerWidth="7" markerHeight="10" refX="6" refY="5" orient="auto"><path d="M0,0 L6,5 L0,10 Z" fill="#ef4444" /></marker>
+        <marker id="arr-norm"  markerWidth="7" markerHeight="10" refX="6" refY="5" orient="auto"><path d="M0,0 L6,5 L0,10 Z" fill="#64748b" /></marker>
+        <marker id="arr-hover" markerWidth="7" markerHeight="10" refX="6" refY="5" orient="auto"><path d="M0,0 L6,5 L0,10 Z" fill="#3b82f6" /></marker>
+        <marker id="arr-draw"  markerWidth="7" markerHeight="10" refX="6" refY="5" orient="auto"><path d="M0,0 L6,5 L0,10 Z" fill="#3b82f6" /></marker>
       </defs>
 
       {deps.map((dep: any, i: number) => {
@@ -517,12 +535,12 @@ function SVGArrows({ deps, tasks, taskYMap, chartStart, pixelsPerDay, totalH, sh
 
         const fsPath = (ex: number): string => {
           if (ex > x2 + 1) {
-            return `M ${x1},${dotY1} L ${ex},${dotY1} L ${ex},${belowTo} L ${x2 - 4},${belowTo} L ${x2 - 4},${dotY2} L ${x2},${dotY2}`;
+            return curvedPath([[x1, dotY1], [ex, dotY1], [ex, belowTo], [x2 - 4, belowTo], [x2 - 4, dotY2], [x2, dotY2]]);
           }
           if (ex < x1 - 1) {
-            return `M ${x1},${dotY1} L ${x1 + 1},${dotY1} L ${x1 + 1},${gapBelowFrom} L ${ex},${gapBelowFrom} L ${ex},${dotY2} L ${x2},${dotY2}`;
+            return curvedPath([[x1, dotY1], [x1 + 1, dotY1], [x1 + 1, gapBelowFrom], [ex, gapBelowFrom], [ex, dotY2], [x2, dotY2]]);
           }
-          return `M ${x1},${dotY1} L ${ex},${dotY1} L ${ex},${dotY2} L ${x2},${dotY2}`;
+          return curvedPath([[x1, dotY1], [ex, dotY1], [ex, dotY2], [x2, dotY2]]);
         };
 
         if (dep.type === "FS") {
@@ -534,19 +552,19 @@ function SVGArrows({ deps, tasks, taskYMap, chartStart, pixelsPerDay, totalH, sh
         } else if (dep.type === "SS") {
           x1 = fromStartX; x2 = toStartX;
           const ex = pickX([Math.min(x1, x2) - 24, leftEdge - 24, rightEdge + 50]);
-          pathD = `M ${x1},${dotY1} L ${ex},${dotY1} L ${ex},${dotY2} L ${x2},${dotY2}`;
+          pathD = curvedPath([[x1, dotY1], [ex, dotY1], [ex, dotY2], [x2, dotY2]]);
         } else if (dep.type === "FF") {
           x1 = fromEndX; x2 = toEndX;
           const ex = pickX([Math.max(x1, x2) + 24, rightEdge + 24, leftEdge - 24]);
-          pathD = `M ${x1},${dotY1} L ${ex},${dotY1} L ${ex},${dotY2} L ${x2},${dotY2}`;
+          pathD = curvedPath([[x1, dotY1], [ex, dotY1], [ex, dotY2], [x2, dotY2]]);
         } else {
           x1 = fromStartX; x2 = toEndX;
           const ex = pickX([Math.min(x1, x2) - 24, leftEdge - 24, rightEdge + 50]);
           const toStartXSF = diffDays(chartStart, toT.startDate) * pixelsPerDay;
           if (ex < toStartXSF - 1) {
-            pathD = `M ${x1},${dotY1} L ${ex},${dotY1} L ${ex},${belowTo} L ${x2 + 4},${belowTo} L ${x2 + 4},${dotY2} L ${x2},${dotY2}`;
+            pathD = curvedPath([[x1, dotY1], [ex, dotY1], [ex, belowTo], [x2 + 4, belowTo], [x2 + 4, dotY2], [x2, dotY2]]);
           } else {
-            pathD = `M ${x1},${dotY1} L ${ex},${dotY1} L ${ex},${dotY2} L ${x2},${dotY2}`;
+            pathD = curvedPath([[x1, dotY1], [ex, dotY1], [ex, dotY2], [x2, dotY2]]);
           }
         }
 
@@ -571,14 +589,10 @@ function SVGArrows({ deps, tasks, taskYMap, chartStart, pixelsPerDay, totalH, sh
             <circle cx={x1} cy={dotY1} r={12} fill="transparent"
               style={{ pointerEvents: isDragging ? "none" : "all", cursor: "grab" }}
               onMouseDown={e => { e.stopPropagation(); onStartEndpointMove && onStartEndpointMove(i, "from", x2, dotY2); }} />
-            <circle cx={x1} cy={dotY1} r={isHov ? 6 : 4} fill="white" stroke={color} strokeWidth={2} style={{ pointerEvents: "none" }} />
-            <circle cx={x1} cy={dotY1} r={isHov ? 3 : 2} fill={color} style={{ pointerEvents: "none" }} />
 
             <circle cx={x2} cy={dotY2} r={12} fill="transparent"
               style={{ pointerEvents: isDragging ? "none" : "all", cursor: "grab" }}
               onMouseDown={e => { e.stopPropagation(); onStartEndpointMove && onStartEndpointMove(i, "to", x1, dotY1); }} />
-            <circle cx={x2} cy={dotY2} r={isHov ? 6 : 4} fill={color} stroke="white" strokeWidth={2} style={{ pointerEvents: "none" }} />
-            <circle cx={x2} cy={dotY2} r={isHov ? 3 : 2} fill="white" style={{ pointerEvents: "none" }} />
 
             {/* Delete popup — click arrow to open; auto-close during drag */}
             {editingDep === i && !isDragging && (
@@ -1766,11 +1780,9 @@ const handleSaveModal = (data: any, newPreds: any) => {
             {canEdit && (
               <button
                 onClick={() => {
-                  if (!isRealProject(projectIdParam)) return;
                   setModalConfig({ isOpen: true, mode: "add", taskId: null, defaultPhase: "", defaultArea: "" });
                 }}
-                disabled={!isRealProject(projectIdParam)}
-                title={!isRealProject(projectIdParam) ? "Select a project first" : undefined}
+                title={undefined}
                 className="px-4 py-1.5 text-[13px] font-semibold bg-[#2563EB] text-white rounded-md flex items-center gap-1.5 shadow-sm hover:bg-[#1D4ED8] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[#2563EB]">
                 + Add task
               </button>
