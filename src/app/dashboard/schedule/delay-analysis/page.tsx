@@ -124,16 +124,49 @@ function DelayAnalyticsPageContent() {
     prevProjectIdParam.current = projectIdParam;
     if (real) {
       fetchTasks(projectIdParam, wsId!).then(tasks => {
-        const delayed = tasks.filter(t => t.status === "delayed" || t.status === "runningLate");
-        const realRows: DelayRow[] = delayed.map((t, i) => ({
-          id: i + 1,
-          name: t.contractor || t.name,
-          count: "1",
-          avg: t.status === "delayed" ? "3d" : "1d",
-          critical: t.status === "delayed" ? "1" : "0",
-          impact: t.status === "delayed" ? "+3d" : "+1d",
-          projectId: 0,
-        }));
+        const today = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD in local time
+
+        // Derive delay the same way Gantt does: DB status OR date-based
+        const delayedTasks = tasks.filter(t =>
+          t.status === "delayed" || t.status === "runningLate" ||
+          (t.pct < 100 && t.endDate && t.endDate < today)
+        );
+
+        // Days slipped = today − task endDate
+        const calcSlip = (endDate: string) =>
+          Math.max(1, Math.round((Date.now() - new Date(endDate + "T00:00:00").getTime()) / 86400000));
+
+        // Group by contractor (groupBy=0) or space (groupBy=1)
+        const groupKey = (t: (typeof tasks)[0]) =>
+          groupBy === 0
+            ? (t.contractor && t.contractor !== "—" ? t.contractor : "Unassigned")
+            : (t.space || "Unassigned");
+
+        const grouped = new Map<string, typeof delayedTasks>();
+        for (const t of delayedTasks) {
+          const key = groupKey(t);
+          if (!grouped.has(key)) grouped.set(key, []);
+          grouped.get(key)!.push(t);
+        }
+
+        const realRows: DelayRow[] = Array.from(grouped.entries()).map(([key, ts], i) => {
+          const slips = ts.map(t => t.endDate ? calcSlip(t.endDate) : 1);
+          const avgSlip = Math.round(slips.reduce((a, b) => a + b, 0) / slips.length);
+          const maxSlip = Math.max(...slips);
+          const criticalCount = ts.filter(t =>
+            t.status === "delayed" || (t.endDate && t.endDate < today && t.pct < 100)
+          ).length;
+          return {
+            id: i + 1,
+            name: key,
+            count: String(ts.length),
+            avg: `${avgSlip}d`,
+            critical: String(criticalCount),
+            impact: `+${maxSlip}d`,
+            projectId: 0,
+          };
+        });
+
         setRows(realRows);
         setSelected(realRows.length > 0 ? realRows[0].id : null);
       });
@@ -144,7 +177,7 @@ function DelayAnalyticsPageContent() {
         setSelected(data.length > 0 ? data[0].id : null);
       });
     }
-  }, [projectIdParam, workspaceId, groupBy]);
+  }, [projectIdParam, workspaceId, groupBy, real]);
 
   useEffect(() => {
     if (selected === null) { setDeepDive(null); return; }
