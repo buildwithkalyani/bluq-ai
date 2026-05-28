@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Search, Plus, Copy, Check, ChevronDown, X, Users, Shield, Pencil, Trash2, ChevronRight, Crown, FolderOpen } from "lucide-react";
+import { Search, Plus, Check, ChevronDown, X, Users, Shield, Pencil, Trash2, ChevronRight, Crown, FolderOpen } from "lucide-react";
 import { useWorkspace } from "@/context/workspace";
+import { authClient } from "@/lib/auth-client";
 import {
   fetchTeamMembers, removeTeamMember, updateMemberRole,
-  getTeamInviteLink, sendTeamInvite, fetchProjects,
+  sendTeamInvite, fetchProjects,
   fetchMemberProjectAccess, setMemberProjectAccess,
   fetchRoles, createRole, updateRole, deleteRole,
   TeamMember, WorkspaceRole, RolePermissions, PermLevel,
@@ -443,6 +444,8 @@ function RoleSelect({
   value: string; roleOptions: RoleOption[]; onChange: (r: string) => void; disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -453,11 +456,20 @@ function RoleSelect({
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  const handleOpen = () => {
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setDropdownPos({ top: rect.bottom + 4, left: rect.left });
+    }
+    setOpen(v => !v);
+  };
+
   return (
     <div className="relative inline-block" ref={ref}>
       <button
+        ref={buttonRef}
         disabled={disabled}
-        onClick={() => setOpen(v => !v)}
+        onClick={handleOpen}
         className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[13px] font-medium transition-colors ${
           disabled
             ? "bg-[#F8FAFC] border-[#E2E8F0] text-[#94A3B8] cursor-default"
@@ -467,10 +479,13 @@ function RoleSelect({
         {value}
         {!disabled && <ChevronDown size={12} className="text-[#94A3B8]" />}
       </button>
-      {open && (
+      {open && dropdownPos && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full mt-1 w-72 bg-white border border-[#E2E8F0] rounded-xl shadow-xl z-50 py-1.5 animate-in fade-in slide-in-from-top-1 duration-100">
+          <div
+            className="fixed w-72 bg-white border border-[#E2E8F0] rounded-xl shadow-xl z-50 py-1.5 animate-in fade-in slide-in-from-top-1 duration-100"
+            style={{ top: dropdownPos.top, left: dropdownPos.left }}
+          >
             {roleOptions.map(r => (
               <div
                 key={r.name}
@@ -758,6 +773,8 @@ function InviteForm({
 // ── Main page ─────────────────────────────────────────────────
 export default function TeamPage() {
   const { workspaceId, loading: wsLoading } = useWorkspace();
+  const { data: sessionData } = authClient.useSession();
+  const currentUserId = sessionData?.user?.id;
   const [tab, setTab] = useState<Tab>("team");
 
   // Team state
@@ -766,7 +783,7 @@ export default function TeamPage() {
   const [search, setSearch] = useState("");
   const [showInviteForm, setShowInviteForm] = useState(false);
   const [accessPopover, setAccessPopover] = useState<{ member: TeamMember; anchor: HTMLElement } | null>(null);
-  const [copied, setCopied] = useState(false);
+
 
   // Roles state
   const [roles, setRoles] = useState<WorkspaceRole[]>([]);
@@ -815,13 +832,7 @@ export default function TeamPage() {
     await sendTeamInvite(email, name, role, workspaceId);
   };
 
-  const handleCopyLink = async () => {
-    if (!workspaceId) return;
-    const url = await getTeamInviteLink(workspaceId);
-    await navigator.clipboard.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
-  };
+
 
   const handleRoleChange = async (memberId: string, role: string) => {
     if (!workspaceId) return;
@@ -887,12 +898,7 @@ export default function TeamPage() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={handleCopyLink}
-                className="flex items-center gap-1.5 px-3.5 py-2 text-[13px] font-medium text-[#475569] bg-white border border-[#E2E8F0] rounded-lg hover:bg-[#F8FAFC] transition-colors cursor-pointer">
-                {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
-                {copied ? "Copied!" : "Copy invite link"}
-              </button>
-              <button onClick={() => setShowInviteForm(v => !v)}
+<button onClick={() => setShowInviteForm(v => !v)}
                 className="flex items-center gap-1.5 px-4 py-2 text-[13px] font-semibold text-white bg-[#2563EB] rounded-lg hover:bg-[#1D4ED8] transition-colors cursor-pointer">
                 <Plus size={15} /> Add Member
               </button>
@@ -949,7 +955,12 @@ export default function TeamPage() {
                         )}
                       </div>
                       <div>
-                        <RoleSelect value={m.role} roleOptions={allRoleOptions} onChange={role => handleRoleChange(m.id, role)} disabled={isSuperAdmin} />
+                        <RoleSelect
+                          value={m.role}
+                          roleOptions={allRoleOptions}
+                          onChange={role => handleRoleChange(m.id, role)}
+                          disabled={isSuperAdmin && m.userId === currentUserId}
+                        />
                       </div>
                       <div>
                         {isWorkspaceWide ? (
@@ -974,7 +985,7 @@ export default function TeamPage() {
                         )}
                       </div>
                       <div>
-                        {!isSuperAdmin && (
+                        {!isWorkspaceWide && (
                           <button onClick={() => handleRemove(m.id)}
                             className="px-3 py-1.5 border border-red-200 text-red-500 rounded-lg text-[13px] font-medium hover:bg-red-50 transition-colors cursor-pointer">
                             Remove Access
