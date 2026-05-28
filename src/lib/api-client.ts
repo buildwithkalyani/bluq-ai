@@ -852,11 +852,10 @@ export async function getDocumentUploadUrl(
   return apiFetch(`/documents/upload-url?${params}`);
 }
 
-/** POST /documents — save Supabase Storage URL reference after upload */
-export async function deleteDocument(id: string): Promise<void> {
+export async function deleteDocument(id: string, workspaceId: string): Promise<void> {
   const token = await getAuthToken();
   const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
-  const res = await fetch(`${BACKEND_URL}/documents/${id}`, {
+  const res = await fetch(`${BACKEND_URL}/documents/${id}?workspaceId=${workspaceId}`, {
     method: "DELETE",
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });

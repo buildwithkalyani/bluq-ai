@@ -756,7 +756,7 @@ function RealImport({
   const handleDeleteDoc = async (docId: string) => {
     setDeleteError("");
     try {
-      await deleteDocument(docId);
+      await deleteDocument(docId, workspaceId);
       setExistingDocs(prev => {
         const updated = prev.filter(d => d.id !== docId);
         writeDocsCache(projectId, updated);
