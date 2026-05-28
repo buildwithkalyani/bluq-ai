@@ -542,15 +542,16 @@ interface TeamMember {
   id: string;
   name: string;
   email: string;
-  role: "Admin" | "Editor" | "Viewer";
+  role: "Super Admin" | "Admin" | "Editor" | "Viewer";
 }
 
-const ROLE_OPTIONS: TeamMember["role"][] = ["Admin", "Editor", "Viewer"];
+const ROLE_OPTIONS: TeamMember["role"][] = ["Super Admin", "Admin", "Editor", "Viewer"];
 
 const ROLE_STYLE: Record<TeamMember["role"], { bg: string; text: string }> = {
-  Admin:  { bg: "#FEF2F2", text: "#DC2626" },
-  Editor: { bg: "#EFF6FF", text: "#0969da" },
-  Viewer: { bg: "#F1F5F9", text: "#475569" },
+  "Super Admin": { bg: "#F5F3FF", text: "#7C3AED" },
+  Admin:         { bg: "#FEF2F2", text: "#DC2626" },
+  Editor:        { bg: "#EFF6FF", text: "#0969da" },
+  Viewer:        { bg: "#F1F5F9", text: "#475569" },
 };
 
 function TeamTab({ project, isMock = false, onSettingsUpdated }: { project: BackendProject; isMock?: boolean; onSettingsUpdated?: (id: string, s: Record<string, unknown>) => void }) {
