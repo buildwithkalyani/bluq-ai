@@ -106,6 +106,7 @@ function OverviewContent() {
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetching, setFetching] = useState(false);
   const [isOutdated, setIsOutdated] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -128,6 +129,7 @@ function OverviewContent() {
       }
 
       // Fetch fresh in background
+      setFetching(true);
       fetchProjects(workspaceId)
         .then((rows) => {
           const fresh = mapBackendProjects(rows);
@@ -142,7 +144,7 @@ function OverviewContent() {
           const age = cached ? Date.now() - cached.lastFetchedAt : Infinity;
           if (age > STALE_MS) setIsOutdated(true);
         })
-        .finally(() => setLoading(false));
+        .finally(() => { setLoading(false); setFetching(false); });
     } else if (isDesignMode) {
       getProjects().then((data) => {
         setProjects(data);
@@ -187,7 +189,7 @@ function OverviewContent() {
   };
 
 
-  if (loading) {
+  if (loading || wsLoading) {
     return (
       <div className="p-5">
         <div className="animate-pulse space-y-4">
@@ -216,8 +218,16 @@ function OverviewContent() {
             onBack={goBack}
             wrapperClassName="max-w-7xl mx-auto"
           />
+        ) : fetching ? (
+          <div className="animate-pulse space-y-4 p-5">
+            <div className="h-6 w-48 bg-[#E2E8F0] rounded" />
+            <div className="grid grid-cols-2 gap-3.5">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-48 bg-[#E2E8F0] rounded-lg" />
+              ))}
+            </div>
+          </div>
         ) : (
-          // projectId in URL but not found in loaded list — redirect back to list
           <div className="p-10 text-center">
             <div className="text-[14px] text-[#64748B] mb-3">Project not found.</div>
             <button onClick={goBack} className="text-[13px] text-[#2563EB] font-semibold hover:underline cursor-pointer">← Back to all projects</button>
