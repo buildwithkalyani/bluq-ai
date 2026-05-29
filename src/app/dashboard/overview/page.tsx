@@ -19,7 +19,7 @@ import {
 import ProjectDetailView from "./ProjectDetailView";
 import CreateProjectModal from "./CreateProjectModal";
 import { useWorkspace } from "@/context/workspace";
-import { fetchProjects, deleteProject } from "@/lib/api-client";
+import { fetchProjects, deleteProject, fetchPinnedProjects, updatePinnedProjects } from "@/lib/api-client";
 
 function fmtDate(iso: string): string {
   if (!iso || iso === "TBD") return iso;
@@ -133,7 +133,15 @@ function OverviewContent() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (workspaceId) setPinnedIds(readPinned(workspaceId));
+    if (!workspaceId) return;
+    // Show localStorage immediately, then sync from backend
+    setPinnedIds(readPinned(workspaceId));
+    fetchPinnedProjects(workspaceId)
+      .then((ids) => {
+        setPinnedIds(ids);
+        writePinned(workspaceId, ids);
+      })
+      .catch(() => {/* keep localStorage value on error */});
   }, [workspaceId]);
 
   useEffect(() => {
@@ -178,7 +186,10 @@ function OverviewContent() {
       ? pinnedIds.filter(x => x !== id)
       : [id, ...pinnedIds];
     setPinnedIds(next);
-    if (workspaceId) writePinned(workspaceId, next);
+    if (workspaceId) {
+      writePinned(workspaceId, next);
+      updatePinnedProjects(workspaceId, next).catch(() => {/* optimistic — ignore transient errors */});
+    }
     setMenuOpenProjectId(null);
   };
 
