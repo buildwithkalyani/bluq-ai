@@ -401,7 +401,7 @@ export default function ProjectDetailView({
   const { workspaceId, isDesignMode } = useWorkspace();
 
   // ── Reoptimize flow ──────────────────────────────────────────
-  type ReoptState = "idle" | "running" | "done" | "error";
+  type ReoptState = "idle" | "running" | "done" | "error" | "no-schedule";
   const [reoptState, setReoptState] = useState<ReoptState>("idle");
   const [reoptJobId, setReoptJobId] = useState<string | null>(null);
   const [reoptProgress, setReoptProgress] = useState<{ step: number; totalSteps: number; percentage: number; status: string } | null>(null);
@@ -471,6 +471,10 @@ export default function ProjectDetailView({
 
   async function handleReoptimize() {
     if (!workspaceId) return;
+    if (tasks.filter(t => !t.parentTaskId).length === 0) {
+      setReoptState("no-schedule");
+      return;
+    }
     setReoptState("running");
     setReoptProgress(null);
     setReoptError(null);
@@ -619,7 +623,7 @@ export default function ProjectDetailView({
         <div className="flex gap-2 shrink-0">
           {real && (
             <button
-              onClick={reoptState === "idle" || reoptState === "error" ? handleReoptimize : undefined}
+              onClick={reoptState === "idle" || reoptState === "error" || reoptState === "no-schedule" ? handleReoptimize : undefined}
               disabled={reoptState === "running"}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold border transition-colors cursor-pointer disabled:cursor-not-allowed
                 ${reoptState === "done"
@@ -753,6 +757,24 @@ export default function ProjectDetailView({
           <button
             onClick={() => { setReoptState("idle"); setReoptError(null); }}
             className="shrink-0 px-3 py-1 rounded-lg border border-[#FEE2E2] text-[#EF4444] text-[11px] font-medium hover:bg-[#FEE2E2] transition-colors cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {reoptState === "no-schedule" && (
+        <div className="mb-4 px-4 py-3 rounded-xl border border-[#FEF3C7] bg-[#FFFBEB] flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={14} className="text-[#F59E0B] shrink-0" />
+            <div>
+              <span className="text-[13px] font-bold text-[#B45309]">No schedule to optimize</span>
+              <div className="text-[11px] text-[#D97706]">No schedule or document has been imported yet. Please upload a schedule file first.</div>
+            </div>
+          </div>
+          <button
+            onClick={() => setReoptState("idle")}
+            className="shrink-0 px-3 py-1 rounded-lg border border-[#FEF3C7] text-[#B45309] text-[11px] font-medium hover:bg-[#FEF3C7] transition-colors cursor-pointer"
           >
             Dismiss
           </button>
