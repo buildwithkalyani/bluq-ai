@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, Suspense } from 'react';
 import { useSearchParams } from "next/navigation";
 import { getScheduleTasks, STATUS_CONFIG, type ScheduleTask } from "@/lib/mock-data";
-import { fetchTasks, isRealProject } from "@/lib/api-client";
+import { fetchTasks, fetchLatestScheduleVersion, isRealProject } from "@/lib/api-client";
 import { useWorkspace } from "@/context/workspace";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
@@ -50,6 +50,7 @@ function SlippageBadge({ baselineEnd, actualEnd }: { baselineEnd?: string; actua
 function BaselineActualPageContent() {
   const [tasks, setTasks] = useState<ScheduleTask[]>([]);
   const [loading, setLoading] = useState(true);
+  const [uploadedAt, setUploadedAt] = useState<string | null>(null);
   const [collapsedPhases, setCollapsedPhases] = useState<Set<string>>(new Set());
   const searchParams = useSearchParams();
   const { isDesignMode, workspaceId: ctxWorkspaceId, loading: wsLoading } = useWorkspace();
@@ -67,6 +68,11 @@ function BaselineActualPageContent() {
         ? getScheduleTasks(Number(projectIdParam))
         : Promise.resolve([]);
     load.then(t => { setTasks(t); setLoading(false); });
+    if (real) {
+      fetchLatestScheduleVersion(projectIdParam, workspaceId!).then(v => {
+        if (v?.createdAt) setUploadedAt(fmtDate(v.createdAt));
+      });
+    }
   }, [projectIdParam, workspaceId, wsLoading, isDesignMode]);
 
   const togglePhase = (p: string) =>
@@ -123,7 +129,7 @@ function BaselineActualPageContent() {
         </div>
         <div className="px-3 py-2 bg-white border border-[#E2E8F0] rounded-lg shadow-sm text-right">
           <div className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.08em]">Uploaded</div>
-          <div className="text-[12px] font-semibold text-[#475569]">{activeBaseline.uploadedAt}</div>
+          <div className="text-[12px] font-semibold text-[#475569]">{uploadedAt ?? activeBaseline.uploadedAt}</div>
         </div>
       </div>
 
