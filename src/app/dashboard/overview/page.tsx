@@ -30,6 +30,7 @@ function fmtDate(iso: string): string {
 
 const PROJECTS_CACHE_KEY = "bluq_projects_cache";
 const PINNED_KEY = "bluq_pinned_projects";
+const WS_CACHE_KEY = "bluq_workspace";
 const STALE_MS = 5 * 60 * 1000; // 5 minutes
 
 function readPinned(workspaceId: string): string[] {
@@ -65,6 +66,20 @@ function isSameProjects(a: Project[], b: Project[]): boolean {
   if (a.length !== b.length) return false;
   const key = (p: Project) => `${p.id}:${p.status}:${p.pct}`;
   return JSON.stringify(a.map(key).sort()) === JSON.stringify(b.map(key).sort());
+}
+
+// Reads cached projects synchronously from localStorage using the stored workspace ID.
+// Called as a lazy useState initializer so state is populated before the first render,
+// eliminating the skeleton/flash on hard refresh when localStorage is warm.
+function readInitialProjects(): Project[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const wsRaw = localStorage.getItem(WS_CACHE_KEY);
+    if (!wsRaw) return [];
+    const ws = JSON.parse(wsRaw) as { id?: string };
+    if (!ws.id) return [];
+    return readProjectsCache(ws.id)?.data ?? [];
+  } catch { return []; }
 }
 
 const STATUS_MAP: Record<string, string> = {
@@ -118,8 +133,8 @@ function OverviewContent() {
   const searchParams = useSearchParams();
   const selectedProjectId = searchParams.get("projectId");
 
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [projects, setProjects] = useState<Project[]>(readInitialProjects);
+  const [loading, setLoading] = useState<boolean>(() => readInitialProjects().length === 0);
   const [isOutdated, setIsOutdated] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -163,14 +178,18 @@ function OverviewContent() {
           setIsOutdated(false);
           // Only re-render if data actually changed
           setProjects(prev => isSameProjects(prev, fresh) ? prev : fresh);
+          // Set loading=false in the same synchronous block as setProjects so React
+          // batches both updates — prevents a flash of "No projects found" between
+          // the two setState calls when no localStorage cache exists on hard refresh.
+          setLoading(false);
         })
         .catch((err) => {
           console.error("projects refresh:", err);
           // Surface soft indicator only if cache is stale (> 5 min old)
           const age = cached ? Date.now() - cached.lastFetchedAt : Infinity;
           if (age > STALE_MS) setIsOutdated(true);
-        })
-        .finally(() => setLoading(false));
+          setLoading(false);
+        });
     } else if (isDesignMode) {
       getProjects().then((data) => {
         setProjects(data);
