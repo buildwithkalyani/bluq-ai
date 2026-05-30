@@ -330,6 +330,7 @@ export interface BackendTask {
   id: string;
   workspaceId: string;
   projectId: string;
+  scheduleVersionId: string | null;
   title: string;
   status: string;
   startDate: string | null;
@@ -378,16 +379,16 @@ function backendTaskToScheduleTask(t: BackendTask): ScheduleTask {
   };
 }
 
-/** GET /tasks?projectId=&workspaceId= → ScheduleTask[] */
+/** GET /tasks?projectId=&workspaceId=&scheduleVersionId= → ScheduleTask[] */
 export async function fetchTasks(
   projectId: string,
   workspaceId: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  scheduleVersionId?: string
 ): Promise<ScheduleTask[]> {
-  const rows = await apiFetch<BackendTask[]>(
-    `/tasks?projectId=${projectId}&workspaceId=${workspaceId}`,
-    signal
-  );
+  let url = `/tasks?projectId=${projectId}&workspaceId=${workspaceId}`;
+  if (scheduleVersionId) url += `&scheduleVersionId=${scheduleVersionId}`;
+  const rows = await apiFetch<BackendTask[]>(url, signal);
   return (rows ?? []).map(backendTaskToScheduleTask);
 }
 
@@ -406,6 +407,7 @@ export async function createTask(data: {
   isMilestone?: boolean;
   parentTaskId?: string;
   priority?: string;
+  scheduleVersionId?: string;
 }): Promise<BackendTask> {
   return apiPost<BackendTask>("/tasks", data);
 }
@@ -912,6 +914,58 @@ export async function createScheduleVersion(
   workspaceId: string
 ): Promise<ScheduleVersion> {
   return apiPost<ScheduleVersion>("/schedule/versions", { projectId, workspaceId });
+}
+
+export async function createScheduleVersionFromImport(
+  projectId: string,
+  workspaceId: string,
+  sourceFileName: string,
+): Promise<ScheduleVersion> {
+  return apiPost<ScheduleVersion>("/schedule/versions", {
+    projectId,
+    workspaceId,
+    generatedBy: "import",
+    sourceFileName,
+  });
+}
+
+export async function parseScheduleFilePreview(
+  file: File
+): Promise<{ headers: string[]; rows: string[][]; error?: string; suggestion?: string }> {
+  const token = await getAuthToken();
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${BACKEND_URL}/schedule/parse-preview`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as any).error ?? `parse-preview failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function bulkImportTasks(data: {
+  workspaceId: string;
+  projectId: string;
+  scheduleVersionId?: string;
+  tasks: Array<{
+    title: string;
+    startDate?: string;
+    endDate?: string;
+    durationDays?: number;
+    percentComplete?: number;
+    contractor?: string;
+    area?: string;
+    phase?: string;
+    predecessorName?: string;
+    sortOrder?: number;
+  }>;
+  unmappedColumns?: string[];
+}): Promise<{ count: number; tasks: BackendTask[] }> {
+  return apiPost("/tasks/bulk", data);
 }
 
 export interface ScheduleGenerateResult {

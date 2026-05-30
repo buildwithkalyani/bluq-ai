@@ -4,7 +4,8 @@ import { useState, useCallback, useEffect, Suspense } from "react";
 import { CheckCircle, AlertTriangle, X, Loader, FileText, Sparkles, RefreshCw, Upload, ClipboardList, Table2, GitBranch, Layers, ArrowLeft, PenLine, Plus, Lock, Bot, FolderOpen, Calculator, ScrollText, Milestone, BarChart3, Package, MapPin, Receipt, Home, Building2, Factory, Route, Train, Landmark, CircleDot } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { parseCSVPreview, BLUQ_FIELDS } from "@/lib/mock-data";
+import { BLUQ_FIELDS } from "@/lib/mock-data";
+import { autoMapAllColumns, CANONICAL_FIELDS, type MappingConfidence } from "@/lib/column-aliases";
 import { Card, SectionTitle, Btn } from "@/components/ui/bluq-ui";
 import { useWorkspace } from "@/context/workspace";
 import {
@@ -17,6 +18,8 @@ import {
   generateSchedule,
   fetchScheduleVersions,
   createScheduleVersion,
+  createScheduleVersionFromImport,
+  bulkImportTasks,
   type ScheduleStatusResult,
   type BackendDocument,
   type ScheduleVersion,
@@ -179,9 +182,9 @@ const IMPORT_METHODS: Array<{
     id: "msp",
     label: "My planner uses MS Project",
     sub: "Microsoft Project file",
-    description: "Your planner works in MS Project. Export the .mpp file and upload it. All tasks, links, and milestones come across cleanly.",
-    accepts: ".mpp",
-    formats: [".mpp"],
+    description: "Upload a .mpp file, or export as XML from MS Project (File → Save As → XML Format) for best results.",
+    accepts: ".mpp,.xml",
+    formats: [".mpp", ".xml"],
     icon: <GitBranch size={22} />,
     color: "#2563EB",
     bg: "#EFF6FF",
@@ -191,9 +194,9 @@ const IMPORT_METHODS: Array<{
     id: "primavera",
     label: "My planner uses Primavera P6",
     sub: "Oracle Primavera P6",
-    description: "Your planner works in Primavera P6. Ask them to export an .xer file and upload it here. Activities, WBS, and relationships all carry over.",
-    accepts: ".xer",
-    formats: [".xer"],
+    description: "Your planner works in Primavera P6. Ask them to export an .xer file or use File → Export → XML from P6. Activities, WBS, and relationships all carry over.",
+    accepts: ".xer,.xml",
+    formats: [".xer", ".xml"],
     icon: <Layers size={22} />,
     color: "#7C3AED",
     bg: "#F5F3FF",
@@ -574,8 +577,29 @@ function ScheduleLanding({
 
 // ─── MANUAL SCHEDULE SETUP ───────────────────────────────────────────────────
 
-function ManualScheduleSetup({ projectId, projectName, onBack }: { projectId: string; projectName: string; onBack: () => void }) {
+function ManualScheduleSetup({ projectId, workspaceId, projectName, onBack }: { projectId: string; workspaceId: string; projectName: string; onBack: () => void }) {
   const router = useRouter();
+  const [creating, setCreating] = useState(false);
+
+  const handleOpen = async () => {
+    setCreating(true);
+    let versionId: string | undefined;
+    try {
+      if (projectId && workspaceId) {
+        const { createScheduleVersion } = await import("@/lib/api-client");
+        const v = await createScheduleVersion(projectId, workspaceId);
+        versionId = v.id;
+      }
+    } catch {
+      // version creation failed — navigate anyway, user can still add tasks
+    } finally {
+      setCreating(false);
+      const params = new URLSearchParams({ projectId, workspaceId });
+      if (versionId) params.set("versionId", versionId);
+      router.push(`/dashboard/schedule/gantt?${params.toString()}`);
+    }
+  };
+
   return (
     <div className="p-6 space-y-5">
       <button onClick={onBack} className="flex items-center gap-1.5 text-[12px] font-medium text-[#64748B] hover:text-[#0F172A] transition-colors cursor-pointer">
@@ -602,10 +626,11 @@ function ManualScheduleSetup({ projectId, projectName, onBack }: { projectId: st
       </div>
       <div className="flex items-center gap-3 pt-2">
         <button
-          onClick={() => router.push(`/dashboard/schedule/list-view?projectId=${projectId}`)}
-          className="px-6 py-2.5 rounded-xl text-[13px] font-bold text-white bg-[#0F172A] hover:bg-[#1E293B] transition-colors cursor-pointer"
+          onClick={handleOpen}
+          disabled={creating}
+          className="px-6 py-2.5 rounded-xl text-[13px] font-bold text-white bg-[#0F172A] hover:bg-[#1E293B] transition-colors cursor-pointer disabled:opacity-60"
         >
-          Open blank schedule
+          {creating ? "Creating…" : "Open blank schedule"}
         </button>
         <button onClick={onBack} className="px-5 py-2.5 rounded-xl text-[13px] font-medium text-[#475569] border border-[#E2E8F0] bg-white hover:bg-[#F8FAFC] transition-colors cursor-pointer">
           Go back
@@ -1751,12 +1776,151 @@ function RealImport({
   );
 }
 
+// ─── FILE PARSING ─────────────────────────────────────────────────────────────
+
+function parseCSVText(text: string): { headers: string[]; rows: string[][] } {
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (!lines.length) return { headers: [], rows: [] };
+  const parseLine = (line: string): string[] => {
+    const result: string[] = [];
+    let cur = "";
+    let inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+        else inQ = !inQ;
+      } else if (ch === ',' && !inQ) {
+        result.push(cur.trim());
+        cur = "";
+      } else {
+        cur += ch;
+      }
+    }
+    result.push(cur.trim());
+    return result;
+  };
+  const headers = parseLine(lines[0]);
+  const rows = lines.slice(1).map(parseLine).filter(r => r.some(c => c));
+  return { headers, rows };
+}
+
+async function parseFileForPreview(
+  file: File,
+): Promise<{ headers: string[]; rows: string[][]; error?: string; suggestion?: string }> {
+  const ext = file.name.toLowerCase().split(".").pop() ?? "";
+
+  // CSV — parse client-side, no network round-trip needed
+  if (ext === "csv") {
+    const text = await file.text();
+    return parseCSVText(text);
+  }
+
+  // Excel — parse client-side via SheetJS
+  if (ext === "xlsx" || ext === "xls") {
+    const XLSX = await import("xlsx");
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(new Uint8Array(buf), { type: "array", cellDates: true });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const data: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: false, dateNF: "yyyy-mm-dd" });
+    if (!data.length) return { headers: [], rows: [] };
+    const headers = (data[0] as unknown[]).map(String);
+    const rows = (data.slice(1) as unknown[][])
+      .filter(r => r.some(c => String(c).trim()))
+      .map(r => r.map(String));
+    return { headers, rows };
+  }
+
+  // MPP, XER, MSPDI XML — send to backend for server-side parsing
+  if (ext === "mpp" || ext === "xer" || ext === "xml") {
+    const { parseScheduleFilePreview } = await import("@/lib/api-client");
+    return parseScheduleFilePreview(file);
+  }
+
+  return { headers: [], rows: [], error: `Unsupported file type: .${ext}` };
+}
+
+// ─── IMPORT TRANSFORMATION ────────────────────────────────────────────────────
+
+function normalizeDate(val: string): string | undefined {
+  if (!val) return undefined;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
+  // DD/MM/YYYY or DD-MM-YYYY (default for Indian construction)
+  const dmy = val.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  // Fallback: JS Date (handles ISO strings from SheetJS)
+  const d = new Date(val);
+  if (!isNaN(d.getTime())) return d.toISOString().split("T")[0];
+  return undefined;
+}
+
+type TaskPayload = {
+  title: string;
+  startDate?: string;
+  endDate?: string;
+  durationDays?: number;
+  percentComplete?: number;
+  contractor?: string;
+  area?: string;
+  predecessorName?: string;
+  phase?: string;
+  sortOrder: number;
+};
+
+function rowsToTaskPayloads(
+  headers: string[],
+  rows: string[][],
+  mappings: Record<string, string>,
+): TaskPayload[] {
+  return rows
+    .map((row, sortOrder) => {
+      const task: Record<string, unknown> = { sortOrder };
+      headers.forEach((h, i) => {
+        const field = mappings[h];
+        const val = (row[i] ?? "").trim();
+        if (!field || !val) return;
+        switch (field) {
+          case "Task Name":    task.title = val; break;
+          case "Start Date":   { const d = normalizeDate(val); if (d) task.startDate = d; break; }
+          case "End Date":     { const d = normalizeDate(val); if (d) task.endDate = d; break; }
+          case "Duration":     { const n = parseInt(val); if (!isNaN(n)) task.durationDays = n; break; }
+          case "% Complete":   { const n = parseFloat(val.replace(/[%\s]/g, "")); if (!isNaN(n)) task.percentComplete = Math.min(100, Math.max(0, n)); break; }
+          case "Contractor":   task.contractor = val; break;
+          case "Space / Zone": task.area = val; break;
+          case "Predecessor":  task.predecessorName = val; break;
+          case "Phase":        task.phase = val; break;
+        }
+      });
+      return task;
+    })
+    .filter((t): t is TaskPayload => typeof t.title === "string" && t.title.length > 0);
+}
+
+function validateBeforeImport(
+  headers: string[],
+  rows: string[][],
+  mappings: Record<string, string>,
+): string | null {
+  const mapped = Object.values(mappings).filter(Boolean);
+  if (!mapped.includes("Task Name")) return "Map a column to Task Name before importing.";
+  const hasStart = mapped.includes("Start Date");
+  const hasEnd = mapped.includes("End Date");
+  const hasDuration = mapped.includes("Duration");
+  if (!hasStart) return "Map a Start Date column — required for the Gantt chart.";
+  if (!hasEnd && !hasDuration) return "Map either End Date or Duration so tasks have a length.";
+  const payloads = rowsToTaskPayloads(headers, rows, mappings);
+  if (!payloads.length) return "No valid tasks found — check that Task Name column is not empty.";
+  return null;
+}
+
 // ─── MOCK MODE WIZARD ────────────────────────────────────────────────────────
 
 function MockImport({
-  projectId: _projectId, projectName, mode, onBack, currentVersionCount = 0, onComplete,
+  projectId: _projectId, realProjectId, realWorkspaceId, projectName, mode, onBack, currentVersionCount = 0, onComplete,
 }: {
   projectId: number;
+  realProjectId?: string;
+  realWorkspaceId?: string;
   projectName: string;
   mode: ImportMode;
   onBack: () => void;
@@ -1770,31 +1934,45 @@ function MockImport({
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<string[][]>([]);
   const [mappings, setMappings] = useState<Record<string, string>>({});
+  const [confidence, setConfidence] = useState<Record<string, MappingConfidence>>({});
   const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState("");
+  const [parsing, setParsing] = useState(false);
+  const [parseError, setParseError] = useState("");
   const [fileQueue, setFileQueue] = useState<{ file: File; status: "pending" | "done" }[]>([]);
+  const [actualVersionNumber, setActualVersionNumber] = useState<number | null>(null);
 
   const isRebaseline = currentVersionCount > 0;
   const nextVersion = currentVersionCount + 1;
 
   const handleFile = useCallback(async (file: File) => {
     setFileName(file.name);
-    const mock = await parseCSVPreview();
-    setHeaders(mock.headers);
-    setRows(mock.rows);
-    const autoMap: Record<string, string> = {};
-    mock.headers.forEach(h => {
-      const l = h.toLowerCase();
-      if (l.includes("activity") || l.includes("task")) autoMap[h] = "Task Name";
-      else if (l.includes("begin") || l.includes("start")) autoMap[h] = "Start Date";
-      else if (l.includes("finish") || l.includes("end")) autoMap[h] = "End Date";
-      else if (l.includes("day") || l.includes("duration")) autoMap[h] = "Duration";
-      else if (l.includes("depend") || l.includes("pred")) autoMap[h] = "Predecessor";
-      else if (l.includes("assign") || l.includes("contractor")) autoMap[h] = "Contractor";
-      else if (l.includes("location") || l.includes("zone")) autoMap[h] = "Space / Zone";
-      else if (l.includes("progress") || l.includes("complete")) autoMap[h] = "% Complete";
-    });
-    setMappings(autoMap);
-    setStep("map");
+    setParseError("");
+    setParsing(true);
+    try {
+      const parsed = await parseFileForPreview(file);
+      // Backend returned an error (e.g. MPP binary) with a helpful suggestion
+      if (parsed.error) {
+        setParseError(parsed.suggestion ? `${parsed.error} ${parsed.suggestion}` : parsed.error);
+        setParsing(false);
+        return;
+      }
+      if (!parsed.headers.length) {
+        setParseError("Could not read columns — check the file has a header row.");
+        setParsing(false);
+        return;
+      }
+      setHeaders(parsed.headers);
+      setRows(parsed.rows);
+      const { mappings: autoMap, confidence: autoConfidence } = autoMapAllColumns(parsed.headers, parsed.rows);
+      setMappings(autoMap);
+      setConfidence(autoConfidence);
+      setStep("map");
+    } catch (err: unknown) {
+      setParseError(err instanceof Error ? err.message : "Failed to read file");
+    } finally {
+      setParsing(false);
+    }
   }, []);
 
   const modeMethod = IMPORT_METHODS.find(m => m.id === mode)!;
@@ -1813,13 +1991,34 @@ function MockImport({
     handleFiles(e.dataTransfer.files);
   }, [handleFiles]);
 
-  const handleImport = () => {
+  const handleImport = async () => {
+    setImportError("");
+    const validationError = validateBeforeImport(headers, rows, mappings);
+    if (validationError) { setImportError(validationError); return; }
+
     setImporting(true);
-    setTimeout(() => {
-      setImporting(false);
+    try {
+      const payloads = rowsToTaskPayloads(headers, rows, mappings);
+
+      if (realProjectId && realWorkspaceId) {
+        const unmappedColumns = headers.filter(h => !confidence[h]);
+        const version = await createScheduleVersionFromImport(realProjectId, realWorkspaceId, fileName);
+        await bulkImportTasks({ workspaceId: realWorkspaceId, projectId: realProjectId, scheduleVersionId: version.id, tasks: payloads, unmappedColumns });
+        setActualVersionNumber(version.versionNumber);
+        // Signal Gantt + List-view to refetch immediately
+        window.dispatchEvent(new CustomEvent("bluq_tasks_imported", { detail: { projectId: realProjectId } }));
+        onComplete?.({ versionNumber: version.versionNumber, fileName, taskCount: payloads.length });
+      } else {
+        // Design-mode simulation
+        await new Promise(r => setTimeout(r, 1000));
+        onComplete?.({ versionNumber: nextVersion, fileName, taskCount: payloads.length });
+      }
       setStep("done");
-      onComplete?.({ versionNumber: nextVersion, fileName, taskCount: rows.length });
-    }, 1500);
+    } catch (err: unknown) {
+      setImportError(err instanceof Error ? err.message : "Import failed — please try again");
+    } finally {
+      setImporting(false);
+    }
   };
 
   // ── Success screen ──────────────────────────────────────────────────────────
@@ -1831,7 +2030,7 @@ function MockImport({
         </div>
         <div>
           <div className="text-[17px] font-bold text-[#0F172A] mb-1">
-            {isRebaseline ? `Baseline v${nextVersion} uploaded` : "Schedule imported"}
+            {isRebaseline ? `Baseline v${actualVersionNumber ?? nextVersion} uploaded` : "Schedule imported"}
           </div>
           <div className="text-[13px] text-[#64748B]">
             {rows.length} tasks imported from <span className="font-semibold text-[#0F172A]">{fileName}</span>
@@ -1846,7 +2045,12 @@ function MockImport({
             View schedule history
           </button>
           <button
-            onClick={() => router.push(`/dashboard/schedule/gantt`)}
+            onClick={() => {
+              const params = new URLSearchParams();
+              if (realProjectId) params.set("projectId", realProjectId);
+              if (realWorkspaceId) params.set("workspaceId", realWorkspaceId);
+              router.push(`/dashboard/schedule/gantt${params.size ? `?${params}` : ""}`);
+            }}
             className="px-5 py-2.5 rounded-xl text-[13px] font-semibold text-[#475569] border border-[#E2E8F0] bg-white hover:bg-[#F8FAFC] transition-colors cursor-pointer"
           >
             Open Gantt
@@ -1886,30 +2090,44 @@ function MockImport({
             onDrop={handleDrop}
             className={`border-2 border-dashed rounded-lg p-16 text-center cursor-pointer transition-colors ${dragging ? "border-[#2563EB] bg-[#EFF6FF]" : "border-[#E2E8F0] hover:border-[#94A3B8]"}`}
           >
-            <div className="mb-3">{isRebaseline ? <RefreshCw size={48} className="text-[#94A3B8] mx-auto" /> : <Upload size={48} className="text-[#94A3B8] mx-auto" />}</div>
-            <div className="text-sm font-semibold text-[#0F172A] mb-1">
-              Upload Baseline v{nextVersion} for {projectName}
-            </div>
-            <div className="text-xs text-[#94A3B8] mb-1">
-              {isRebaseline
-                ? "This will replace the active baseline — previous versions are kept in history above"
-                : <span>This will become the baseline schedule for <span className="font-semibold text-[#0F172A]">{projectName}</span></span>
-              }
-            </div>
-            <div className="text-xs text-[#94A3B8] mb-4">Supports {modeMethod.formats.join(", ")} — select multiple files at once</div>
-            <label>
-              <input type="file" accept={modeMethod.accepts} multiple className="hidden"
-                onChange={e => { if (e.target.files?.length) handleFiles(e.target.files); e.target.value = ""; }} />
-              <span className="inline-block px-5 py-2 bg-[#2563EB] text-white rounded-md text-[13px] font-semibold cursor-pointer hover:bg-[#1D4ED8] transition-colors">
-                Browse Files
-              </span>
-            </label>
-            {fileQueue.length > 1 && (
-              <div className="mt-3 text-[11px] text-[#475569]">
-                {fileQueue.length} files queued — processing <span className="font-semibold text-[#0F172A]">{fileQueue[0]?.file.name}</span>
-              </div>
+            {parsing ? (
+              <>
+                <Loader size={48} className="text-[#2563EB] mx-auto mb-3 animate-spin" />
+                <div className="text-sm font-semibold text-[#0F172A]">Reading {fileName}…</div>
+              </>
+            ) : (
+              <>
+                <div className="mb-3">{isRebaseline ? <RefreshCw size={48} className="text-[#94A3B8] mx-auto" /> : <Upload size={48} className="text-[#94A3B8] mx-auto" />}</div>
+                <div className="text-sm font-semibold text-[#0F172A] mb-1">
+                  Upload Baseline v{nextVersion} for {projectName}
+                </div>
+                <div className="text-xs text-[#94A3B8] mb-1">
+                  {isRebaseline
+                    ? "This will replace the active baseline — previous versions are kept in history above"
+                    : <span>This will become the baseline schedule for <span className="font-semibold text-[#0F172A]">{projectName}</span></span>
+                  }
+                </div>
+                <div className="text-xs text-[#94A3B8] mb-4">Supports {modeMethod.formats.join(", ")} — select multiple files at once</div>
+                <label>
+                  <input type="file" accept={modeMethod.accepts} multiple className="hidden"
+                    onChange={e => { if (e.target.files?.length) handleFiles(e.target.files); e.target.value = ""; }} />
+                  <span className="inline-block px-5 py-2 bg-[#2563EB] text-white rounded-md text-[13px] font-semibold cursor-pointer hover:bg-[#1D4ED8] transition-colors">
+                    Browse Files
+                  </span>
+                </label>
+                {fileQueue.length > 1 && (
+                  <div className="mt-3 text-[11px] text-[#475569]">
+                    {fileQueue.length} files queued — processing <span className="font-semibold text-[#0F172A]">{fileQueue[0]?.file.name}</span>
+                  </div>
+                )}
+              </>
             )}
           </div>
+          {parseError && (
+            <div className="mt-3 px-3 py-2 bg-[#FEF2F2] border border-[#FCA5A5] rounded-lg text-[12px] text-[#DC2626] font-semibold flex items-center gap-2">
+              <AlertTriangle size={13} className="shrink-0" /> {parseError}
+            </div>
+          )}
         </Card>
       )}
 
@@ -1925,20 +2143,64 @@ function MockImport({
               <Btn small primary onClick={() => setStep("preview")}>Next: Preview →</Btn>
             </div>
           </div>
-          <div className="space-y-2">
-            {headers.map(h => (
-              <div key={h} className="flex items-center gap-3 py-2 px-3 rounded-md bg-[#F8FAFC]">
-                <div className="w-48 text-xs font-semibold text-[#0F172A] font-mono">{h}</div>
-                <span className="text-[#94A3B8] text-sm">→</span>
-                <select value={mappings[h] || ""} onChange={e => setMappings({ ...mappings, [h]: e.target.value })}
-                  className="flex-1 border border-[#E2E8F0] rounded-md px-3 py-1.5 text-xs bg-white text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#2563EB]">
-                  <option value="">Select field...</option>
-                  {BLUQ_FIELDS.map(f => <option key={f} value={f}>{f}</option>)}
-                </select>
-                {mappings[h] && mappings[h] !== "— Skip Column —" && <span className="text-[#059669] text-sm">✓</span>}
-              </div>
-            ))}
+
+          {/* Confidence legend */}
+          <div className="flex items-center gap-3 mb-3 text-[11px] text-[#94A3B8]">
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#059669] inline-block" /> High confidence</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#D97706] inline-block" /> Medium — verify</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#94A3B8] inline-block" /> Unmapped</span>
           </div>
+
+          <div className="space-y-1.5">
+            {headers.map(h => {
+              const conf = confidence[h] ?? null;
+              const mapped = mappings[h] && mappings[h] !== "— Skip Column —";
+              const confColor = conf === "high" ? "#059669" : conf === "medium" ? "#D97706" : "#94A3B8";
+              const confLabel = conf === "high" ? "High" : conf === "medium" ? "Medium" : "—";
+              const rowBg = conf === "high" ? "#F0FDF4" : conf === "medium" ? "#FFFBEB" : "#F8FAFC";
+              const borderColor = conf === "high" ? "#BBF7D0" : conf === "medium" ? "#FDE68A" : "#E2E8F0";
+              return (
+                <div key={h} className="flex items-center gap-3 py-2 px-3 rounded-md border"
+                  style={{ background: rowBg, borderColor }}>
+                  {/* Confidence dot */}
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: confColor }} />
+                  {/* Original column name */}
+                  <div className="w-40 text-xs font-semibold text-[#0F172A] font-mono truncate" title={h}>{h}</div>
+                  {/* Confidence label */}
+                  <div className="w-16 text-[10px] font-bold shrink-0" style={{ color: confColor }}>{confLabel}</div>
+                  <span className="text-[#94A3B8] text-sm shrink-0">→</span>
+                  {/* Field selector */}
+                  <select
+                    value={mappings[h] || ""}
+                    onChange={e => {
+                      setMappings({ ...mappings, [h]: e.target.value });
+                      setConfidence({ ...confidence, [h]: e.target.value ? "high" : null });
+                    }}
+                    className="flex-1 border border-[#E2E8F0] rounded-md px-3 py-1.5 text-xs bg-white text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
+                  >
+                    <option value="">— Skip column —</option>
+                    {CANONICAL_FIELDS.map(f => <option key={f} value={f}>{f}</option>)}
+                  </select>
+                  {mapped && <span className="text-[#059669] text-sm shrink-0">✓</span>}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Summary counts */}
+          {(() => {
+            const high = headers.filter(h => confidence[h] === "high" && mappings[h]).length;
+            const medium = headers.filter(h => confidence[h] === "medium" && mappings[h]).length;
+            const unmapped = headers.filter(h => !mappings[h]).length;
+            return (
+              <div className="mt-3 flex items-center gap-3 text-[11px]">
+                {high > 0 && <span className="text-[#059669] font-semibold">{high} auto-mapped</span>}
+                {medium > 0 && <span className="text-[#D97706] font-semibold">{medium} need review</span>}
+                {unmapped > 0 && <span className="text-[#94A3B8]">{unmapped} unmapped (will be skipped)</span>}
+              </div>
+            );
+          })()}
+
           <div className="mt-4 border-t border-[#E2E8F0] pt-4">
             <div className="text-[11px] font-bold text-[#475569] mb-2">SAMPLE DATA (first 2 rows)</div>
             <div className="overflow-x-auto">
@@ -1979,6 +2241,11 @@ function MockImport({
               {rows.length} tasks ready as Baseline v{nextVersion} for {projectName} · {Object.values(mappings).filter(v => v && v !== "— Skip Column —").length} columns mapped
             </span>
           </div>
+          {importError && (
+            <div className="mt-3 px-3 py-2 bg-[#FEF2F2] border border-[#FCA5A5] rounded-lg text-[12px] text-[#DC2626] font-semibold flex items-center gap-2">
+              <AlertTriangle size={13} className="shrink-0" /> {importError}
+            </div>
+          )}
         </Card>
       )}
 
@@ -2117,7 +2384,7 @@ function ImportCSVContent() {
   }
 
   if (importMode === "manual") {
-    return <ManualScheduleSetup projectId={projectIdParam} projectName={projectName} onBack={goBack} />;
+    return <ManualScheduleSetup projectId={projectIdParam} workspaceId={workspaceId ?? ""} projectName={projectName} onBack={goBack} />;
   }
 
   const handleImportComplete = (info: { versionNumber: number; fileName: string; taskCount: number }) => {
@@ -2140,6 +2407,8 @@ function ImportCSVContent() {
 
   const mockImportProps = {
     projectId: Number(projectIdParam),
+    realProjectId: real ? projectIdParam : undefined,
+    realWorkspaceId: real ? (workspaceId ?? undefined) : undefined,
     projectName,
     mode: importMode,
     onBack: goBack,

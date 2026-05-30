@@ -387,16 +387,18 @@ interface ProjectDetailViewProps {
   project: Project & { clientName?: string };
   onBack: () => void;
   wrapperClassName?: string;
+  initialTasks?: ScheduleTask[] | null;
 }
 
 export default function ProjectDetailView({
   project: proj,
   onBack,
   wrapperClassName = "",
+  initialTasks,
 }: ProjectDetailViewProps) {
-  const [tasks, setTasks]   = useState<ScheduleTask[]>([]);
+  const [tasks, setTasks]   = useState<ScheduleTask[]>(Array.isArray(initialTasks) ? initialTasks : []);
   const [issues, setIssues] = useState<ProjectIssue[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!Array.isArray(initialTasks));
   const router = useRouter();
   const { workspaceId, isDesignMode } = useWorkspace();
 
@@ -411,6 +413,18 @@ export default function ProjectDetailView({
   const real = !isDesignMode && isRealProject(projectIdStr) && !!workspaceId;
 
   useEffect(() => {
+    if (Array.isArray(initialTasks)) {
+      // Already have tasks from parent prefetch — use them, no fetch needed
+      setTasks(initialTasks);
+      setLoading(false);
+      return;
+    }
+    if (initialTasks === null) {
+      // Parent prefetch in progress — wait for it (parent will re-render with array)
+      setLoading(true);
+      return;
+    }
+    // No prefetch from parent (design mode or undefined) — fetch ourselves
     setLoading(true);
     if (real && workspaceId) {
       fetchTasks(projectIdStr, workspaceId)
@@ -423,7 +437,7 @@ export default function ProjectDetailView({
         getProjectIssues(Number(proj.id)),
       ]).then(([t, i]) => { setTasks(t); setIssues(i); setLoading(false); });
     }
-  }, [proj.id, workspaceId, real]);
+  }, [proj.id, workspaceId, real, initialTasks]);
 
   // Live task updates + schedule:generated events
   useTaskSocket({

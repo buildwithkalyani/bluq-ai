@@ -845,8 +845,15 @@ function ProjectSettingsPageInner() {
 
   if (loadingProjects) {
     return (
-      <div className="p-5 flex items-center justify-center h-full">
-        <div className="text-sm text-[#475569]">Loading projects…</div>
+      <div className="px-6 py-5 animate-pulse space-y-5">
+        <div className="h-6 w-40 bg-[#E2E8F0] rounded" />
+        <div className="h-4 w-24 bg-[#E2E8F0] rounded" />
+        <div className="flex gap-6 border-b border-[#E2E8F0] pb-0">
+          {[1, 2, 3].map((i) => <div key={i} className="h-4 w-20 bg-[#E2E8F0] rounded mb-3" />)}
+        </div>
+        <div className="space-y-3">
+          {[1, 2, 3, 4, 5].map((i) => <div key={i} className="h-10 bg-[#E2E8F0] rounded-lg" />)}
+        </div>
       </div>
     );
   }

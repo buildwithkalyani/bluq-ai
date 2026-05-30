@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useMemo, Suspense } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, Suspense } from 'react';
 import { Search, Pencil, Trash2, Plus } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import {
@@ -79,6 +79,7 @@ function ListViewPageContent() {
   const projectIdParam = searchParams.get("projectId") ?? "0";
   const urlWs = searchParams.get("workspaceId");
   const workspaceId = (urlWs && urlWs !== "null") ? urlWs : ctxWorkspaceId;
+  const versionId = searchParams.get("versionId") ?? undefined;
   const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
   const selectedTaskData = tasks.find(t => t.id === selectedTask) ?? null;
 
@@ -86,7 +87,7 @@ function ListViewPageContent() {
     if (wsLoading) return;
     setLoading(true);
     const taskLoader = real
-      ? fetchTasks(projectIdParam, workspaceId!)
+      ? fetchTasks(projectIdParam, workspaceId!, undefined, versionId)
       : isDesignMode
         ? getScheduleTasks(Number(projectIdParam))
         : Promise.resolve([]);
@@ -102,7 +103,22 @@ function ListViewPageContent() {
       setCollapsedAreas(new Set());
       setCollapsedTasks(new Set());
     });
-  }, [projectIdParam, workspaceId, wsLoading, isDesignMode]);
+  }, [projectIdParam, workspaceId, wsLoading, isDesignMode, versionId]);
+
+  // Refetch tasks when an import completes on the import-csv page
+  const refetchTasks = useCallback(() => {
+    if (!real) return;
+    fetchTasks(projectIdParam, workspaceId!, undefined, versionId).then(t => setTasks(t)).catch(console.error);
+  }, [real, projectIdParam, workspaceId, versionId]);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { projectId: pid } = (e as CustomEvent).detail;
+      if (pid === projectIdParam) refetchTasks();
+    };
+    window.addEventListener("bluq_tasks_imported", handler);
+    return () => window.removeEventListener("bluq_tasks_imported", handler);
+  }, [projectIdParam, refetchTasks]);
 
   const togglePhase = (p: string) =>
     setCollapsedPhases(prev => { const s = new Set(prev); s.has(p) ? s.delete(p) : s.add(p); return s; });
