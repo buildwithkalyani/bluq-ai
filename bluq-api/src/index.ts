@@ -28,6 +28,7 @@ dotenv.config();
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
+import multipart from "@fastify/multipart";
 
 // Routes
 import { healthRoute } from "./routes/health.js";
@@ -51,6 +52,7 @@ import { startPdfWorker } from "./workers/pdf.worker.js";
 import { initSocketServer } from "./lib/socket.js";
 
 const app = Fastify({ logger: true });
+app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } }); // 50 MB max
 
 // ---------------------------------------------------------------------------
 // RAW BODY CAPTURE

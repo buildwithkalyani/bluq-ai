@@ -19,7 +19,8 @@ import {
 import ProjectDetailView from "./ProjectDetailView";
 import CreateProjectModal from "./CreateProjectModal";
 import { useWorkspace } from "@/context/workspace";
-import { fetchProjects, deleteProject, fetchPinnedProjects, updatePinnedProjects } from "@/lib/api-client";
+import { fetchProjects, fetchTasks, deleteProject, fetchPinnedProjects, updatePinnedProjects, isRealProject } from "@/lib/api-client";
+import type { ScheduleTask } from "@/lib/mock-data";
 
 function fmtDate(iso: string): string {
   if (!iso || iso === "TBD") return iso;
@@ -135,7 +136,9 @@ function OverviewContent() {
 
   const [projects, setProjects] = useState<Project[]>(readInitialProjects);
   const [loading, setLoading] = useState<boolean>(() => readInitialProjects().length === 0);
+  const [fetching, setFetching] = useState(false);
   const [isOutdated, setIsOutdated] = useState(false);
+  const [prefetchedTasks, setPrefetchedTasks] = useState<ScheduleTask[] | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
@@ -171,6 +174,7 @@ function OverviewContent() {
       }
 
       // Fetch fresh in background
+      setFetching(true);
       fetchProjects(workspaceId)
         .then((rows) => {
           const fresh = mapBackendProjects(rows);
@@ -188,15 +192,15 @@ function OverviewContent() {
           // Surface soft indicator only if cache is stale (> 5 min old)
           const age = cached ? Date.now() - cached.lastFetchedAt : Infinity;
           if (age > STALE_MS) setIsOutdated(true);
-          setLoading(false);
-        });
+        })
+        .finally(() => { setLoading(false); setFetching(false); });
     } else if (isDesignMode) {
       getProjects().then((data) => {
         setProjects(data);
-        setLoading(false);
-      });
+      }).finally(() => { setLoading(false); setFetching(false); });
     } else {
       setLoading(false);
+      // keep fetching=true — workspace will redirect to onboarding if truly no workspace
     }
   }, [workspaceId, wsLoading, isDesignMode]);
 
@@ -211,6 +215,16 @@ function OverviewContent() {
     }
     setMenuOpenProjectId(null);
   };
+
+  // Parallel prefetch: start fetchTasks as soon as workspaceId + projectId are known,
+  // without waiting for fetchProjects to complete first.
+  useEffect(() => {
+    if (!workspaceId || !selectedProjectId || !isRealProject(selectedProjectId)) return;
+    setPrefetchedTasks(null);
+    fetchTasks(selectedProjectId, workspaceId)
+      .then(t => setPrefetchedTasks(t))
+      .catch(() => setPrefetchedTasks([]));
+  }, [workspaceId, selectedProjectId]);
 
   const baseFiltered = projects.filter((p) => {
     const matchesSearch =
@@ -251,7 +265,7 @@ function OverviewContent() {
   };
 
 
-  if (loading) {
+  if (loading || wsLoading) {
     return (
       <div className="p-5">
         <div className="animate-pulse space-y-4">
@@ -279,9 +293,18 @@ function OverviewContent() {
             project={selectedProject}
             onBack={goBack}
             wrapperClassName="max-w-7xl mx-auto"
+            initialTasks={prefetchedTasks}
           />
+        ) : (fetching || !workspaceId) ? (
+          <div className="animate-pulse space-y-4 p-5">
+            <div className="h-6 w-48 bg-[#E2E8F0] rounded" />
+            <div className="grid grid-cols-2 gap-3.5">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-48 bg-[#E2E8F0] rounded-lg" />
+              ))}
+            </div>
+          </div>
         ) : (
-          // projectId in URL but not found in loaded list — redirect back to list
           <div className="p-10 text-center">
             <div className="text-[14px] text-[#64748B] mb-3">Project not found.</div>
             <button onClick={goBack} className="text-[13px] text-[#2563EB] font-semibold hover:underline cursor-pointer">← Back to all projects</button>
