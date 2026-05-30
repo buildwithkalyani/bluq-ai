@@ -19,7 +19,8 @@ import {
 import ProjectDetailView from "./ProjectDetailView";
 import CreateProjectModal from "./CreateProjectModal";
 import { useWorkspace } from "@/context/workspace";
-import { fetchProjects, deleteProject, fetchPinnedProjects, updatePinnedProjects } from "@/lib/api-client";
+import { fetchProjects, fetchTasks, deleteProject, fetchPinnedProjects, updatePinnedProjects, isRealProject } from "@/lib/api-client";
+import type { ScheduleTask } from "@/lib/mock-data";
 
 function fmtDate(iso: string): string {
   if (!iso || iso === "TBD") return iso;
@@ -137,6 +138,7 @@ function OverviewContent() {
   const [loading, setLoading] = useState<boolean>(() => readInitialProjects().length === 0);
   const [fetching, setFetching] = useState(false);
   const [isOutdated, setIsOutdated] = useState(false);
+  const [prefetchedTasks, setPrefetchedTasks] = useState<ScheduleTask[] | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
@@ -195,10 +197,10 @@ function OverviewContent() {
     } else if (isDesignMode) {
       getProjects().then((data) => {
         setProjects(data);
-        setLoading(false);
-      });
+      }).finally(() => { setLoading(false); setFetching(false); });
     } else {
       setLoading(false);
+      // keep fetching=true — workspace will redirect to onboarding if truly no workspace
     }
   }, [workspaceId, wsLoading, isDesignMode]);
 
@@ -213,6 +215,16 @@ function OverviewContent() {
     }
     setMenuOpenProjectId(null);
   };
+
+  // Parallel prefetch: start fetchTasks as soon as workspaceId + projectId are known,
+  // without waiting for fetchProjects to complete first.
+  useEffect(() => {
+    if (!workspaceId || !selectedProjectId || !isRealProject(selectedProjectId)) return;
+    setPrefetchedTasks(null);
+    fetchTasks(selectedProjectId, workspaceId)
+      .then(t => setPrefetchedTasks(t))
+      .catch(() => setPrefetchedTasks([]));
+  }, [workspaceId, selectedProjectId]);
 
   const baseFiltered = projects.filter((p) => {
     const matchesSearch =
@@ -281,8 +293,9 @@ function OverviewContent() {
             project={selectedProject}
             onBack={goBack}
             wrapperClassName="max-w-7xl mx-auto"
+            initialTasks={prefetchedTasks}
           />
-        ) : fetching ? (
+        ) : (fetching || !workspaceId) ? (
           <div className="animate-pulse space-y-4 p-5">
             <div className="h-6 w-48 bg-[#E2E8F0] rounded" />
             <div className="grid grid-cols-2 gap-3.5">

@@ -338,6 +338,7 @@ export const tasks = pgTable("tasks", {
 	phase: text(),
 	isMilestone: boolean("is_milestone").default(false),
 	parentTaskId: uuid("parent_task_id"),
+	scheduleVersionId: uuid("schedule_version_id"),
 	sortOrder: integer("sort_order").default(0),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
@@ -356,6 +357,11 @@ export const tasks = pgTable("tasks", {
 		foreignColumns: [table.id],
 		name: "tasks_parent_task_id_fkey"
 	}),
+	foreignKey({
+		columns: [table.scheduleVersionId],
+		foreignColumns: [scheduleVersions.id],
+		name: "tasks_schedule_version_id_fkey"
+	}).onDelete("set null"),
 	foreignKey({
 		columns: [table.projectId],
 		foreignColumns: [projects.id],

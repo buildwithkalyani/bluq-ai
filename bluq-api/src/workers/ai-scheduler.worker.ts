@@ -457,6 +457,7 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
   const taskInserts = allTasks.map((t, index) => ({
     workspaceId,
     projectId,
+    scheduleVersionId: savedVersion.id,
     title: t.fullName,
     description: `${t.originalCode} | ${t.phase} | Qty: ${t.estimatedQuantity} ${t.unit} | Crew: ${crewToString(t.crew)}`,
     status: "not_started" as const,

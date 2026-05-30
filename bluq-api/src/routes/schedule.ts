@@ -24,6 +24,15 @@ import { verifySession } from "../lib/verifySession.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Converts MSPDI ISO 8601 duration (e.g. "PT8H", "P5DT0H") to working days */
+function parseMspDuration(iso: string): number {
+  const days = iso.match(/(\d+(?:\.\d+)?)D/)?.[1];
+  const hours = iso.match(/(\d+(?:\.\d+)?)H/)?.[1];
+  const d = parseFloat(days ?? "0");
+  const h = parseFloat(hours ?? "0");
+  return Math.round(d + h / 8) || 1;
+}
+
 export async function scheduleRoute(app: FastifyInstance) {
 
   // =========================================================================
@@ -475,7 +484,7 @@ export async function scheduleRoute(app: FastifyInstance) {
   // =========================================================================
   app.post("/schedule/versions", { preHandler: verifySession }, async (request, reply) => {
     try {
-      const body = request.body as { projectId: string; workspaceId: string };
+      const body = request.body as { projectId: string; workspaceId: string; generatedBy?: string; sourceFileName?: string };
       const userId = request.userId;
 
       if (!body.projectId || !body.workspaceId) {
@@ -508,7 +517,8 @@ export async function scheduleRoute(app: FastifyInstance) {
           versionNumber: nextVersion,
           isBaseline: true,
           isLocked: false,
-          generatedBy: "manual",
+          generatedBy: body.generatedBy ?? "manual",
+          sourceFileName: body.sourceFileName ?? null,
           uploadedBy: userId,
           scheduleJson: {},
         })
@@ -536,6 +546,334 @@ export async function scheduleRoute(app: FastifyInstance) {
     } catch (err: any) {
       console.error("POST /schedule/versions error:", err.message);
       return reply.status(500).send({ error: "Failed to create schedule version" });
+    }
+  });
+
+  // =========================================================================
+  // POST /schedule/parse-preview
+  // Accepts a multipart file upload (.mpp, .xml, .xer, .csv, .xlsx)
+  // Returns { headers: string[], rows: string[][], error?: string, suggestion?: string }
+  // Used by the import wizard to show real column data before mapping.
+  // =========================================================================
+  app.post("/schedule/parse-preview", { preHandler: verifySession }, async (request, reply) => {
+    try {
+      const data = await request.file();
+      if (!data) return reply.status(400).send({ error: "No file uploaded" });
+
+      const fileName = data.filename;
+      const ext = fileName.toLowerCase().split(".").pop() ?? "";
+      const chunks: Buffer[] = [];
+      for await (const chunk of data.file) chunks.push(chunk);
+      const buf = Buffer.concat(chunks);
+
+      // ── XER (Primavera P6) ──────────────────────────────────────────────────
+      if (ext === "xer") {
+        const text = buf.toString("utf-8");
+        const lines = text.split(/\r?\n/);
+
+        // State machine — XER sections can appear in any order
+        type XerSection = "task" | "taskpred" | "projwbs" | null;
+        let section: XerSection = null;
+
+        let taskHeaders: string[] = [];
+        const taskRows: string[][] = [];
+        let predHeaders: string[] = [];
+        const predRows: string[][] = [];
+        let wbsHeaders: string[] = [];
+        const wbsRows: string[][] = [];
+
+        for (const line of lines) {
+          // Section header — %T TASK must not match %T TASKPRED
+          if (/^%T\s+TASK\b/.test(line) && !/^%T\s+TASKPRED/.test(line)) {
+            section = "task"; continue;
+          }
+          if (/^%T\s+TASKPRED\b/.test(line)) { section = "taskpred"; continue; }
+          if (/^%T\s+PROJWBS\b/.test(line))  { section = "projwbs";  continue; }
+          if (line.startsWith("%T"))          { section = null; continue; }
+
+          const fields = line.slice(3).split("\t");
+          if (line.startsWith("%F") && section === "task")     { taskHeaders = fields; continue; }
+          if (line.startsWith("%F") && section === "taskpred") { predHeaders = fields; continue; }
+          if (line.startsWith("%F") && section === "projwbs")  { wbsHeaders  = fields; continue; }
+          if (line.startsWith("%R") && section === "task")     { taskRows.push(fields); continue; }
+          if (line.startsWith("%R") && section === "taskpred") { predRows.push(fields); continue; }
+          if (line.startsWith("%R") && section === "projwbs")  { wbsRows.push(fields);  continue; }
+        }
+
+        if (!taskHeaders.length) {
+          return reply.send({ headers: [], rows: [], error: "No TASK section found in XER file" });
+        }
+
+        // ── Build wbs_id → wbs_name from PROJWBS section ─────────────────────
+        const wbsIdCol   = wbsHeaders.indexOf("wbs_id");
+        const wbsNameCol = wbsHeaders.indexOf("wbs_name");
+        const wbsIdToName = new Map<string, string>();
+        if (wbsIdCol !== -1 && wbsNameCol !== -1) {
+          for (const row of wbsRows) {
+            const id   = row[wbsIdCol]?.trim();
+            const name = row[wbsNameCol]?.trim();
+            if (id && name) wbsIdToName.set(id, name);
+          }
+        }
+
+        // ── Build task_id → task_name lookup ──────────────────────────────────
+        const taskIdIdx   = taskHeaders.indexOf("task_id");
+        const taskNameIdx = taskHeaders.indexOf("task_name");
+        const wbsIdIdx    = taskHeaders.indexOf("wbs_id");
+        const taskIdToName = new Map<string, string>();
+        for (const row of taskRows) {
+          const id   = row[taskIdIdx]?.trim();
+          const name = row[taskNameIdx]?.trim();
+          if (id && name) taskIdToName.set(id, name);
+        }
+
+        // ── Build task_id → [{name, type}] via TASKPRED ───────────────────────
+        const succIdIdx   = predHeaders.indexOf("task_id");      // the successor
+        const predIdIdx   = predHeaders.indexOf("pred_task_id"); // the predecessor
+        const predTypeIdx = predHeaders.indexOf("pred_type");
+
+        const taskIdToPreds = new Map<string, Array<{ name: string; type: string }>>();
+        if (succIdIdx !== -1 && predIdIdx !== -1) {
+          for (const row of predRows) {
+            const succId   = row[succIdIdx]?.trim();
+            const predId   = row[predIdIdx]?.trim();
+            const predName = predId ? taskIdToName.get(predId) : undefined;
+            if (succId && predName) {
+              const rawType = predTypeIdx !== -1 ? (row[predTypeIdx]?.trim() ?? "") : "";
+              const depType = (["FS", "FF", "SS", "SF"] as const).includes(rawType as "FS") ? rawType : "FS";
+              if (!taskIdToPreds.has(succId)) taskIdToPreds.set(succId, []);
+              taskIdToPreds.get(succId)!.push({ name: predName, type: depType });
+            }
+          }
+        }
+
+        // ── Extract wanted columns + resolved Predecessor ─────────────────────
+        const wanted = [
+          "task_id", "task_name", "target_start_date",
+          "target_end_date", "target_drtn_hr_cnt", "phys_complete_pct",
+        ];
+        const labels: Record<string, string> = {
+          task_name: "Activity", target_start_date: "Start Date",
+          target_end_date: "End Date", target_drtn_hr_cnt: "Duration",
+          phys_complete_pct: "% Complete",
+        };
+
+        const idxs = wanted
+          .filter(k => k !== "task_id")
+          .map(k => taskHeaders.indexOf(k))
+          .filter(i => i !== -1);
+
+        const durationIdx = taskHeaders.indexOf("target_drtn_hr_cnt");
+        const outHeaders = [...idxs.map(i => labels[taskHeaders[i]] ?? taskHeaders[i]), "Predecessor", "Phase"];
+
+        const outRows = taskRows.map(row => {
+          const taskId = row[taskIdIdx]?.trim();
+          const preds  = taskId ? (taskIdToPreds.get(taskId) ?? []) : [];
+          const wbsId  = wbsIdIdx !== -1 ? row[wbsIdIdx]?.trim() : undefined;
+          const phase  = wbsId ? (wbsIdToName.get(wbsId) ?? "") : "";
+          const cells  = idxs.map(i => {
+            const val = row[i] ?? "";
+            // XER stores duration in hours — convert to working days (÷8)
+            if (i === durationIdx && val !== "") {
+              const hrs = parseFloat(val);
+              return isNaN(hrs) ? val : String(Math.round(hrs / 8) || 1);
+            }
+            return val;
+          });
+          // Encode predecessors as "Name|TYPE" so bulk import can preserve dep type
+          return [...cells, preds.map(p => `${p.name}|${p.type}`).join(", "), phase];
+        });
+
+        return reply.send({ headers: outHeaders, rows: outRows });
+      }
+
+      // ── XML — detect P6 vs MSPDI, parse accordingly ───────────────────────
+      if (ext === "xml") {
+        const { XMLParser } = await import("fast-xml-parser");
+        const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
+        const xmlText = buf.toString("utf-8");
+        const parsed = parser.parse(xmlText);
+
+        // ── Primavera P6 XML detection ─────────────────────────────────────
+        // P6 XML root is <APIBusinessObjects> with oracle.com namespace,
+        // or the parsed object has top-level Activity/Relationship keys.
+        const isP6 =
+          xmlText.includes("oracle.com/Primavera") ||
+          parsed?.APIBusinessObjects !== undefined ||
+          parsed?.APIBusinessObjects?.Activity !== undefined ||
+          // Some P6 exports wrap in a Project element but still have PlannedStartDate
+          (parsed?.Project?.Activity !== undefined);
+
+        if (isP6) {
+          // P6 XML structure: Activities + Relationships + WBS at top level or under Project
+          const root = parsed?.APIBusinessObjects ?? parsed?.Project ?? parsed;
+          const actList: any[] = Array.isArray(root?.Activity)
+            ? root.Activity
+            : root?.Activity ? [root.Activity] : [];
+
+          const relList: any[] = Array.isArray(root?.Relationship)
+            ? root.Relationship
+            : root?.Relationship ? [root.Relationship] : [];
+
+          const wbsList: any[] = Array.isArray(root?.WBS)
+            ? root.WBS
+            : root?.WBS ? [root.WBS] : [];
+
+          // Build WBSObjectId → wbs_name for phase lookup
+          const wbsObjIdToName = new Map<string, string>();
+          for (const w of wbsList) {
+            const id   = String(w.ObjectId ?? "");
+            const name = String(w.Name ?? "");
+            if (id && name) wbsObjIdToName.set(id, name);
+          }
+
+          // Build ObjectId → Name lookup for relationship resolution
+          const objIdToName = new Map<string, string>();
+          for (const a of actList) {
+            const objId = String(a.ObjectId ?? a.Id ?? "");
+            const name  = String(a.Name ?? "");
+            if (objId && name) objIdToName.set(objId, name);
+          }
+
+          // Build successor ObjectId → [{name, type}] — P6 Relationship.Type is "FS"/"FF"/etc.
+          const VALID_P6_TYPES = new Set(["FS", "FF", "SS", "SF"]);
+          const succToPreds = new Map<string, Array<{ name: string; type: string }>>();
+          for (const r of relList) {
+            const predObjId = String(r.PredecessorActivityObjectId ?? r.PredecessorActivity ?? "");
+            const succObjId = String(r.SuccessorActivityObjectId   ?? r.SuccessorActivity   ?? "");
+            const predName  = predObjId ? objIdToName.get(predObjId) : undefined;
+            if (succObjId && predName) {
+              const rawType = String(r.Type ?? "").toUpperCase();
+              const depType = VALID_P6_TYPES.has(rawType) ? rawType : "FS";
+              if (!succToPreds.has(succObjId)) succToPreds.set(succObjId, []);
+              succToPreds.get(succObjId)!.push({ name: predName, type: depType });
+            }
+          }
+
+          const rows = actList
+            .filter((a: any) => a.Name && a.Type !== "WBS") // skip WBS summary rows
+            .map((a: any) => {
+              const objId = String(a.ObjectId ?? a.Id ?? "");
+              const preds = succToPreds.get(objId) ?? [];
+              const start = (a.PlannedStartDate ?? a.StartDate ?? a.EarlyStartDate ?? "")
+                .toString().split("T")[0];
+              const end   = (a.PlannedFinishDate ?? a.FinishDate ?? a.EarlyFinishDate ?? "")
+                .toString().split("T")[0];
+              const dur   = a.PlannedDuration ?? a.Duration ?? "";
+              const pct   = a.PercentComplete ?? a.PhysicalPercentComplete ?? 0;
+              const wbsId = String(a.WBSObjectId ?? a.WBSId ?? "");
+              const phase = wbsId ? (wbsObjIdToName.get(wbsId) ?? "") : "";
+              return [
+                String(a.Name),
+                start,
+                end,
+                dur ? String(Math.round(Number(dur))) : "",
+                preds.map(p => `${p.name}|${p.type}`).join(", "),
+                String(pct),
+                phase,
+              ];
+            });
+
+          return reply.send({
+            headers: ["Task Name", "Start Date", "End Date", "Duration (days)", "Predecessor", "% Complete", "Phase"],
+            rows,
+          });
+        }
+
+        // ── MSPDI (MS Project XML) ─────────────────────────────────────────
+        const taskList: any[] =
+          parsed?.Project?.Tasks?.Task ??
+          parsed?.["msp:Project"]?.["msp:Tasks"]?.["msp:Task"] ?? [];
+        const mspTasks = Array.isArray(taskList) ? taskList : [taskList];
+
+        // Build UID → Name for predecessor resolution
+        const uidToName = new Map<string, string>();
+        for (const t of mspTasks) {
+          if (t.UID != null && t.Name) uidToName.set(String(t.UID), String(t.Name));
+        }
+
+        // Derive phase from nearest parent Summary task using OutlineLevel stack.
+        // Process tasks in document order (depth-first outline order in MSPDI).
+        // For each task: pop stack entries at same-or-deeper level, then push if Summary.
+        // Phase for a leaf task = name of stack top = nearest enclosing Summary.
+        const uidToPhase = new Map<string, string>();
+        const summaryStack: Array<{ level: number; name: string }> = [];
+        for (const t of mspTasks) {
+          const level = Number(t.OutlineLevel ?? 0);
+          const isSummary = t.Summary === true || t.Summary === 1
+            || String(t.Summary) === "1" || String(t.Summary).toLowerCase() === "true";
+          while (summaryStack.length && summaryStack[summaryStack.length - 1].level >= level) {
+            summaryStack.pop();
+          }
+          if (isSummary && t.Name) {
+            summaryStack.push({ level, name: String(t.Name) });
+          } else if (!isSummary && t.UID != null && summaryStack.length) {
+            uidToPhase.set(String(t.UID), summaryStack[summaryStack.length - 1].name);
+          }
+        }
+
+        // MSPDI PredecessorLink.Type is numeric: 0=FF, 1=FS, 2=SF, 3=SS
+        const MSP_DEP_TYPE: Record<number, string> = { 0: "FF", 1: "FS", 2: "SF", 3: "SS" };
+
+        const rows = mspTasks
+          .filter((t: any) => t.Name && !t.Summary)
+          .map((t: any) => {
+            const predLinks = t.PredecessorLink
+              ? (Array.isArray(t.PredecessorLink) ? t.PredecessorLink : [t.PredecessorLink])
+              : [];
+            const predNames = predLinks
+              .flatMap((l: any) => {
+                const name = uidToName.get(String(l.PredecessorUID ?? ""));
+                if (!name) return [];
+                const depType = MSP_DEP_TYPE[Number(l.Type)] ?? "FS";
+                return [`${name}|${depType}`];
+              })
+              .join(", ");
+            const phase = uidToPhase.get(String(t.UID ?? "")) ?? "";
+            return [
+              String(t.Name),
+              t.Start  ? String(t.Start).split("T")[0]  : "",
+              t.Finish ? String(t.Finish).split("T")[0] : "",
+              t.Duration ? String(parseMspDuration(String(t.Duration))) : "",
+              predNames,
+              t.PercentComplete != null ? `${t.PercentComplete}` : "0",
+              phase,
+            ];
+          });
+
+        return reply.send({
+          headers: ["Task Name", "Start Date", "End Date", "Duration (days)", "Predecessor", "% Complete", "Phase"],
+          rows,
+        });
+      }
+
+      // ── MPP (MS Project binary) ─────────────────────────────────────────────
+      if (ext === "mpp") {
+        // Validate it's a real OLE Compound Document (MPP signature)
+        const { read: cfbRead } = await import("cfb");
+        try {
+          cfbRead(buf, { type: "buffer" });
+          // It's a valid OLE file — guide to XML export
+          return reply.send({
+            headers: [],
+            rows: [],
+            error: "MPP binary format cannot be parsed directly.",
+            suggestion: "In MS Project: File → Save As → change type to 'XML Format (*.xml)' → upload that file instead.",
+          });
+        } catch {
+          return reply.send({
+            headers: [],
+            rows: [],
+            error: "File does not appear to be a valid MS Project file.",
+            suggestion: "Export from MS Project as XML: File → Save As → XML Format (*.xml).",
+          });
+        }
+      }
+
+      return reply.status(400).send({ error: `Unsupported file type: .${ext}` });
+    } catch (err: any) {
+      console.error("POST /schedule/parse-preview error:", err.message);
+      return reply.status(500).send({ error: "Failed to parse file", details: err.message });
     }
   });
 

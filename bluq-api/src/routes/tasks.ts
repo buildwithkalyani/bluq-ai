@@ -1,7 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
 import { tasks, taskDependencies, projects } from "../db/schema.js";
-import { eq, and, ne, lte, gte } from "drizzle-orm";
+import { eq, and, ne, lte, gte, isNull } from "drizzle-orm";
 import { verifySession } from "../lib/verifySession.js";
 import { detectPhase } from "../lib/detect-phase.js";
 
@@ -76,13 +76,17 @@ export async function tasksRoute(app: FastifyInstance) {
   // =========================================================================
   app.get("/tasks", { preHandler: verifySession }, async (request, reply) => {
     try {
-      const { projectId, workspaceId } = request.query as { projectId: string; workspaceId: string };
+      const { projectId, workspaceId, scheduleVersionId } = request.query as { projectId: string; workspaceId: string; scheduleVersionId?: string };
       if (!projectId || !workspaceId) return reply.status(400).send({ error: "projectId and workspaceId required" });
       if (!UUID_REGEX.test(workspaceId) || !UUID_REGEX.test(projectId)) {
         return reply.status(400).send({ error: "projectId and workspaceId must be valid UUIDs" });
       }
-      const data = await db.select().from(tasks).where(and(eq(tasks.projectId, projectId), eq(tasks.workspaceId, workspaceId)));
-      return data;
+      if (scheduleVersionId && !UUID_REGEX.test(scheduleVersionId)) {
+        return reply.status(400).send({ error: "scheduleVersionId must be a valid UUID" });
+      }
+      const conditions = [eq(tasks.projectId, projectId), eq(tasks.workspaceId, workspaceId)];
+      if (scheduleVersionId) conditions.push(eq(tasks.scheduleVersionId, scheduleVersionId));
+      return db.select().from(tasks).where(and(...conditions));
     } catch (err: any) {
       console.error("GET /tasks error:", err.message, err.cause);
       return reply.status(500).send({ error: "Failed to fetch tasks", details: err.message });
@@ -251,6 +255,119 @@ export async function tasksRoute(app: FastifyInstance) {
     } catch (err: any) {
       console.error("GET /tasks/milestones error:", err.message, err.cause);
       return reply.status(500).send({ error: "Failed to fetch milestones", details: err.message });
+    }
+  });
+
+  // =========================================================================
+  // POST /tasks/bulk  — import tasks from a parsed schedule file
+  // Body: { workspaceId, projectId, tasks: [{ title, startDate?, endDate?,
+  //   durationDays?, percentComplete?, contractor?, area?, predecessorName?,
+  //   sortOrder? }] }
+  // =========================================================================
+  app.post("/tasks/bulk", { preHandler: verifySession }, async (request, reply) => {
+    try {
+      const body = request.body as {
+        workspaceId: string;
+        projectId: string;
+        scheduleVersionId?: string;
+        tasks: Array<{
+          title: string;
+          startDate?: string;
+          endDate?: string;
+          durationDays?: number;
+          percentComplete?: number;
+          contractor?: string;
+          area?: string;
+          phase?: string;
+          predecessorName?: string;
+          sortOrder?: number;
+        }>;
+        unmappedColumns?: string[];
+      };
+
+      if (!body.workspaceId || !body.projectId || !Array.isArray(body.tasks) || !body.tasks.length) {
+        return reply.status(400).send({ error: "workspaceId, projectId, and tasks[] are required" });
+      }
+      if (!UUID_REGEX.test(body.workspaceId) || !UUID_REGEX.test(body.projectId)) {
+        return reply.status(400).send({ error: "workspaceId and projectId must be valid UUIDs" });
+      }
+      if (body.scheduleVersionId && !UUID_REGEX.test(body.scheduleVersionId)) {
+        return reply.status(400).send({ error: "scheduleVersionId must be a valid UUID" });
+      }
+
+      if (body.unmappedColumns?.length) {
+        console.log(JSON.stringify({
+          event: "import_unmapped_columns",
+          workspaceId: body.workspaceId,
+          projectId: body.projectId,
+          taskCount: body.tasks.length,
+          unmappedColumns: body.unmappedColumns,
+          ts: new Date().toISOString(),
+        }));
+      }
+
+      const taskValues = body.tasks.map((t, i) => ({
+        workspaceId: body.workspaceId,
+        projectId: body.projectId,
+        scheduleVersionId: body.scheduleVersionId ?? null,
+        title: t.title,
+        startDate: t.startDate ?? null,
+        endDate: t.endDate ?? null,
+        durationDays: t.durationDays ?? null,
+        percentComplete: t.percentComplete != null ? String(t.percentComplete) : "0",
+        contractor: t.contractor ?? null,
+        area: t.area ?? null,
+        phase: t.phase?.trim() || detectPhase(t.title) || null,
+        sortOrder: t.sortOrder ?? i,
+      }));
+
+      // Insert in chunks of 2000 — single giant INSERT can timeout on large schedules.
+      // Collect all created rows first; deps are resolved only after all chunks done.
+      const CHUNK = 2000;
+      const created: (typeof tasks.$inferSelect)[] = [];
+      for (let i = 0; i < taskValues.length; i += CHUNK) {
+        const batch = await db.insert(tasks).values(taskValues.slice(i, i + CHUNK)).returning();
+        created.push(...batch);
+      }
+
+      // Resolve predecessor names → IDs and create dependencies.
+      // predecessorName may be comma-separated. XER encodes dep type as "Name|FS";
+      // plain CSV/XLSX entries have no pipe and default to FS.
+      const nameToId = new Map(
+        body.tasks.map((t, i) => [t.title.toLowerCase().trim(), created[i].id])
+      );
+      const VALID_DEP_TYPES = new Set(["FS", "FF", "SS", "SF"]);
+      const depValues = body.tasks.flatMap((t, i) => {
+        if (!t.predecessorName?.trim()) return [];
+        return t.predecessorName
+          .split(",")
+          .map(s => s.trim())
+          .filter(Boolean)
+          .flatMap(entry => {
+            const pipeIdx = entry.lastIndexOf("|");
+            const name    = pipeIdx !== -1 ? entry.slice(0, pipeIdx).trim() : entry;
+            const rawType = pipeIdx !== -1 ? entry.slice(pipeIdx + 1).trim() : "";
+            const depType = VALID_DEP_TYPES.has(rawType) ? rawType : "FS";
+            const predId  = nameToId.get(name.toLowerCase());
+            if (!predId) return [];
+            return [{
+              workspaceId: body.workspaceId,
+              predecessorId: predId,
+              successorId: created[i].id,
+              dependencyType: depType,
+              lagDays: 0,
+            }];
+          });
+      });
+
+      if (depValues.length) {
+        await db.insert(taskDependencies).values(depValues);
+      }
+
+      return reply.status(201).send({ count: created.length, tasks: created });
+    } catch (err: any) {
+      console.error("POST /tasks/bulk error:", err.message);
+      return reply.status(500).send({ error: "Failed to bulk import tasks", details: err.message });
     }
   });
 

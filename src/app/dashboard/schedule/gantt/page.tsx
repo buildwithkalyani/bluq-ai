@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useMemo, Suspense } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback, Suspense } from 'react';
 import { Search } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { getScheduleTasks, getScheduleDeps, type ScheduleTask, type TaskDependency } from "@/lib/mock-data";
@@ -962,6 +962,7 @@ function GanttChartContent() {
   const projectIdParam = searchParams.get("projectId") ?? "0";
   const urlWs = searchParams.get("workspaceId");
   const workspaceId = (urlWs && urlWs !== "null") ? urlWs : ctxWorkspaceId;
+  const versionId = searchParams.get("versionId") ?? undefined;
   const urlProjectEndDate = searchParams.get("projectEndDate") ?? null;
   const urlProjectStartDate = searchParams.get("projectStartDate") ?? null;
   const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
@@ -1031,7 +1032,7 @@ function GanttChartContent() {
 
       // Fetch tasks + deps first (critical path); schedule version is non-blocking
       Promise.all([
-        fetchTasks(projectIdParam, workspaceId!, signal),
+        fetchTasks(projectIdParam, workspaceId!, signal, versionId),
         fetchTaskDependencies(projectIdParam, workspaceId!, signal),
       ]).then(([freshTasks, depRows]) => {
         const freshDeps = depRows.map(r => ({ from: r.predecessorId, to: r.successorId, type: r.dependencyType, label: r.dependencyType }));
@@ -1061,17 +1062,38 @@ function GanttChartContent() {
       setTasks([]);
       setDeps([]);
     }
-  }, [projectIdParam, workspaceId, isDesignMode]);
+  }, [projectIdParam, workspaceId, isDesignMode, versionId]);
 
   const gapCheckGaps: SuspectedGap[] =
     scheduleVersion?.scheduleJson?.gapCheck?.suspectedGaps?.filter(g => !g.alreadyCovered) ?? [];
 
-  const refreshTasks = () => {
-    if (real) fetchTasks(projectIdParam, workspaceId!).then(fresh => {
-      setTasks(fresh);
-      writeGanttCache(projectIdParam, { tasks: fresh, deps, depIds });
+  const refreshTasksAndDeps = useCallback(() => {
+    if (!real) return;
+    Promise.all([
+      fetchTasks(projectIdParam, workspaceId!, undefined, versionId),
+      fetchTaskDependencies(projectIdParam, workspaceId!),
+    ]).then(([freshTasks, depRows]) => {
+      const freshDeps = depRows.map(r => ({ from: r.predecessorId, to: r.successorId, type: r.dependencyType, label: r.dependencyType }));
+      const freshDepIds: Record<string, string> = {};
+      depRows.forEach(r => { freshDepIds[depIdKey(r.predecessorId, r.successorId)] = r.id; });
+      setTasks(freshTasks);
+      setDeps(freshDeps);
+      setDepIds(freshDepIds);
+      writeGanttCache(projectIdParam, { tasks: freshTasks, deps: freshDeps, depIds: freshDepIds });
     }).catch(console.error);
-  };
+  }, [real, projectIdParam, workspaceId, versionId]);
+
+  const refreshTasks = refreshTasksAndDeps;
+
+  // Listen for import completion from the import-csv page
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { projectId: pid } = (e as CustomEvent).detail;
+      if (pid === projectIdParam) refreshTasksAndDeps();
+    };
+    window.addEventListener("bluq_tasks_imported", handler);
+    return () => window.removeEventListener("bluq_tasks_imported", handler);
+  }, [projectIdParam, refreshTasksAndDeps]);
 
   useTaskSocket({ projectId: real ? projectIdParam : null, setTasks });
 
@@ -1357,6 +1379,7 @@ const handleSaveModal = (data: any, newPreds: any) => {
           contractor: data.contractor || undefined,
           area: data.space || undefined,
           phase: data.phase || undefined,
+          scheduleVersionId: versionId || undefined,
         }).then(created => {
           setTasks(p => p.map(t => t.id === targetId ? { ...t, id: created.id } : t));
           setDeps(p => p.map(d => d.to === targetId ? { ...d, to: created.id } : d));

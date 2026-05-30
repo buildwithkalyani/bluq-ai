@@ -958,13 +958,26 @@ function TopNav() {
   );
 }
 
-function DashboardShell({ children }: { children: React.ReactNode }) {
-  const { loading } = useWorkspace();
-  if (loading) return (
-    <div className="h-screen bg-[#F6F8FA] flex items-center justify-center">
-      <div className="w-6 h-6 border-2 border-[#3A4EA2] border-t-transparent rounded-full animate-spin" />
+function ContentSkeleton() {
+  return (
+    <div className="p-5 animate-pulse space-y-4">
+      <div className="h-6 w-48 bg-[#E2E8F0] rounded" />
+      <div className="flex gap-3">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="flex-1 h-20 bg-[#E2E8F0] rounded-lg" />
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-3.5">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="h-48 bg-[#E2E8F0] rounded-lg" />
+        ))}
+      </div>
     </div>
   );
+}
+
+function DashboardShell({ children }: { children: React.ReactNode }) {
+  const { loading } = useWorkspace();
   return (
     <div className="h-screen flex flex-col bg-[#F6F8FA] text-[#24292f]">
       <Suspense fallback={null}>
@@ -978,7 +991,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
           <Suspense fallback={null}>
             <ProjectAwareSubTabs />
           </Suspense>
-          <div className="flex-1 overflow-auto">{children}</div>
+          <div className="flex-1 overflow-auto">
+            {loading ? <ContentSkeleton /> : children}
+          </div>
         </div>
       </div>
     </div>
