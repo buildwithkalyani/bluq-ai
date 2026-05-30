@@ -603,6 +603,17 @@ export async function sendTeamInvite(email: string, name: string, role: string, 
   await apiPost<{ ok: boolean }>("/team/invite", { email, name, role, workspaceId });
 }
 
+/** GET /team/pinned?workspaceId= → pinned project IDs for current user */
+export async function fetchPinnedProjects(workspaceId: string): Promise<string[]> {
+  const res = await apiFetch<{ pinnedProjectIds: string[] }>(`/team/pinned?workspaceId=${encodeURIComponent(workspaceId)}`);
+  return res.pinnedProjectIds ?? [];
+}
+
+/** PUT /team/pinned — save pinned project IDs for current user */
+export async function updatePinnedProjects(workspaceId: string, pinnedProjectIds: string[]): Promise<void> {
+  await apiPut<{ ok: boolean }>("/team/pinned", { workspaceId, pinnedProjectIds });
+}
+
 export interface TeamMember {
   id: string;
   userId: string;
@@ -852,11 +863,10 @@ export async function getDocumentUploadUrl(
   return apiFetch(`/documents/upload-url?${params}`);
 }
 
-/** POST /documents — save Supabase Storage URL reference after upload */
-export async function deleteDocument(id: string): Promise<void> {
+export async function deleteDocument(id: string, workspaceId: string): Promise<void> {
   const token = await getAuthToken();
   const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
-  const res = await fetch(`${BACKEND_URL}/documents/${id}`, {
+  const res = await fetch(`${BACKEND_URL}/documents/${id}?workspaceId=${workspaceId}`, {
     method: "DELETE",
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });

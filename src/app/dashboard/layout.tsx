@@ -346,6 +346,9 @@ function NewProjectModal({
                 )}
               </div>
             )}
+            {address.trim().length > 0 && !addressValidated && !suggestionsOpen && (
+              <p className="text-red-500 text-[11px] mt-1">Please select a valid address from the suggestions.</p>
+            )}
           </div>
 
           <div>
@@ -416,7 +419,7 @@ function NewProjectModal({
           </button>
           <button
             onClick={handleCreate}
-            disabled={!name.trim() || creating}
+            disabled={!name.trim() || creating || (address.trim().length > 0 && !addressValidated)}
             className="px-5 py-2 text-[13px] font-semibold text-white bg-[#2563EB] rounded-lg hover:bg-[#1D4ED8] transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {creating ? "Creating..." : "Create Project"}

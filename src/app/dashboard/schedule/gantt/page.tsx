@@ -319,8 +319,8 @@ function GanttRow({ t, selected, chartStart, pixelsPerDay, onSelect, onUpdateDat
   const dragRef = useRef({ mode: "move", startX: 0, initStart: "", initEnd: "" });
   const isSubTask = !!t.parentTaskId;
   const rowH = isSubTask ? SUB_ROW_H : ROW_H;
-  const barTop = isSubTask ? 11 : 14;
-  const barH = isSubTask ? 14 : 20;
+  const barTop = isSubTask ? 9 : 11;
+  const barH = isSubTask ? 18 : 26;
 
   const leftPx = diffDays(chartStart, t.startDate) * pixelsPerDay;
   const widthPx = Math.max(4, diffDays(t.startDate, t.endDate) * pixelsPerDay);
@@ -382,7 +382,7 @@ function GanttRow({ t, selected, chartStart, pixelsPerDay, onSelect, onUpdateDat
         {/* Baseline ghost bar — sits behind, dashed */}
         {showBaseline && hasBaselineVariance && (
           <div
-            className="absolute pointer-events-none rounded-[3px]"
+            className="absolute pointer-events-none rounded-[5px]"
             style={{
               top: barTop - 2,
               left: baselineLeftPx,
@@ -406,8 +406,8 @@ function GanttRow({ t, selected, chartStart, pixelsPerDay, onSelect, onUpdateDat
 
         {/* Bar */}
         <div className="absolute" style={{ top: barTop, left: leftPx, width: widthPx, height: barH }} onMouseDown={handleMouseDown("move")}>
-          <div className="absolute inset-0 rounded-[3px] overflow-hidden cursor-grab active:cursor-grabbing select-none"
-            style={{ background: "#f1f5f9", boxShadow: isCrit ? `0 0 0 2px ${barColor}` : `inset 0 0 0 1.5px ${barColor}` }}>
+          <div className="absolute inset-0 rounded-[5px] overflow-hidden cursor-grab active:cursor-grabbing select-none"
+            style={{ background: `${barColor}18`, boxShadow: isCrit ? `0 0 0 2px ${barColor}` : `inset 0 0 0 1.5px ${barColor}` }}>
             <div className="absolute left-0 top-0 bottom-0" style={{ width: `${t.pct}%`, background: barColor, minWidth: t.pct > 0 ? 3 : 0 }} />
             {widthPx >= 36 && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -421,10 +421,6 @@ function GanttRow({ t, selected, chartStart, pixelsPerDay, onSelect, onUpdateDat
           </div>
           <div onMouseDown={handleMouseDown("left")}  className="absolute left-0  top-0 bottom-0 w-2 cursor-col-resize z-10" />
           <div onMouseDown={handleMouseDown("right")} className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize z-10" />
-          {widthPx < 36 && (
-            <span className="absolute top-1/2 -translate-y-1/2 text-[10px] font-bold pointer-events-none whitespace-nowrap"
-              style={{ left: widthPx + 4, color: barColor }}>{t.pct}%</span>
-          )}
         </div>
 
         {/* Right port — large hit area with arrow icon, drag from here to create dependency */}
@@ -442,6 +438,28 @@ function GanttRow({ t, selected, chartStart, pixelsPerDay, onSelect, onUpdateDat
 
 const DEP_LABELS: Record<string, string> = { FS: "Finish → Start", SS: "Start → Start", FF: "Finish → Finish", SF: "Start → Finish" };
 
+function curvedPath(pts: [number, number][], r = 10): string {
+  if (pts.length < 2) return "";
+  let d = `M ${pts[0][0]},${pts[0][1]}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [px, py] = pts[i - 1];
+    const [cx, cy] = pts[i];
+    const [nx, ny] = pts[i + 1];
+    const len1 = Math.hypot(cx - px, cy - py);
+    const len2 = Math.hypot(nx - cx, ny - cy);
+    if (len1 < 0.01 || len2 < 0.01) { d += ` L ${cx},${cy}`; continue; }
+    const rc = Math.min(r, len1 / 2, len2 / 2);
+    const bx = cx - (cx - px) / len1 * rc;
+    const by = cy - (cy - py) / len1 * rc;
+    const ax = cx + (nx - cx) / len2 * rc;
+    const ay = cy + (ny - cy) / len2 * rc;
+    d += ` L ${bx},${by} Q ${cx},${cy} ${ax},${ay}`;
+  }
+  const last = pts[pts.length - 1];
+  d += ` L ${last[0]},${last[1]}`;
+  return d;
+}
+
 function SVGArrows({ deps, tasks, taskYMap, chartStart, pixelsPerDay, totalH, showCriticalPath, criticalPathTasks, onDeleteDep, onChangeDep, drawingDep, movingDep, onStartEndpointMove, mousePos }: any) {
   const [hoveredDep, setHoveredDep] = useState<number | null>(null);
   const [editingDep, setEditingDep] = useState<number | null>(null);
@@ -450,10 +468,10 @@ function SVGArrows({ deps, tasks, taskYMap, chartStart, pixelsPerDay, totalH, sh
   return (
     <svg className="absolute top-0 overflow-visible" style={{ left: 0, width: "100%", height: totalH, zIndex: 25, pointerEvents: "none" }}>
       <defs>
-        <marker id="arr-crit"  markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M1,1 L5,3 L1,5 Z" fill="#ef4444" /></marker>
-        <marker id="arr-norm"  markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M1,1 L5,3 L1,5 Z" fill="#64748b" /></marker>
-        <marker id="arr-hover" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M1,1 L5,3 L1,5 Z" fill="#3b82f6" /></marker>
-        <marker id="arr-draw"  markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M1,1 L5,3 L1,5 Z" fill="#3b82f6" /></marker>
+        <marker id="arr-crit"  markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,4 L0,8 Z" fill="#ef4444" /></marker>
+        <marker id="arr-norm"  markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,4 L0,8 Z" fill="#64748b" /></marker>
+        <marker id="arr-hover" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,4 L0,8 Z" fill="#3b82f6" /></marker>
+        <marker id="arr-draw"  markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,4 L0,8 Z" fill="#3b82f6" /></marker>
       </defs>
 
       {deps.map((dep: any, i: number) => {
@@ -474,8 +492,8 @@ function SVGArrows({ deps, tasks, taskYMap, chartStart, pixelsPerDay, totalH, sh
         const toEndX     = diffDays(chartStart, toT.endDate)     * pixelsPerDay;
 
         const midBarY = (t: any) => {
-          const bt = t.parentTaskId ? 11 : 14;
-          const bh = t.parentTaskId ? 14 : 20;
+          const bt = t.parentTaskId ? 9 : 11;
+          const bh = t.parentTaskId ? 18 : 26;
           return (taskYMap[t.id] ?? 0) + bt + bh / 2;
         };
 
@@ -483,71 +501,35 @@ function SVGArrows({ deps, tasks, taskYMap, chartStart, pixelsPerDay, totalH, sh
         const dotY2 = midBarY(toT);
 
         let x1: number, x2: number, pathD: string;
-        const fromRowY = taskYMap[fromT.id] ?? 0;
-        const toRowY   = taskYMap[toT.id]   ?? 0;
-
-        const segTopY = Math.min(dotY1, dotY2);
-        const segBotY = Math.max(dotY1, dotY2);
-        const spans = (tasks as any[])
-          .filter(t => {
-            const ty = taskYMap[t.id];
-            if (ty === undefined || ty === fromRowY || ty === toRowY) return false;
-            const bt = t.parentTaskId ? 11 : 14;
-            const bb = bt + (t.parentTaskId ? 14 : 20);
-            return ty + bb > segTopY && ty + bt < segBotY;
-          })
-          .map(t => ({
-            l: diffDays(chartStart, t.startDate) * pixelsPerDay,
-            r: diffDays(chartStart, t.endDate)   * pixelsPerDay,
-          }));
-
-        const fromBarSpan = { l: fromStartX, r: fromEndX };
-        const toBarSpan   = { l: toStartX,   r: toEndX   };
-        const allSpans    = [...spans, fromBarSpan, toBarSpan];
-        const isClear     = (cx: number) => allSpans.every(b => cx < b.l - 8 || cx > b.r + 8);
-        const leftEdge    = Math.min(...allSpans.map(b => b.l));
-        const rightEdge   = Math.max(...allSpans.map(b => b.r));
-        const pickX = (candidates: number[]) =>
-          candidates.find(cx => isClear(cx)) ?? (rightEdge + 50);
-
-        const toRH   = toT.parentTaskId ? SUB_ROW_H : ROW_H;
-        const fromRH = fromT.parentTaskId ? SUB_ROW_H : ROW_H;
-        const belowTo      = toRowY   + toRH + 2;
-        const gapBelowFrom = fromRowY + fromRH;
-
-        const fsPath = (ex: number): string => {
-          if (ex > x2 + 1) {
-            return `M ${x1},${dotY1} L ${ex},${dotY1} L ${ex},${belowTo} L ${x2 - 4},${belowTo} L ${x2 - 4},${dotY2} L ${x2},${dotY2}`;
-          }
-          if (ex < x1 - 1) {
-            return `M ${x1},${dotY1} L ${x1 + 1},${dotY1} L ${x1 + 1},${gapBelowFrom} L ${ex},${gapBelowFrom} L ${ex},${dotY2} L ${x2},${dotY2}`;
-          }
-          return `M ${x1},${dotY1} L ${ex},${dotY1} L ${ex},${dotY2} L ${x2},${dotY2}`;
-        };
 
         if (dep.type === "FS") {
           x1 = fromEndX; x2 = toStartX;
-          const ex = x2 >= x1 + 2
-            ? pickX([Math.round((x1 + x2) / 2), leftEdge - 24, rightEdge + 50])
-            : pickX([Math.max(fromEndX, toEndX) + 30, rightEdge + 50, leftEdge - 24]);
-          pathD = fsPath(ex);
+          if (x2 > x1 + 1) {
+            // Gap: route via midpoint, approach toStartX from the left.
+            const vx = Math.round((x1 + x2) / 2);
+            pathD = curvedPath([[x1, dotY1], [vx, dotY1], [vx, dotY2], [x2, dotY2]], 6);
+          } else {
+            // Overlap: go right past both bars, route above the to-bar, then approach
+            // toStartX from the left so the path never crosses the bar interior.
+            const toVEnd = Math.max(toEndX, x2 + 4);
+            const vx = Math.max(x1, toVEnd) + 16;
+            const bt2 = toT.parentTaskId ? 9 : 11;
+            const topAbove = (taskYMap[toT.id] ?? 0) + bt2 - 4;
+            const leftApproach = Math.max(0, x2 - 14);
+            pathD = curvedPath([[x1, dotY1], [vx, dotY1], [vx, topAbove], [leftApproach, topAbove], [leftApproach, dotY2], [x2, dotY2]], 6);
+          }
         } else if (dep.type === "SS") {
           x1 = fromStartX; x2 = toStartX;
-          const ex = pickX([Math.min(x1, x2) - 24, leftEdge - 24, rightEdge + 50]);
-          pathD = `M ${x1},${dotY1} L ${ex},${dotY1} L ${ex},${dotY2} L ${x2},${dotY2}`;
+          const vx = Math.min(x1, x2) - 12;
+          pathD = curvedPath([[x1, dotY1], [vx, dotY1], [vx, dotY2], [x2, dotY2]], 6);
         } else if (dep.type === "FF") {
           x1 = fromEndX; x2 = toEndX;
-          const ex = pickX([Math.max(x1, x2) + 24, rightEdge + 24, leftEdge - 24]);
-          pathD = `M ${x1},${dotY1} L ${ex},${dotY1} L ${ex},${dotY2} L ${x2},${dotY2}`;
-        } else {
+          const vx = Math.max(x1, x2) + 12;
+          pathD = curvedPath([[x1, dotY1], [vx, dotY1], [vx, dotY2], [x2, dotY2]], 6);
+        } else { // SF
           x1 = fromStartX; x2 = toEndX;
-          const ex = pickX([Math.min(x1, x2) - 24, leftEdge - 24, rightEdge + 50]);
-          const toStartXSF = diffDays(chartStart, toT.startDate) * pixelsPerDay;
-          if (ex < toStartXSF - 1) {
-            pathD = `M ${x1},${dotY1} L ${ex},${dotY1} L ${ex},${belowTo} L ${x2 + 4},${belowTo} L ${x2 + 4},${dotY2} L ${x2},${dotY2}`;
-          } else {
-            pathD = `M ${x1},${dotY1} L ${ex},${dotY1} L ${ex},${dotY2} L ${x2},${dotY2}`;
-          }
+          const vx = Math.min(x1, x2) - 12;
+          pathD = curvedPath([[x1, dotY1], [vx, dotY1], [vx, dotY2], [x2, dotY2]], 6);
         }
 
         const labelX = Math.round((x1 + x2) / 2);
@@ -571,14 +553,10 @@ function SVGArrows({ deps, tasks, taskYMap, chartStart, pixelsPerDay, totalH, sh
             <circle cx={x1} cy={dotY1} r={12} fill="transparent"
               style={{ pointerEvents: isDragging ? "none" : "all", cursor: "grab" }}
               onMouseDown={e => { e.stopPropagation(); onStartEndpointMove && onStartEndpointMove(i, "from", x2, dotY2); }} />
-            <circle cx={x1} cy={dotY1} r={isHov ? 6 : 4} fill="white" stroke={color} strokeWidth={2} style={{ pointerEvents: "none" }} />
-            <circle cx={x1} cy={dotY1} r={isHov ? 3 : 2} fill={color} style={{ pointerEvents: "none" }} />
 
             <circle cx={x2} cy={dotY2} r={12} fill="transparent"
               style={{ pointerEvents: isDragging ? "none" : "all", cursor: "grab" }}
               onMouseDown={e => { e.stopPropagation(); onStartEndpointMove && onStartEndpointMove(i, "to", x1, dotY1); }} />
-            <circle cx={x2} cy={dotY2} r={isHov ? 6 : 4} fill={color} stroke="white" strokeWidth={2} style={{ pointerEvents: "none" }} />
-            <circle cx={x2} cy={dotY2} r={isHov ? 3 : 2} fill="white" style={{ pointerEvents: "none" }} />
 
             {/* Delete popup — click arrow to open; auto-close during drag */}
             {editingDep === i && !isDragging && (
@@ -1142,8 +1120,8 @@ function GanttChartContent() {
   const pixelsPerDay = BASE_PIXELS_PER_DAY * zoomLevel;
 
   const [modalConfig, setModalConfig] = useState({ isOpen: false, mode: "add", taskId: null as string | null, defaultPhase: "", defaultArea: "" });
-  const [showContractors, setShowContractors] = useState(true);
-  const leftPanelW = showContractors ? 500 : 340;
+  const [showContractors, setShowContractors] = useState(false);
+  const leftPanelW = showContractors ? 500 : 400;
 
   const zoomIn = () => setZoomLevel(p => Math.min(3, +(p + 0.2).toFixed(1)));
   const zoomOut = () => setZoomLevel(p => Math.max(0.1, +(p - 0.2).toFixed(1)));
@@ -1766,11 +1744,9 @@ const handleSaveModal = (data: any, newPreds: any) => {
             {canEdit && (
               <button
                 onClick={() => {
-                  if (!isRealProject(projectIdParam)) return;
                   setModalConfig({ isOpen: true, mode: "add", taskId: null, defaultPhase: "", defaultArea: "" });
                 }}
-                disabled={!isRealProject(projectIdParam)}
-                title={!isRealProject(projectIdParam) ? "Select a project first" : undefined}
+                title={undefined}
                 className="px-4 py-1.5 text-[13px] font-semibold bg-[#2563EB] text-white rounded-md flex items-center gap-1.5 shadow-sm hover:bg-[#1D4ED8] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[#2563EB]">
                 + Add task
               </button>
@@ -1826,12 +1802,18 @@ const handleSaveModal = (data: any, newPreds: any) => {
           {/* Frozen Left Column */}
           <div className="sticky left-0 z-30 bg-white border-r border-[#E2E8F0] shadow-[1px_0_0_0_#e5e7eb]" style={{ width: leftPanelW, minWidth: leftPanelW }}>
             <div className="flex items-center border-b text-[13px] font-semibold text-[#64748B]" style={{ height: HEADER_H }}>
-              <div className="flex-1 px-4 bg-[#F1F5F9] h-full flex items-center">Task name</div>
-              <div className="w-[160px] shrink-0 border-l-2 border-[#E2E8F0] flex items-center justify-between px-3 h-full bg-[#EEF2FF] text-[#4F46E5]">
-                <span>{showContractors ? "Contractors" : ""}</span>
-                <button onClick={() => setShowContractors(v => !v)} className="text-[11px] text-[#A5B4FC] hover:text-[#4F46E5] outline-none focus:outline-none"
-                  title={showContractors ? "Hide contractors" : "Show contractors"}>{showContractors ? "◀" : "▶"}</button>
+              <div className="flex-1 px-4 bg-[#F1F5F9] h-full flex items-center justify-between">
+                <span>Task name</span>
+                {!showContractors && (
+                  <button onClick={() => setShowContractors(true)} className="text-[11px] text-[#A5B4FC] hover:text-[#4F46E5] outline-none focus:outline-none pr-1" title="Show contractors">Contractors ▶</button>
+                )}
               </div>
+              {showContractors && (
+                <div className="w-[160px] shrink-0 border-l-2 border-[#E2E8F0] flex items-center justify-between px-3 h-full bg-[#EEF2FF] text-[#4F46E5]">
+                  <span>Contractors</span>
+                  <button onClick={() => setShowContractors(false)} className="text-[11px] text-[#A5B4FC] hover:text-[#4F46E5] outline-none focus:outline-none" title="Hide contractors">◀</button>
+                </div>
+              )}
               <div className="w-[60px] shrink-0 border-l-2 border-[#E2E8F0] bg-[#F1F5F9] h-full" />
             </div>
             <div>

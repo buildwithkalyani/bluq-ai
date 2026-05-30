@@ -51,6 +51,7 @@ export const workspaceMembers = pgTable("workspace_members", {
 	status: text().default('pending').notNull(),
 	invitedAt: timestamp("invited_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 	joinedAt: timestamp("joined_at", { withTimezone: true, mode: 'string' }),
+	pinnedProjectIds: jsonb("pinned_project_ids").default([]).notNull(),
 }, (table) => [
 	index("idx_wm_user").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
 	index("idx_wm_workspace").using("btree", table.workspaceId.asc().nullsLast().op("uuid_ops")),

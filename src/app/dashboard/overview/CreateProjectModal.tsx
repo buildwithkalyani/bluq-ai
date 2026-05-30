@@ -287,6 +287,9 @@ export default function CreateProjectModal({ onClose, onCreate, editingProject, 
                 )}
               </div>
             )}
+            {address.trim().length > 0 && !addressValidated && !suggestionsOpen && (
+              <p className="text-red-500 text-[11px] mt-1">Please select a valid address from the suggestions.</p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -346,7 +349,7 @@ export default function CreateProjectModal({ onClose, onCreate, editingProject, 
 
         <div className="flex justify-end gap-3 mt-8">
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn primary className="px-6" onClick={handleSubmit} disabled={saving}>
+          <Btn primary className="px-6" onClick={handleSubmit} disabled={saving || (!isEditing && (!name.trim() || !address.trim() || !startDate || !endDate || !code.trim() || !addressValidated))}>
             {saving ? (isEditing ? "Saving..." : "Creating...") : isEditing ? "Save Changes" : "Create Project →"}
           </Btn>
         </div>

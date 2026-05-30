@@ -2,7 +2,7 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Search, Building2, Users, CalendarDays, MoreVertical, Pencil, Trash2, MapPin, AlertTriangle, CheckCircle2, ClipboardList, FileText } from "lucide-react";
+import { Search, Building2, Users, CalendarDays, MoreVertical, Pencil, Trash2, MapPin, AlertTriangle, CheckCircle2, ClipboardList, FileText, Pin, PinOff } from "lucide-react";
 import {
   getProjects,
   STATUS_CONFIG,
@@ -19,7 +19,7 @@ import {
 import ProjectDetailView from "./ProjectDetailView";
 import CreateProjectModal from "./CreateProjectModal";
 import { useWorkspace } from "@/context/workspace";
-import { fetchProjects, deleteProject } from "@/lib/api-client";
+import { fetchProjects, deleteProject, fetchPinnedProjects, updatePinnedProjects } from "@/lib/api-client";
 
 function fmtDate(iso: string): string {
   if (!iso || iso === "TBD") return iso;
@@ -29,7 +29,22 @@ function fmtDate(iso: string): string {
 }
 
 const PROJECTS_CACHE_KEY = "bluq_projects_cache";
+const PINNED_KEY = "bluq_pinned_projects";
+const WS_CACHE_KEY = "bluq_workspace";
 const STALE_MS = 5 * 60 * 1000; // 5 minutes
+
+function readPinned(workspaceId: string): string[] {
+  try {
+    const raw = localStorage.getItem(`${PINNED_KEY}_${workspaceId}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function writePinned(workspaceId: string, ids: string[]): void {
+  try {
+    localStorage.setItem(`${PINNED_KEY}_${workspaceId}`, JSON.stringify(ids));
+  } catch {}
+}
 
 type ProjectsCache = { data: Project[]; lastFetchedAt: number };
 
@@ -51,6 +66,20 @@ function isSameProjects(a: Project[], b: Project[]): boolean {
   if (a.length !== b.length) return false;
   const key = (p: Project) => `${p.id}:${p.status}:${p.pct}`;
   return JSON.stringify(a.map(key).sort()) === JSON.stringify(b.map(key).sort());
+}
+
+// Reads cached projects synchronously from localStorage using the stored workspace ID.
+// Called as a lazy useState initializer so state is populated before the first render,
+// eliminating the skeleton/flash on hard refresh when localStorage is warm.
+function readInitialProjects(): Project[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const wsRaw = localStorage.getItem(WS_CACHE_KEY);
+    if (!wsRaw) return [];
+    const ws = JSON.parse(wsRaw) as { id?: string };
+    if (!ws.id) return [];
+    return readProjectsCache(ws.id)?.data ?? [];
+  } catch { return []; }
 }
 
 const STATUS_MAP: Record<string, string> = {
@@ -104,18 +133,32 @@ function OverviewContent() {
   const searchParams = useSearchParams();
   const selectedProjectId = searchParams.get("projectId");
 
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [projects, setProjects] = useState<Project[]>(readInitialProjects);
+  const [loading, setLoading] = useState<boolean>(() => readInitialProjects().length === 0);
   const [fetching, setFetching] = useState(false);
   const [isOutdated, setIsOutdated] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+
+  const [pinnedIds, setPinnedIds] = useState<string[]>([]);
 
   // Modal State
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [menuOpenProjectId, setMenuOpenProjectId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    // Show localStorage immediately, then sync from backend
+    setPinnedIds(readPinned(workspaceId));
+    fetchPinnedProjects(workspaceId)
+      .then((ids) => {
+        setPinnedIds(ids);
+        writePinned(workspaceId, ids);
+      })
+      .catch(() => {/* keep localStorage value on error */});
+  }, [workspaceId]);
 
   useEffect(() => {
     if (wsLoading) return;
@@ -137,6 +180,10 @@ function OverviewContent() {
           setIsOutdated(false);
           // Only re-render if data actually changed
           setProjects(prev => isSameProjects(prev, fresh) ? prev : fresh);
+          // Set loading=false in the same synchronous block as setProjects so React
+          // batches both updates — prevents a flash of "No projects found" between
+          // the two setState calls when no localStorage cache exists on hard refresh.
+          setLoading(false);
         })
         .catch((err) => {
           console.error("projects refresh:", err);
@@ -155,13 +202,30 @@ function OverviewContent() {
     }
   }, [workspaceId, wsLoading, isDesignMode]);
 
-  const filtered = projects.filter((p) => {
+  const handleTogglePin = (id: string) => {
+    const next = pinnedIds.includes(id)
+      ? pinnedIds.filter(x => x !== id)
+      : [id, ...pinnedIds];
+    setPinnedIds(next);
+    if (workspaceId) {
+      writePinned(workspaceId, next);
+      updatePinnedProjects(workspaceId, next).catch(() => {/* optimistic — ignore transient errors */});
+    }
+    setMenuOpenProjectId(null);
+  };
+
+  const baseFiltered = projects.filter((p) => {
     const matchesSearch =
       p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.address.toLowerCase().includes(search.toLowerCase());
     const matchesStatus = statusFilter ? p.status === statusFilter : true;
     return matchesSearch && matchesStatus;
   });
+  // Pinned projects float to top
+  const filtered = [
+    ...baseFiltered.filter(p => pinnedIds.includes(String(p.id))),
+    ...baseFiltered.filter(p => !pinnedIds.includes(String(p.id))),
+  ];
 
   const toggleStatusFilter = (status: string) =>
     setStatusFilter((prev) => (prev === status ? null : status));
@@ -335,8 +399,13 @@ function OverviewContent() {
                   {/* Header */}
                   <div className="flex justify-between items-start px-5 pt-5 pb-0 mt-1">
                     <div className="flex-1 min-w-0 pr-2">
-                      <div className="text-[15px] font-semibold text-[#0F172A] leading-snug group-hover:text-[#2563EB] transition-colors truncate">
-                        {p.name}
+                      <div className="flex items-center gap-1.5">
+                        {pinnedIds.includes(String(p.id)) && (
+                          <Pin size={11} className="shrink-0 text-[#2563EB]" fill="#2563EB" />
+                        )}
+                        <div className="text-[15px] font-semibold text-[#0F172A] leading-snug group-hover:text-[#2563EB] transition-colors truncate">
+                          {p.name}
+                        </div>
                       </div>
                       <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         <span className="text-[11px] text-[#94A3B8] font-mono">{p.code}</span>
@@ -367,6 +436,13 @@ function OverviewContent() {
                               </div>
                             ) : (
                               <>
+                                <button onClick={() => handleTogglePin(String(p.id))} className="w-full text-left px-3 py-2 text-[12px] text-[#0F172A] hover:bg-[#F8FAFC] flex items-center gap-2.5 transition-colors">
+                                  {pinnedIds.includes(String(p.id))
+                                    ? <><PinOff size={12} className="text-[#94A3B8]" /> Unpin Project</>
+                                    : <><Pin size={12} className="text-[#94A3B8]" /> Pin Project</>
+                                  }
+                                </button>
+                                <div className="my-1 border-t border-[#F1F5F9]" />
                                 <button onClick={() => { setEditingProject(p); setMenuOpenProjectId(null); }} className="w-full text-left px-3 py-2 text-[12px] text-[#0F172A] hover:bg-[#F8FAFC] flex items-center gap-2.5 transition-colors">
                                   <Pencil size={12} className="text-[#94A3B8]" /> Edit Project
                                 </button>

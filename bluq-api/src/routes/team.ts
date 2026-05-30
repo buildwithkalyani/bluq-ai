@@ -312,4 +312,35 @@ export async function teamRoute(app: FastifyInstance) {
 
     return { ok: true, workspaceId };
   });
+
+  // GET /team/pinned?workspaceId=xxx — get pinned project IDs for the current user
+  app.get("/team/pinned", { preHandler: verifySession }, async (request, reply) => {
+    const { workspaceId } = request.query as { workspaceId: string };
+    if (!workspaceId) return reply.status(400).send({ error: "workspaceId required" });
+
+    const [row] = await db
+      .select({ pinnedProjectIds: workspaceMembers.pinnedProjectIds })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, request.userId)))
+      .limit(1);
+
+    if (!row) return reply.status(404).send({ error: "Membership not found" });
+    return { pinnedProjectIds: (row.pinnedProjectIds as string[]) ?? [] };
+  });
+
+  // PUT /team/pinned — set pinned project IDs for the current user
+  app.put("/team/pinned", { preHandler: verifySession }, async (request, reply) => {
+    const { workspaceId, pinnedProjectIds } = request.body as { workspaceId: string; pinnedProjectIds: string[] };
+    if (!workspaceId) return reply.status(400).send({ error: "workspaceId required" });
+    if (!Array.isArray(pinnedProjectIds)) return reply.status(400).send({ error: "pinnedProjectIds must be an array" });
+
+    const [updated] = await db
+      .update(workspaceMembers)
+      .set({ pinnedProjectIds })
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, request.userId)))
+      .returning({ id: workspaceMembers.id });
+
+    if (!updated) return reply.status(404).send({ error: "Membership not found" });
+    return { ok: true, pinnedProjectIds };
+  });
 }

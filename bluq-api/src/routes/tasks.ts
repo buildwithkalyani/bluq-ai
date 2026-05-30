@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
-import { tasks, taskDependencies } from "../db/schema.js";
+import { tasks, taskDependencies, projects } from "../db/schema.js";
 import { eq, and, ne, lte, gte } from "drizzle-orm";
 import { verifySession } from "../lib/verifySession.js";
 import { detectPhase } from "../lib/detect-phase.js";
@@ -28,6 +28,43 @@ function futureDateIST(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
   return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+}
+
+// ---------------------------------------------------------------------------
+// Status auto-calculation (project-relative)
+// ---------------------------------------------------------------------------
+
+/**
+ * Derives task status from project timeline and task progress.
+ *
+ * Rule 1: pct >= 100                                      → 'completed'
+ * Rule 2: tStart > pEnd AND tEnd > pEnd                   → 'delayed'
+ * Rule 3: tStart in [pStart..pEnd] AND tEnd > pEnd        → 'running_late'
+ *
+ * Returns null when none of the rules match (caller keeps its own value).
+ * All date params are "YYYY-MM-DD" strings — ISO lexicographic comparison is safe.
+ */
+function computeAutoStatus(
+  percentComplete: number | string | null | undefined,
+  taskStartDate: string | null | undefined,
+  taskEndDate: string | null | undefined,
+  projectStartDate: string | null | undefined,
+  projectEndDate: string | null | undefined,
+): "completed" | "delayed" | "running_late" | null {
+  const pct = Number(percentComplete ?? 0);
+  if (pct >= 100) return "completed";
+
+  if (!taskStartDate || !taskEndDate || !projectStartDate || !projectEndDate) return null;
+
+  // Rule 2: both task dates fall entirely after project end
+  if (taskStartDate > projectEndDate && taskEndDate > projectEndDate) return "delayed";
+
+  // Rule 3: task starts within project window but overruns project end
+  if (taskStartDate >= projectStartDate && taskStartDate <= projectEndDate && taskEndDate > projectEndDate) {
+    return "running_late";
+  }
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -245,6 +282,18 @@ export async function tasksRoute(app: FastifyInstance) {
         return reply.status(400).send({ error: "workspaceId and projectId must be valid UUIDs" });
       }
       if (!body.phase) body.phase = detectPhase(body.title) ?? undefined;
+
+      // Fetch parent project to compute project-relative status
+      const [project] = await db.select().from(projects).where(eq(projects.id, body.projectId));
+      const autoStatus = computeAutoStatus(
+        (body as any).percentComplete,
+        body.startDate,
+        body.endDate,
+        project?.startDate,
+        project?.endDate,
+      );
+      if (autoStatus) body.status = autoStatus;
+
       const [newTask] = await db.insert(tasks).values(body).returning();
       return reply.status(201).send(newTask);
     } catch (err: any) {
@@ -263,6 +312,27 @@ export async function tasksRoute(app: FastifyInstance) {
         return reply.status(400).send({ error: "id must be a valid UUID" });
       }
       const body = request.body as Record<string, any>;
+
+      // Fetch existing task to fill in fields absent from the partial update
+      const [existing] = await db.select().from(tasks).where(eq(tasks.id, id));
+      if (!existing) return reply.status(404).send({ error: "Task not found" });
+
+      const effectivePct      = body.percentComplete !== undefined ? body.percentComplete : existing.percentComplete;
+      const effectiveStart    = body.startDate  !== undefined ? body.startDate  : existing.startDate;
+      const effectiveEnd      = body.endDate    !== undefined ? body.endDate    : existing.endDate;
+      const projectId         = body.projectId  !== undefined ? body.projectId  : existing.projectId;
+
+      // Fetch parent project for project-relative status rules
+      const [project] = await db.select().from(projects).where(eq(projects.id, projectId));
+      const autoStatus = computeAutoStatus(
+        effectivePct,
+        effectiveStart,
+        effectiveEnd,
+        project?.startDate,
+        project?.endDate,
+      );
+      if (autoStatus) body.status = autoStatus;
+
       const [updated] = await db.update(tasks).set(body).where(eq(tasks.id, id)).returning();
       if (!updated) return reply.status(404).send({ error: "Task not found" });
       return updated;

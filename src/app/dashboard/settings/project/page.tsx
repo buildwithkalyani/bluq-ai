@@ -436,7 +436,7 @@ function ContractorsTab({ project, isMock = false, onSettingsUpdated }: { projec
                   </select>
                   <input
                     value={newPhone}
-                    onChange={(e) => { setNewPhone(e.target.value.replace(/\D/g, "")); setNewPhoneError(""); }}
+                    onChange={(e) => { const val = e.target.value.replace(/\D/g, ""); setNewPhone(val); setNewPhoneError(val.length > 0 && !isValidPhone(val) ? "Please enter a valid 10-digit phone number." : ""); }}
                     placeholder="98765 43210"
                     className="flex-1 px-2.5 py-1.5 text-xs text-[#0F172A] bg-white outline-none min-w-0"
                   />
@@ -542,15 +542,16 @@ interface TeamMember {
   id: string;
   name: string;
   email: string;
-  role: "Admin" | "Editor" | "Viewer";
+  role: "Super Admin" | "Admin" | "Editor" | "Viewer";
 }
 
-const ROLE_OPTIONS: TeamMember["role"][] = ["Admin", "Editor", "Viewer"];
+const ROLE_OPTIONS: TeamMember["role"][] = ["Super Admin", "Admin", "Editor", "Viewer"];
 
 const ROLE_STYLE: Record<TeamMember["role"], { bg: string; text: string }> = {
-  Admin:  { bg: "#FEF2F2", text: "#DC2626" },
-  Editor: { bg: "#EFF6FF", text: "#0969da" },
-  Viewer: { bg: "#F1F5F9", text: "#475569" },
+  "Super Admin": { bg: "#F5F3FF", text: "#7C3AED" },
+  Admin:         { bg: "#FEF2F2", text: "#DC2626" },
+  Editor:        { bg: "#EFF6FF", text: "#0969da" },
+  Viewer:        { bg: "#F1F5F9", text: "#475569" },
 };
 
 function TeamTab({ project, isMock = false, onSettingsUpdated }: { project: BackendProject; isMock?: boolean; onSettingsUpdated?: (id: string, s: Record<string, unknown>) => void }) {
