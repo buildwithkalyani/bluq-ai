@@ -440,25 +440,33 @@ function TopNavProjectDropdown() {
   const [isOpen, setIsOpen] = useState(false);
   const [showNewModal, setShowNewModal] = useState(false);
 
+  const loadProjects = (wsId: string) => {
+    fetchProjects(wsId).then((rows) => {
+      setProjects(rows.map((p) => ({
+        id: p.id as any,
+        name: p.projectName,
+        code: p.projectCode ?? "",
+        pct: Number(p.percentComplete ?? 0),
+        status: "notStarted" as const,
+        tasks: 0, tasksDone: 0, workers: 0, issues: 0,
+        stage: p.stage ?? "",
+        startDate: p.startDate ?? "",
+        endDate: p.endDate ?? "",
+        address: p.address ?? "",
+      })));
+    }).catch(console.error);
+  };
+
   useEffect(() => {
-    if (workspaceId) {
-      fetchProjects(workspaceId).then((rows) => {
-        setProjects(rows.map((p) => ({
-          id: p.id as any,
-          name: p.projectName,
-          code: p.projectCode ?? "",
-          pct: Number(p.percentComplete ?? 0),
-          status: "notStarted" as const,
-          tasks: 0, tasksDone: 0, workers: 0, issues: 0,
-          stage: p.stage ?? "",
-          startDate: p.startDate ?? "",
-          endDate: p.endDate ?? "",
-          address: p.address ?? "",
-        })));
-      }).catch(console.error);
-    } else {
-      getProjects().then(setProjects);
-    }
+    if (!workspaceId) return;
+    loadProjects(workspaceId);
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    const handler = () => loadProjects(workspaceId);
+    window.addEventListener("bluq_project_created", handler);
+    return () => window.removeEventListener("bluq_project_created", handler);
   }, [workspaceId]);
 
   const currentId = searchParams.get("projectId") || "0";
@@ -942,9 +950,9 @@ function TopNav() {
   return (
     <div className="flex items-center justify-between px-5 h-[52px] border-b border-[#E2E8F0] bg-white flex-shrink-0">
       <div className="flex items-center gap-3">
-        <a href="/" style={{ display: "flex", alignItems: "center", textDecoration: "none" }}>
+        <div style={{ display: "flex", alignItems: "center" }}>
           <img src="/bluQ-logo (1).svg" alt="BluQ" style={{ height: "22px", width: "auto" }} />
-        </a>
+        </div>
         <div className="w-px h-4 bg-[#E2E8F0]" />
         <span className="text-[13px] font-medium text-[#64748B]">{today}</span>
       </div>
