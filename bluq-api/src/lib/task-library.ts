@@ -124,6 +124,12 @@ export interface TaskTemplate {
   safetyChecks: string[];
   remarks: string;
   
+  // Duration category — determines how duration is calculated
+  // A = Process task: duration fixed by chemistry/physics (curing, setting, soaking).
+  //     No crew scaling, no monsoon, no regional index, no timeline compression.
+  // B = Labour task (default): duration driven by crew, productivity, weather.
+  taskCategory?: "A" | "B";
+
   // Conditional flags — rules engine uses these
   isCore: boolean;              // true = included in every project of matching type
   conditions?: TaskCondition[]; // if present, task is only included when conditions are met
@@ -530,7 +536,8 @@ export const CORE_TASKS: TaskTemplate[] = [
     name: "Footing curing (7 days minimum)",
     unit: "Sqm",
     productivityRate: { min: 7, max: 7, unit: "days" },
-    monsoonImpactFactor: 1.20,
+    taskCategory: "A",
+    monsoonImpactFactor: 1.0,
     crew: [
       { role: "Labourer", count: 2 }
     ],
@@ -606,7 +613,8 @@ export const CORE_TASKS: TaskTemplate[] = [
     name: "Plinth beam curing",
     unit: "Sqm",
     productivityRate: { min: 7, max: 7, unit: "days" },
-    monsoonImpactFactor: 1.20,
+    taskCategory: "A",
+    monsoonImpactFactor: 1.0,
     crew: [
       { role: "Labourer", count: 2 }
     ],
@@ -926,7 +934,8 @@ export const CORE_TASKS: TaskTemplate[] = [
     name: "Slab curing — ponding / membrane (14 days)",
     unit: "Sqm",
     productivityRate: { min: 14, max: 14, unit: "days" },
-    monsoonImpactFactor: 1.15,
+    taskCategory: "A",
+    monsoonImpactFactor: 1.0,
     crew: [
       { role: "Labourer", count: 3 }
     ],
@@ -1114,7 +1123,8 @@ export const CORE_TASKS: TaskTemplate[] = [
     name: "Masonry curing (7 days)",
     unit: "Sqm",
     productivityRate: { min: 7, max: 7, unit: "days" },
-    monsoonImpactFactor: 1.15,
+    taskCategory: "A",
+    monsoonImpactFactor: 1.0,
     crew: [
       { role: "Labourer", count: 2 }
     ],
@@ -1144,7 +1154,7 @@ export const CORE_TASKS: TaskTemplate[] = [
       { role: "Plumber", count: 1 },
       { role: "Helper", count: 2 }
     ],
-    predecessors: [{ taskCode: "MW-02", type: "FS", lagDays: 3, note: "per floor" }],
+    predecessors: [{ taskCode: "MW-02", type: "FS", lagDays: 5, note: "start after ~50% internal masonry complete" }],
     isCodeRef: ["IS 1239", "IS 15778"],
     dsrRef: "DSR 17.1-17.6",
     safetyChecks: ["Pressure test 6 kg/cm² for 2 hrs"],
@@ -1163,7 +1173,7 @@ export const CORE_TASKS: TaskTemplate[] = [
       { role: "Plumber", count: 1 },
       { role: "Helper", count: 2 }
     ],
-    predecessors: [{ taskCode: "MW-02", type: "FS", lagDays: 3, note: "per floor" }],
+    predecessors: [{ taskCode: "MW-02", type: "FS", lagDays: 5, note: "start after ~50% internal masonry complete" }],
     isCodeRef: ["IS 13592"],
     dsrRef: "DSR 17.7-17.10",
     safetyChecks: ["Gradient 1:40 min; leakage test"],
@@ -1305,8 +1315,8 @@ export const CORE_TASKS: TaskTemplate[] = [
       { role: "Wall Chaser Operator", count: 1 }
     ],
     predecessors: [
-      { taskCode: "MW-01", type: "FS", lagDays: 3 },
-      { taskCode: "MW-02", type: "FS", lagDays: 3 }
+      { taskCode: "MW-01", type: "FS", lagDays: 7, note: "start after ~50% external masonry complete" },
+      { taskCode: "MW-02", type: "FS", lagDays: 7, note: "start after ~50% internal masonry complete" }
     ],
     isCodeRef: ["IS 9537"],
     dsrRef: "DSR 19.1",
@@ -1499,7 +1509,8 @@ export const CORE_TASKS: TaskTemplate[] = [
     name: "Plaster curing (7 days)",
     unit: "Sqm",
     productivityRate: { min: 7, max: 7, unit: "days" },
-    monsoonImpactFactor: 1.15,
+    taskCategory: "A",
+    monsoonImpactFactor: 1.0,
     crew: [
       { role: "Labourer", count: 2 }
     ],
@@ -1547,7 +1558,7 @@ export const CORE_TASKS: TaskTemplate[] = [
       { role: "WP Specialist", count: 1 },
       { role: "Helper", count: 2 }
     ],
-    predecessors: [{ taskCode: "PL-04", type: "FS", lagDays: 0, note: "or SS-08 per floor" }],
+    predecessors: [{ taskCode: "SS-09", type: "FS", lagDays: 1, note: "after slab curing complete (14 days min)" }],
     isCodeRef: ["IS 2645"],
     dsrRef: "DSR 7.22",
     safetyChecks: ["Turn up 300mm on walls; ponding test 48 hrs"],
@@ -1611,7 +1622,7 @@ export const CORE_TASKS: TaskTemplate[] = [
     ],
     predecessors: [
       { taskCode: "WP-02", type: "FS", lagDays: 0, note: "toilets" },
-      { taskCode: "PT-01", type: "FS", lagDays: 3 }
+      { taskCode: "PT-01", type: "FS", lagDays: 7, note: "wait for plaster curing (7 days min)" }
     ],
     isCodeRef: ["IS 2571"],
     dsrRef: "DSR 11.1",

@@ -858,14 +858,19 @@ function RealImport({
     }
 
     setStep("ready");
-    // Refresh and cache existing docs list
+    // Refresh and cache existing docs list; clear done entries from files state
+    // (they're now represented in existingDocs — showing both causes duplicate rows)
     fetchDocuments(projectId, workspaceId)
-      .then(docs => { setExistingDocs(docs); writeDocsCache(projectId, docs); })
+      .then(docs => {
+        setExistingDocs(docs);
+        writeDocsCache(projectId, docs);
+        setFiles(prev => prev.filter(f => f.status !== "done"));
+      })
       .catch(err => console.error("fetchDocuments after upload:", err));
   };
 
   // Trigger schedule generation + start polling
-  const handleGenerate = async () => {
+  const handleGenerate = async (mode: "committed" | "optimised") => {
     setStep("generating");
     setErrorMsg("");
 
@@ -875,7 +880,7 @@ function RealImport({
         projectId,
         workspaceId,
         startDate: startDate || undefined,
-        endDate: endDate || undefined,
+        endDate: mode === "committed" ? (endDate || undefined) : undefined,
         buildingType: buildingType || undefined,
         city: city || undefined,
         // extra context — backend uses what it supports, ignores the rest
@@ -922,7 +927,7 @@ function RealImport({
     }
   };
 
-  const doneCount = files.filter(f => f.status === "done").length;
+  const doneCount = files.filter(f => f.status === "done" && (!f.docId || !existingDocs.some(d => d.id === f.docId))).length;
   const errorCount = files.filter(f => f.status === "error").length;
   const allDone = files.length > 0 && files.every(f => f.status === "done" || f.status === "error");
   const totalDocs = existingDocs.length + doneCount;
@@ -1237,7 +1242,7 @@ function RealImport({
           {/* Category tile grid */}
           <div className="grid grid-cols-3 gap-2.5">
             {DOC_CATEGORIES.map(cat => {
-              const catFiles = files.filter(f => f.docCategory === cat.id);
+              const catFiles = files.filter(f => f.docCategory === cat.id && !(f.status === "done" && f.docId && existingDocs.some(d => d.id === f.docId)));
               const catCount = catFiles.length + existingDocs.filter(d => d.folder?.includes(cat.id)).length;
               const active = catCount > 0;
               const { Icon } = cat;
@@ -1297,7 +1302,10 @@ function RealImport({
                   </div>
                 );
               })}
-              {files.map((entry, i) => {
+              {files.filter(entry =>
+                // Hide done entries whose docId is already in existingDocs — avoids duplicate rows
+                !(entry.status === "done" && entry.docId && existingDocs.some(d => d.id === entry.docId))
+              ).map((entry, i) => {
                 const cat = DOC_CATEGORIES.find(c => c.id === entry.docCategory);
                 return (
                   <div key={i} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${entry.status === "error" ? "bg-[#FFFBEB] border-[#FCD34D]" : "bg-[#F8FAFC] border-[#E2E8F0]"}`}>
@@ -1745,27 +1753,55 @@ function RealImport({
         );
       })()}
 
-      {/* ── GENERATE BUTTON ── */}
-      <div className="rounded-xl border border-[#C7D2FE] bg-[#EEF2FF] p-4">
-        <button
-          onClick={handleGenerate}
-          disabled={!canGenerate}
-          className="w-full py-3 rounded-xl text-[14px] font-bold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          style={{ background: canGenerate ? "linear-gradient(135deg, #4F46E5, #6D28D9)" : "#94A3B8" }}
-        >
-          <Sparkles size={16} />
-          Generate schedule with AI
-        </button>
-        {canGenerate ? (
-          <div className="text-[11px] text-[#4F46E5] text-center mt-2.5 font-medium">
-            Using {totalDocs} document{totalDocs !== 1 ? "s" : ""} · ready in ~2 minutes
+      {/* ── GENERATE BUTTONS ── */}
+      <div className="grid grid-cols-2 gap-3">
+        {/* Button 1: Committed Timeline */}
+        <div className={`rounded-xl border p-3.5 flex flex-col gap-2.5 ${canGenerate && endDate ? "border-[#C7D2FE] bg-[#EEF2FF]" : canGenerate ? "border-[#FDE68A] bg-[#FFFBEB]" : "border-[#E2E8F0] bg-[#F8FAFC]"}`}>
+          <button
+            onClick={() => handleGenerate("committed")}
+            disabled={!canGenerate}
+            className="w-full py-2.5 rounded-lg text-[13px] font-bold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+            style={{ background: canGenerate ? "linear-gradient(135deg, #4F46E5, #6D28D9)" : "#94A3B8" }}
+          >
+            <Sparkles size={14} />
+            Build Schedule in Given Timeline
+          </button>
+          <div className="text-[11px] text-center leading-tight">
+            {!canGenerate ? (
+              <span className="text-[#94A3B8]">Upload documents first</span>
+            ) : endDate ? (
+              <span className="text-[#4F46E5] font-medium">Commits to {new Date(endDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })} · compresses tasks to fit</span>
+            ) : (
+              <span className="text-[#B45309] font-medium">⚠ No end date set in project — will run as optimised</span>
+            )}
           </div>
-        ) : (
-          <div className="text-[11px] text-[#64748B] text-center mt-2.5">
-            Upload at least one document to generate
+        </div>
+
+        {/* Button 2: Optimised Schedule */}
+        <div className={`rounded-xl border p-3.5 flex flex-col gap-2.5 ${canGenerate ? "border-[#BBF7D0] bg-[#F0FDF4]" : "border-[#E2E8F0] bg-[#F8FAFC]"}`}>
+          <button
+            onClick={() => handleGenerate("optimised")}
+            disabled={!canGenerate}
+            className="w-full py-2.5 rounded-lg text-[13px] font-bold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+            style={{ background: canGenerate ? "linear-gradient(135deg, #059669, #0D9488)" : "#94A3B8" }}
+          >
+            <Sparkles size={14} />
+            Build Optimised Schedule
+          </button>
+          <div className="text-[11px] text-center leading-tight">
+            {canGenerate ? (
+              <span className="text-[#065F46] font-medium">Natural task durations · shows realistic completion date</span>
+            ) : (
+              <span className="text-[#94A3B8]">Upload documents first</span>
+            )}
           </div>
-        )}
+        </div>
       </div>
+      {canGenerate && (
+        <div className="text-[11px] text-[#64748B] text-center -mt-1">
+          Using {totalDocs} document{totalDocs !== 1 ? "s" : ""} · ready in ~2 minutes
+        </div>
+      )}
 
       {files.some(f => f.status === "pending") && (
         <div className="px-3 py-2 bg-[#FEF3C7] border border-[#D97706] rounded-lg text-[12px] text-[#92400E] font-semibold">
