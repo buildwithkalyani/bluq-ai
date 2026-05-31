@@ -560,6 +560,7 @@ function OverviewContent() {
             });
             setIsCreateModalOpen(false);
             selectProject(project.id);
+            window.dispatchEvent(new CustomEvent("bluq_project_created"));
           }}
         />
       )}
