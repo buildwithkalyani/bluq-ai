@@ -136,17 +136,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             }
           } else {
             clearWorkspaceCache();
-            // No workspace at all → must onboard (unless already skipped/done)
-            const done = localStorage.getItem("onboarding_done") === "true";
-            if (!done && pathname !== "/onboarding" && !pathname.startsWith("/invite")) {
+            // No org exists for this user — clear any stale onboarding_done flag
+            // (could be left by a different user on the same device) and force onboarding.
+            localStorage.removeItem("onboarding_done");
+            if (pathname !== "/onboarding" && !pathname.startsWith("/invite")) {
               router.replace("/onboarding");
             }
           }
         })
         .catch((err) => {
           console.error("workspace fetch error:", err.message);
-          // If we had no valid cache and backend fails, redirect to onboarding
+          // No valid cache for this user and backend failed → force onboarding
           if (!cached?.userId || cached.userId !== userId) {
+            localStorage.removeItem("onboarding_done");
             if (pathname !== "/onboarding" && !pathname.startsWith("/invite")) {
               router.replace("/onboarding");
             }
