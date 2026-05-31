@@ -69,6 +69,7 @@ export interface ScheduledTask {
   name: string;
   fullName: string;
   unit: string;
+  taskCategory: "A" | "B"; // A = process (chemistry-fixed), B = labour (crew-driven)
 
   // Floor / wing info
   floorNumber?: number;
@@ -377,17 +378,62 @@ function estimateQuantity(
  * For LS (lump sum) tasks, use the productivity rate directly as days.
  * For per-flat tasks, multiply quantity by rate.
  */
+/**
+ * When a productivity rate is expressed "per fitter", "per mason", etc., the
+ * total daily output is rate × number_of_that_role on site.  Without this
+ * multiplier a task with 4 steel fitters computes 4× too long.
+ */
+function getCrewMultiplier(
+  productivityUnit: string,
+  crew: Array<{ role: string; count: number }>
+): number {
+  const pu = productivityUnit.toLowerCase();
+  const roleKeywords: Record<string, string[]> = {
+    fitter:      ["fitter", "steel fitter", "bar bender"],
+    mason:       ["mason", "tile specialist", "tile fixer", "plaster"],
+    plumber:     ["plumber"],
+    electrician: ["electrician"],
+    carpenter:   ["carpenter"],
+    labourer:    ["labourer", "labor", "helper"],
+    worker:      [],  // generic: use total crew
+  };
+
+  for (const [keyword, aliases] of Object.entries(roleKeywords)) {
+    if (!pu.includes(`per ${keyword}`)) continue;
+
+    if (keyword === "worker") {
+      return Math.max(1, crew.reduce((s, c) => s + c.count, 0));
+    }
+    const matchTerms = [keyword, ...aliases];
+    const matched = crew.filter(c =>
+      matchTerms.some(t => c.role.toLowerCase().includes(t))
+    );
+    const count = matched.reduce((s, c) => s + c.count, 0);
+    return Math.max(1, count);
+  }
+
+  return 1;
+}
+
+// Task-library crew sizes are calibrated for ~300 sqm floor plates.
+// Larger floor plates deploy proportionally more workers in parallel — without
+// scaling, a 2000 sqm floor plate produces 6× too-long durations for steel,
+// plastering, tiling, etc., leading to 30-year schedules.
+const REFERENCE_FLOOR_AREA_SQM = 300;
+
 function calculateBaseDuration(
   quantity: number,
   rateMin: number,
   rateMax: number,
   unit: string,
   productivityUnit: string,
-  isPerFlat: boolean
+  isPerFlat: boolean,
+  crew: Array<{ role: string; count: number }> = [],
+  floorAreaScale: number = 1   // > 1 when floor plate > reference; scales crew up
 ): number {
   const avgRate = (rateMin + rateMax) / 2;
 
-  // LS tasks: productivity is already in days
+  // LS tasks: productivity is already in days — not affected by floor area
   if (unit === "LS") {
     return avgRate;
   }
@@ -403,23 +449,26 @@ function calculateBaseDuration(
   // Regular tasks: quantity ÷ rate = days
   if (avgRate <= 0) return 1;
 
+  // Crew multiplier — applies when rate is expressed "per fitter", "per mason", etc.
+  const crewMult = getCrewMultiplier(productivityUnit, crew);
+
   // Handle different productivity units
   if (productivityUnit.includes("/hr") || productivityUnit.includes("hr")) {
-    // Rate is per hour — assume 8-hour workday
+    // Rate is per hour — crew multiplier not applied (pump/machine output is total)
     return Math.max(1, Math.ceil(quantity / (avgRate * 8)));
   }
 
   if (productivityUnit.includes("/day") || productivityUnit.includes("day")) {
-    return Math.max(1, Math.ceil(quantity / avgRate));
+    return Math.max(1, Math.ceil(quantity / (avgRate * crewMult * floorAreaScale)));
   }
 
   if (productivityUnit.includes("days")) {
-    // Rate IS the duration (e.g., "3-5 days", "7 days")
+    // Rate IS the duration (e.g., "3-5 days", "7 days") — not quantity-based
     return Math.ceil(avgRate);
   }
 
   // Default: treat as per-day rate
-  return Math.max(1, Math.ceil(quantity / avgRate));
+  return Math.max(1, Math.ceil(quantity / (avgRate * crewMult * floorAreaScale)));
 }
 
 
@@ -798,17 +847,32 @@ export function calculateSchedule(
   const tasksWithDurations = selectedTasks.map(task => {
     const { quantity, unit: qUnit } = estimateQuantity(task, params);
 
-    const baseDuration = calculateBaseDuration(
-      quantity,
-      task.productivityRateMin,
-      task.productivityRateMax,
-      task.unit,
-      task.productivityUnit,
-      task.isPerFlat
-    );
+    let baseDuration: number;
+    let regionalAdjustedDuration: number;
 
-    // Apply regional productivity index
-    const regionalAdjustedDuration = Math.ceil(baseDuration / region.productivityIndex);
+    if (task.taskCategory === "A") {
+      // Category A — process task: duration is a scientifically fixed minimum.
+      // No crew scaling, no floor-area scaling, no regional productivity index.
+      baseDuration = Math.ceil((task.productivityRateMin + task.productivityRateMax) / 2);
+      regionalAdjustedDuration = baseDuration;
+    } else {
+      // Category B — labour task: scale crew for large floor plates and apply regional index.
+      const floorAreaScale = task.isPerFloor && params.typicalFloorArea && params.typicalFloorArea > REFERENCE_FLOOR_AREA_SQM
+        ? Math.min(8, params.typicalFloorArea / REFERENCE_FLOOR_AREA_SQM)
+        : 1;
+
+      baseDuration = calculateBaseDuration(
+        quantity,
+        task.productivityRateMin,
+        task.productivityRateMax,
+        task.unit,
+        task.productivityUnit,
+        task.isPerFlat,
+        task.crew,
+        floorAreaScale
+      );
+      regionalAdjustedDuration = Math.ceil(baseDuration / region.productivityIndex);
+    }
 
     return {
       ...task,
@@ -836,18 +900,23 @@ export function calculateSchedule(
   const scheduledTasks: ScheduledTask[] = tasksWithDurations.map(task => {
     const cpm = cpmResult.get(task.code) || { earliestStart: 0, earliestFinish: task.regionalAdjustedDuration };
 
-    const monsoonOverlap = calculateMonsoonOverlap(
+    // Category A = process task: duration is chemistry-fixed. Monsoon cannot extend it.
+    const isCuringTask = task.taskCategory === "A";
+
+    const monsoonOverlap = isCuringTask ? 0 : calculateMonsoonOverlap(
       cpm.earliestStart,
       task.regionalAdjustedDuration,
       projectStartDate,
       monsoonMonths
     );
 
-    const { adjustedDuration, extraDays } = applyMonsoonImpact(
-      task.regionalAdjustedDuration,
-      monsoonOverlap,
-      task.monsoonImpactFactor
-    );
+    const { adjustedDuration, extraDays } = isCuringTask
+      ? { adjustedDuration: task.regionalAdjustedDuration, extraDays: 0 }
+      : applyMonsoonImpact(
+          task.regionalAdjustedDuration,
+          monsoonOverlap,
+          task.monsoonImpactFactor
+        );
 
     return {
       ...task,
@@ -884,12 +953,27 @@ export function calculateSchedule(
   }
 
   // ---------------------------------------------------------------------------
-  // PASS 5a: Natural critical path analysis (on uncompressed schedule)
-  // Used to determine minimum possible days (lag days cannot be compressed)
+  // PASS 5a: Compute true minimum possible days
+  // Run CPM with all task durations = 1 day. This correctly handles parallel
+  // critical tasks — unlike the old formula (lagDays + taskCount) which
+  // over-counts sequential days and wrongly marks feasible timelines infeasible.
   // ---------------------------------------------------------------------------
   const naturalDays = maxFinish;
 
-  // Build successor map for backward pass
+  const minDurationCpmInput = scheduledTasks.map(t => ({
+    code: t.code,
+    // Category A tasks have scientifically fixed minimums — they cannot be compressed below their natural duration.
+    // Category B tasks can theoretically be driven to 1 day with unlimited crew.
+    durationDays: t.taskCategory === "A" ? t.baseDurationDays : 1,
+    predecessors: t.predecessors,
+  }));
+  const minCpmResult = forwardPass(minDurationCpmInput);
+  let minimumPossibleDays = 0;
+  for (const [, timing] of minCpmResult) {
+    if (timing.earliestFinish > minimumPossibleDays) minimumPossibleDays = timing.earliestFinish;
+  }
+
+  // Backward pass on natural schedule — for reporting lag days only
   const naturalSuccessorMap = new Map<string, string[]>();
   for (const task of scheduledTasks) {
     if (!naturalSuccessorMap.has(task.code)) naturalSuccessorMap.set(task.code, []);
@@ -899,16 +983,15 @@ export function calculateSchedule(
     }
   }
 
-  // Backward pass on natural schedule
   const naturalLatestFinish = new Map<string, number>();
   for (const task of scheduledTasks) {
     if ((naturalSuccessorMap.get(task.code) || []).length === 0) {
       naturalLatestFinish.set(task.code, naturalDays);
     }
   }
-  const naturalSortedDesc = [...scheduledTasks].sort((a, b) => {
-    return (finalCpmResult.get(b.code)?.earliestFinish || 0) - (finalCpmResult.get(a.code)?.earliestFinish || 0);
-  });
+  const naturalSortedDesc = [...scheduledTasks].sort((a, b) =>
+    (finalCpmResult.get(b.code)?.earliestFinish || 0) - (finalCpmResult.get(a.code)?.earliestFinish || 0)
+  );
   for (const task of naturalSortedDesc) {
     if (!naturalLatestFinish.has(task.code)) {
       const successors = naturalSuccessorMap.get(task.code) || [];
@@ -919,43 +1002,46 @@ export function calculateSchedule(
           const sucLF = naturalLatestFinish.get(sucCode) || naturalDays;
           const sucLS = sucLF - sucTask.adjustedDurationDays;
           const predInfo = sucTask.predecessors.find(p => p.taskCode === task.code);
-          const lag = predInfo?.lagDays || 0;
-          minSuccStart = Math.min(minSuccStart, sucLS - lag);
+          minSuccStart = Math.min(minSuccStart, sucLS - (predInfo?.lagDays || 0));
         }
       }
       naturalLatestFinish.set(task.code, minSuccStart);
     }
   }
 
-  // Identify natural critical path
+  let criticalPathLagDaysTotal = 0;
   const naturalCriticalSet = new Set<string>();
   for (const task of scheduledTasks) {
     const lf = naturalLatestFinish.get(task.code) || naturalDays;
     const es = finalCpmResult.get(task.code)?.earliestStart || 0;
     const ls = lf - task.adjustedDurationDays;
-    if (Math.max(0, ls - es) === 0) naturalCriticalSet.add(task.code);
-  }
-
-  // Sum lag days between consecutive critical path tasks
-  let criticalPathLagDaysTotal = 0;
-  const criticalPathTaskNames: string[] = [];
-  for (const task of scheduledTasks) {
-    if (!naturalCriticalSet.has(task.code)) continue;
-    criticalPathTaskNames.push(task.name);
-    for (const pred of task.predecessors) {
-      if (naturalCriticalSet.has(pred.taskCode) && pred.lagDays > 0) {
-        criticalPathLagDaysTotal += pred.lagDays;
+    if (Math.max(0, ls - es) === 0) {
+      naturalCriticalSet.add(task.code);
+      for (const pred of task.predecessors) {
+        if (naturalCriticalSet.has(pred.taskCode) && pred.lagDays > 0) {
+          criticalPathLagDaysTotal += pred.lagDays;
+        }
       }
     }
   }
-  const criticalPathTaskCount = naturalCriticalSet.size;
-  // Lag days are physics — cannot compress. Minimum 1 day per task on critical path.
-  const minimumPossibleDays = criticalPathLagDaysTotal + criticalPathTaskCount;
 
   // ---------------------------------------------------------------------------
-  // PASS 5b: Timeline fitting — compress only task durations, never lag days
+  // PASS 5b: Timeline fitting — linear interpolation between min and natural
+  //
+  // Old approach: timelineCompression = requestedDays / naturalDays, applied to
+  // task durations directly. This is WRONG because lag days are fixed. Even with
+  // 20% compressed tasks, lags keep the total well above the target date.
+  //
+  // New approach: treat it as interpolation between two known endpoints:
+  //   m = 0 → all tasks at 1 day → schedule = minimumPossibleDays
+  //   m = 1 → natural durations  → schedule = naturalDays
+  //
+  //   m = (requestedDays - minimumPossibleDays) / (naturalDays - minimumPossibleDays)
+  //   finalDuration = max(1, round(1 + m × (adjustedDuration - 1)))
+  //
+  // This correctly accounts for fixed lag days and lands at the target date.
   // ---------------------------------------------------------------------------
-  let timelineCompression = 1.0;
+  let timelineCompression = 1.0;  // interpolation factor m: 0=minimum, 1=natural
   let requestedDays = naturalDays;
   const compressionWarnings: string[] = [];
   let feasible = true;
@@ -966,32 +1052,42 @@ export function calculateSchedule(
       (requestedEndDate.getTime() - projectStartDate.getTime()) / (1000 * 60 * 60 * 24)
     );
 
-    if (requestedDays > 0 && naturalDays > 0) {
-      timelineCompression = requestedDays / naturalDays;
-    }
-
-    if (requestedDays < minimumPossibleDays) {
+    if (requestedDays <= 0) {
+      feasible = false;
+      compressionWarnings.push("End date is before project start date.");
+    } else if (requestedDays < minimumPossibleDays) {
       feasible = false;
       compressionWarnings.push(
-        `Timeline infeasible. Minimum required: ${minimumPossibleDays} days (includes ${criticalPathLagDaysTotal} days of mandatory curing/drying time). Requested: ${requestedDays} days. Critical path: [${criticalPathTaskNames.join(", ")}]`
+        `Timeline infeasible. Minimum: ${minimumPossibleDays} days (includes ${criticalPathLagDaysTotal} days of mandatory curing/drying). Requested: ${requestedDays} days.`
       );
-      // Cannot compress below minimum — set all tasks to 1 day, lags preserved
-      timelineCompression = 1.0;
+    } else if (requestedDays >= naturalDays) {
+      timelineCompression = 1.0; // no compression needed
+    } else {
+      // Interpolation factor: 0 = all tasks 1-day, 1 = natural durations
+      timelineCompression = (requestedDays - minimumPossibleDays) / (naturalDays - minimumPossibleDays);
     }
   }
 
-  if (feasible && timelineCompression < 0.7) {
+  if (feasible && timelineCompression < 0.4) {
     compressionWarnings.push(
-      `Heavy compression applied (${Math.round(timelineCompression * 100)}%). Schedule assumes maximum crew deployment. Verify with contractor before committing.`
+      `Heavy compression applied — schedule requires maximum crew deployment. Verify with contractor before committing.`
     );
   }
 
-  // Compress only finalDurationDays — lags live in predecessors[] and are untouched
   for (const task of scheduledTasks) {
-    if (!feasible) {
-      task.finalDurationDays = 1;
+    if (task.taskCategory === "A") {
+      // Category A — process task: duration is a scientifically fixed minimum.
+      // Cannot be compressed regardless of timeline pressure.
+      task.finalDurationDays = task.adjustedDurationDays;
+    } else if (!feasible) {
+      task.finalDurationDays = task.adjustedDurationDays;
     } else {
-      task.finalDurationDays = Math.max(1, Math.round(task.adjustedDurationDays * timelineCompression));
+      // Category B — labour task: linear interpolation compression.
+      // m=0 → 1 day (max crew), m=1 → natural duration
+      task.finalDurationDays = Math.max(
+        1,
+        Math.round(1 + timelineCompression * (task.adjustedDurationDays - 1))
+      );
     }
   }
 
@@ -1093,7 +1189,7 @@ export function calculateSchedule(
     requestedDays,
     naturalDays,
     minimumPossibleDays,
-    compressionFactor: timelineCompression,
+    compressionFactor: naturalDays > 0 ? requestedDays / naturalDays : 1.0,
     fixedLagDaysOnCriticalPath: criticalPathLagDaysTotal,
     warnings: compressionWarnings,
   };
@@ -1111,7 +1207,7 @@ export function calculateSchedule(
       projectEndDate: projectEndDate.toISOString().split("T")[0],
       criticalPathLength: projectEndDay,
       criticalPathTasks,
-      timelineCompression,
+      timelineCompression: compressionSummary.compressionFactor,
       monsoonMonths,
       totalMonsoonImpactDays,
       phases: phaseSummary,
