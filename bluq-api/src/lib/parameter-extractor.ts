@@ -244,7 +244,11 @@ CRITICAL RULES:
 3. If a parameter cannot be determined from the documents, use the default value specified.
 4. For building type, match to the CLOSEST option from the allowed values.
 5. For soil type, if not mentioned in documents, use "mixed" as default.
-6. Count floors as the number ABOVE ground. "G+4" = floors: 4. "Stilt+5" = floors: 5, stilts: true.
+6. FLOOR COUNT RULE — Extract ONLY the integer after the "+" sign. NEVER add 1 for ground floor.
+   "G+4" = floors: 4    "G+5" = floors: 5    "G+6" = floors: 6    "G+7" = floors: 7
+   "Stilt+5" = floors: 5, stilts: true    "B+G+6" = floors: 6, basements: 1
+   CRITICAL: "G+6" = floors: 6 (NOT 7). The system handles ground floor as floor-0 internally.
+   Rule: floors = the integer immediately after the first "+" in the G+N notation — nothing more.
 7. For region, identify from the project address, city name, or any location reference in the documents.
 8. Use the TASK LIBRARY above to understand what each parameter triggers — extract precisely.
 9. Only add to novelScopeItems if the scope item is NOT covered by any task in the library above.
@@ -281,7 +285,7 @@ DEFAULTS (use when document doesn't specify):
 - terrace: "accessible"
 - waterTableDepth: null
 - startDate: null
-- endDate: null
+- endDate: null  ← ONLY extract if document is a construction CONTRACT or work order. Brochure "possession dates" and marketing timelines are NOT endDate — set null.
 - hvac: false (true for commercial/hospital/hotel)
 - centralAC: false
 - dgSet: false (true for commercial/hospital/hotel)
@@ -293,8 +297,14 @@ DEFAULTS (use when document doesn't specify):
 
 ESTIMATION RULES (when not explicitly stated):
 - buildingHeight: floors × 3.2 meters (typical floor-to-floor)
-- totalArea: if only carpet area given, multiply by 1.25 for built-up
-- typicalFloorArea: totalArea / (floors + 1) approximately
+- typicalFloorArea: DERIVE FROM BROCHURE UNIT DATA — this is the most important area field.
+  Step 1: Find unit sizes in the brochure (e.g. "2BHK: 850 sqft, 3BHK: 1200 sqft").
+  Step 2: Count units per floor (totalUnits / (floors + 1), or read explicitly if stated).
+  Step 3: typicalFloorArea = sum of unit carpet areas per floor × 1.25 (carpet-to-built-up factor).
+  Example: 4 flats per floor (2× 850sqft + 2× 1200sqft) → typicalFloorArea = (1700+2400)×1.25 / 10.76 = 476 sqm.
+  ONLY fall back to totalArea/(floors+1) if NO unit size data exists in the document.
+- totalArea: SINGLE BUILDING only — NOT total complex/township area. Large developers quote total development area; ignore that figure. Set totalArea = typicalFloorArea × (floors + 1) if not explicitly stated for THIS building.
+  If only carpet area given, multiply by 1.25 for built-up area.
 - fireProtection: true if buildingHeight >= 15m
 - lifts: 0 if floors <= 3, 1 if floors 4-7, 2 if floors 8-15, 3+ if floors > 15
 
@@ -412,6 +422,7 @@ export async function extractParameters(
         body: JSON.stringify({
           model,
           max_tokens: 4096,
+          temperature: 0,  // deterministic extraction — same doc = same params every time
           system: [
             // Block 1: Full task library — cached across all calls in a session
             {
@@ -540,6 +551,29 @@ const VALID_TERRACE_TYPES: Set<string> = new Set([
  * This is the safety net — even if Claude returns garbage for a field,
  * the pipeline continues with a reasonable default.
  */
+// Max typical floor plate area per building type — prevents complex/township total area
+// from inflating single-building task durations to thousands of days.
+// These are generous upper bounds: e.g. residential_g7 at 2000 sqm = 20 flats × 100 sqm.
+const FLOOR_AREA_MAXES: Record<string, number> = {
+  villa_bungalow:        500,
+  row_house:             300,
+  farmhouse:            1000,
+  residential_g2:       1000,
+  residential_g4:       1500,
+  residential_g7:       2000,
+  residential_g10:      3000,
+  residential_highrise: 5000,
+  commercial_office:    8000,
+  commercial_retail:    6000,
+  commercial_mall:     20000,
+  industrial_warehouse: 30000,
+  industrial_factory:  15000,
+  institutional_school: 4000,
+  institutional_hospital: 8000,
+  hospitality_hotel:    4000,
+  mixed_use:            8000,
+};
+
 function validateAndFillDefaults(
   raw: Partial<ProjectParameters>,
   options?: { projectRegion?: RegionCode; projectCity?: string }
@@ -549,17 +583,51 @@ function validateAndFillDefaults(
     ? raw.buildingHeight
     : floors * 3.2;
 
+  // Cross-check floors against buildingType range — clamp if clearly outside
+  const extractedBuildingType = validEnum(raw.buildingType, VALID_BUILDING_TYPES, inferBuildingType(floors)) as BuildingType;
+  const btConfig = BUILDING_TYPES[extractedBuildingType];
+  const clampedFloors = (btConfig && floors > btConfig.typicalFloorRange.max + 1)
+    ? btConfig.typicalFloorRange.max
+    : floors;
+  if (clampedFloors !== floors) {
+    console.warn(
+      `[parameter-extractor] floors=${floors} exceeds buildingType=${extractedBuildingType} max=${btConfig.typicalFloorRange.max}, clamped to ${clampedFloors}`
+    );
+  }
+
+  // Clamp typicalFloorArea first — it directly drives all task quantity estimates.
+  // Large Indian developments (Lodha, Prestige, etc.) quote total COMPLEX area in
+  // brochures. We need the floor plate of ONE building/wing, not the whole township.
+  const maxFloorArea = FLOOR_AREA_MAXES[extractedBuildingType] ?? 8000;
+  const rawFloorArea = (raw.typicalFloorArea && raw.typicalFloorArea > 0)
+    ? raw.typicalFloorArea
+    : ((raw.totalArea && raw.totalArea > 0) ? raw.totalArea / (clampedFloors + 1) : (clampedFloors * 200) / (clampedFloors + 1));
+  const typicalFloorArea = Math.min(Math.max(10, rawFloorArea), maxFloorArea);
+
+  // totalArea is derived from typicalFloorArea × floors when the raw value is
+  // implausibly large (i.e. looks like complex area, not single-building area).
+  const maxTotalArea = typicalFloorArea * (clampedFloors + 1) * 2;
+  const rawTotalArea = (raw.totalArea && raw.totalArea > 0) ? raw.totalArea : typicalFloorArea * (clampedFloors + 1);
+  const totalArea = Math.min(Math.max(10, rawTotalArea), maxTotalArea);
+
+  if (rawTotalArea > maxTotalArea) {
+    console.warn(
+      `[parameter-extractor] totalArea=${rawTotalArea} sqm looks like complex area (max for single ${extractedBuildingType}: ${maxTotalArea}). ` +
+      `Clamped to ${totalArea}. typicalFloorArea=${typicalFloorArea}`
+    );
+  }
+
   const params: ProjectParameters = {
     // Building basics
-    buildingType: validEnum(raw.buildingType, VALID_BUILDING_TYPES, inferBuildingType(floors)) as BuildingType,
+    buildingType: extractedBuildingType,
     projectName: raw.projectName || "Untitled Project",
-    floors,
+    floors: clampedFloors,
     basements: clampNumber(raw.basements, 0, 10, 0),
     buildingHeight,
-    totalArea: clampNumber(raw.totalArea, 10, 1_000_000, floors * 200),
-    plotArea: clampNumber(raw.plotArea, 10, 1_000_000, (raw.totalArea || floors * 200) * 1.5),
-    totalUnits: clampNumber(raw.totalUnits, 1, 5000, floors * 4),
-    typicalFloorArea: clampNumber(raw.typicalFloorArea, 10, 50_000, (raw.totalArea || floors * 200) / (floors + 1)),
+    totalArea,
+    plotArea: clampNumber(raw.plotArea, 10, 500_000, totalArea * 1.5),
+    totalUnits: clampNumber(raw.totalUnits, 1, 5000, clampedFloors * 4),
+    typicalFloorArea,
 
     // Site & soil
     regionCode: (options?.projectRegion || validEnum(raw.regionCode, VALID_REGION_CODES, "MH")) as RegionCode,
@@ -636,8 +704,9 @@ function mergeResults(results: ProjectParameters[]): ProjectParameters {
   merged.facadeType      = majorityVote(results.map(r => r.facadeType)) as any;
   merged.terrace         = majorityVote(results.map(r => r.terrace)) as any;
 
-  // Average on numeric fields
-  merged.floors          = Math.round(average(results.map(r => r.floors)));
+  // Average on numeric fields — floors uses min to avoid phantom floor bug
+  // (if runs disagree 6 vs 7, the lower is almost always correct for G+N notation)
+  merged.floors          = Math.min(...results.map(r => r.floors));
   merged.basements       = Math.round(average(results.map(r => r.basements)));
   merged.buildingHeight  = Math.round(average(results.map(r => r.buildingHeight)) * 10) / 10;
   merged.totalArea       = Math.round(average(results.map(r => r.totalArea)));

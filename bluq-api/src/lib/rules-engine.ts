@@ -66,6 +66,7 @@ import {
     productivityRateMin: number;
     productivityRateMax: number;
     productivityUnit: string;
+    taskCategory: "A" | "B";        // A = process (chemistry-fixed), B = labour (crew-driven)
     monsoonImpactFactor: number;    // base MIF × regional multiplier
     crew: Array<{ role: string; count: number }>;
   
@@ -777,6 +778,7 @@ import {
       productivityRateMin: template.productivityRate.min,
       productivityRateMax: template.productivityRate.max,
       productivityUnit: template.productivityRate.unit,
+      taskCategory: template.taskCategory ?? "B",
       monsoonImpactFactor: Math.round(adjustedMif * 100) / 100,
       crew: template.crew.map(c => ({ ...c })),
   

@@ -259,6 +259,10 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     `[worker] Extracted params: ${params.buildingType}, ${params.floors} floors, ` +
     `${params.regionCode}, soil=${params.soilType}, confidence=${params.confidence.overall}`
   );
+  console.log(
+    `[worker] Area params: totalArea=${params.totalArea} sqm, typicalFloorArea=${params.typicalFloorArea} sqm, ` +
+    `totalUnits=${params.totalUnits}, wings=${params.wings ? JSON.stringify(params.wings.map(w => `${w.name}:G+${w.floors}`)) : "none"}`
+  );
   console.log(`[worker] Step 3 completed in ${Date.now() - step3Start}ms`);
 
   // =========================================================================
@@ -292,6 +296,13 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     `${scheduleResult.summary.totalDurationDays} days, ` +
     `${scheduleResult.summary.criticalPathTasks} on critical path, ` +
     `${scheduleResult.summary.totalMonsoonImpactDays} monsoon impact days`
+  );
+  console.log(
+    `[worker] Compression: natural=${scheduleResult.summary.compressionSummary.naturalDays}d, ` +
+    `minimum=${scheduleResult.summary.compressionSummary.minimumPossibleDays}d, ` +
+    `requested=${scheduleResult.summary.compressionSummary.requestedDays}d, ` +
+    `factor=${scheduleResult.summary.compressionSummary.compressionFactor.toFixed(3)}, ` +
+    `feasible=${scheduleResult.summary.compressionSummary.feasible}`
   );
   console.log(`[worker] Step 5 completed in ${Date.now() - step5Start}ms`);
 

@@ -287,6 +287,7 @@ function convertToScheduledTasks(
       name: t.name,
       fullName: t.name,
       unit: sanitizeUnit(t.unit),
+      taskCategory: "B" as const,
 
       floorNumber: undefined,
       floorLabel: undefined,
@@ -341,6 +342,7 @@ function makeUnplacedTask(t: GeneratedTask, durationDays: number): ScheduledTask
     name: t.name,
     fullName: t.name,
     unit: sanitizeUnit(t.unit),
+    taskCategory: "B",
     floorNumber: undefined,
     floorLabel: undefined,
     estimatedQuantity: 1,
