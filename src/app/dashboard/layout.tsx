@@ -767,17 +767,24 @@ function SidebarProfile({ collapsed }: { collapsed?: boolean }) {
   const { data: session } = authClient.useSession();
   const { role } = usePermissions();
   const [isOpen, setIsOpen] = useState(false);
-  const [photoUrl, setPhotoUrl] = useState<string | null>(() => {
-    try { return localStorage.getItem("bluq_profile_photo"); } catch { return null; }
-  });
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+
+  const userId = session?.user?.id;
+  const photoKey = userId ? `bluq_profile_photo_${userId}` : null;
 
   useEffect(() => {
+    if (!photoKey) { setPhotoUrl(null); return; }
+    try { setPhotoUrl(localStorage.getItem(photoKey)); } catch {}
+  }, [photoKey]);
+
+  useEffect(() => {
+    if (!photoKey) return;
     const onStorage = (e: StorageEvent) => {
-      if (e.key === "bluq_profile_photo") setPhotoUrl(e.newValue);
+      if (e.key === photoKey) setPhotoUrl(e.newValue);
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, []);
+  }, [photoKey]);
 
   const userName = session?.user?.name ?? "User";
   const userEmail = session?.user?.email ?? "";
