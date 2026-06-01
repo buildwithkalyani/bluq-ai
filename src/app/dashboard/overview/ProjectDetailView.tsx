@@ -105,14 +105,18 @@ interface WeatherData {
 }
 
 function wxInfo(code: number): { emoji: string; label: string } {
-  if (code === 0)  return { emoji: "☀️", label: "Clear" };
-  if (code <= 3)   return { emoji: "⛅", label: "Partly Cloudy" };
-  if (code <= 48)  return { emoji: "🌫️", label: "Foggy" };
-  if (code <= 67)  return { emoji: "🌧️", label: "Rain" };
-  if (code <= 77)  return { emoji: "❄️", label: "Snow" };
-  if (code <= 82)  return { emoji: "🌦️", label: "Showers" };
-  if (code <= 99)  return { emoji: "⛈️", label: "Thunderstorm" };
-  return { emoji: "🌡️", label: "—" };
+  if (code === 0)  return { emoji: "☀️",  label: "Clear" };
+  if (code === 1)  return { emoji: "🌤️",  label: "Mainly Clear" };
+  if (code === 2)  return { emoji: "⛅",   label: "Partly Cloudy" };
+  if (code === 3)  return { emoji: "☁️",   label: "Overcast" };
+  if (code <= 48)  return { emoji: "🌫️",  label: "Foggy" };
+  if (code <= 55)  return { emoji: "🌦️",  label: "Drizzle" };
+  if (code <= 67)  return { emoji: "🌧️",  label: "Rain" };
+  if (code <= 77)  return { emoji: "❄️",   label: "Snow" };
+  if (code <= 82)  return { emoji: "🌧️",  label: "Showers" };
+  if (code <= 86)  return { emoji: "🌨️",  label: "Snow Showers" };
+  if (code <= 99)  return { emoji: "⛈️",  label: "Thunderstorm" };
+  return                  { emoji: "🌡️",  label: "—" };
 }
 
 function uvLabel(uv: number): { label: string; color: string } {
