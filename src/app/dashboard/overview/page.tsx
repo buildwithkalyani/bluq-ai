@@ -515,7 +515,7 @@ function OverviewContent() {
                         <AlertTriangle size={10} /> {p.issues} issues
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#ECFDF5] text-[11px] text-[#059669] font-semibold border border-[#A7F3D0]">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#ECFDF5] text-[11px] text-[#059669] font-semibold border border-[#A7F3D0] mt-2 mb-2">
                         <CheckCircle2 size={10} /> No issues
                       </span>
                     )}
