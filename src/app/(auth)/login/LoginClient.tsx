@@ -140,7 +140,7 @@ function LoginForm() {
               className="w-3.5 h-3.5 accent-[#3A4EA2] cursor-pointer"
             />
             <label htmlFor="rememberMe" className="text-[12px] text-[#57606a] cursor-pointer select-none">
-              Keep me logged in for 30 days
+              Keep me logged in for 7 days
             </label>
           </div>
           <button

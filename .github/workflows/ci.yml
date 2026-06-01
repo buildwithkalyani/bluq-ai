@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Reason for manual run"
+        required: false
+        default: "Manual trigger"
+
+jobs:
+  auth-tests:
+    name: Auth Tests (bluq-api)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: bluq-api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: bluq-api/node_modules
+          key: ${{ runner.os }}-bluq-api-${{ hashFiles('bluq-api/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bluq-api-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run auth tests
+        run: npm test
