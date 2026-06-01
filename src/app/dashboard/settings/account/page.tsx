@@ -73,19 +73,25 @@ export default function MyProfilePage() {
     setFetching(false);
   }, [session?.user?.id, sessionPending, useMock, isDesignMode]);
 
-  const [photoUrl, setPhotoUrl] = useState<string | null>(() => {
-    try { return localStorage.getItem("bluq_profile_photo"); } catch { return null; }
-  });
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
+  const photoKey = session?.user?.id ? `bluq_profile_photo_${session.user.id}` : null;
+
+  useEffect(() => {
+    if (!photoKey) return;
+    try { setPhotoUrl(localStorage.getItem(photoKey)); } catch {}
+  }, [photoKey]);
+
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!photoKey) return;
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
       setPhotoUrl(dataUrl);
-      try { localStorage.setItem("bluq_profile_photo", dataUrl); } catch {}
+      try { localStorage.setItem(photoKey, dataUrl); } catch {}
     };
     reader.readAsDataURL(file);
   };
