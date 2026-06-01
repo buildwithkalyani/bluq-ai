@@ -1823,7 +1823,7 @@ const handleSaveModal = (data: any, newPreds: any) => {
           onMouseUp={() => { setDrawingDep(null); setMovingDep(null); }}
         >
           {/* Frozen Left Column */}
-          <div className="sticky left-0 z-30 bg-white border-r border-[#E2E8F0] shadow-[1px_0_0_0_#e5e7eb]" style={{ width: leftPanelW, minWidth: leftPanelW }}>
+          <div className="sticky left-0 z-30 bg-white border-r border-[#E2E8F0] shadow-[1px_0_0_0_#e5e7eb]" style={{ width: leftPanelW, minWidth: leftPanelW, minHeight: HEADER_H + Math.max(totalH, 600) }}>
             <div className="flex items-center border-b text-[13px] font-semibold text-[#64748B]" style={{ height: HEADER_H }}>
               <div className="flex-1 px-4 bg-[#F1F5F9] h-full flex items-center justify-between">
                 <span>Task name</span>
