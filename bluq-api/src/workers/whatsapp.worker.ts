@@ -949,6 +949,33 @@ export async function triggerMorningPrompt(
 }
 
 /**
+ * Send morning prompt to a project contractor (stored in settingsJson, not a system user).
+ * Sets minimal state so the reply flow works correctly.
+ */
+export async function triggerContractorMorningPrompt(
+  phone: string,
+  workspaceId: string,
+  projectId: string,
+  trade: string | null,
+): Promise<void> {
+  const state: WaState = {
+    phone,
+    userId: "",
+    workspaceId,
+    projectId,
+    taskId: "",
+    taskTitle: trade ?? "Site work",
+    area: null,
+    contractor: trade,
+    flowPhase: "idle",
+    eodData: {},
+    lastUpdated: new Date().toISOString(),
+  };
+  await setState(state);
+  await sendMorningPrompt(state);
+}
+
+/**
  * Send evening prompt to a worker.
  * Called by the 5:30pm cron job for every worker who checked in this morning.
  */

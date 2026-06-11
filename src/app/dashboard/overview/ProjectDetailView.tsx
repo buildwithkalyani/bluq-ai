@@ -6,6 +6,8 @@ import {
   CheckCircle2, Circle, Clock, AlertCircle,
   TrendingUp, AlertTriangle, Target, Activity,
   Users, Package, Clipboard, BarChart2, RefreshCw,
+  Sun, Cloud, CloudFog, CloudRain, Snowflake, CloudDrizzle, CloudLightning, Thermometer,
+  type LucideIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
@@ -104,19 +106,19 @@ interface WeatherData {
   };
 }
 
-function wxInfo(code: number): { emoji: string; label: string } {
-  if (code === 0)  return { emoji: "☀️",  label: "Clear" };
-  if (code === 1)  return { emoji: "🌤️",  label: "Mainly Clear" };
-  if (code === 2)  return { emoji: "⛅",   label: "Partly Cloudy" };
-  if (code === 3)  return { emoji: "☁️",   label: "Overcast" };
-  if (code <= 48)  return { emoji: "🌫️",  label: "Foggy" };
-  if (code <= 55)  return { emoji: "🌦️",  label: "Drizzle" };
-  if (code <= 67)  return { emoji: "🌧️",  label: "Rain" };
-  if (code <= 77)  return { emoji: "❄️",   label: "Snow" };
-  if (code <= 82)  return { emoji: "🌧️",  label: "Showers" };
-  if (code <= 86)  return { emoji: "🌨️",  label: "Snow Showers" };
-  if (code <= 99)  return { emoji: "⛈️",  label: "Thunderstorm" };
-  return                  { emoji: "🌡️",  label: "—" };
+function wxInfo(code: number): { icon: LucideIcon; color: string; label: string } {
+  if (code === 0)  return { icon: Sun,            color: "#F59E0B", label: "Clear" };
+  if (code === 1)  return { icon: Sun,            color: "#FBBF24", label: "Mainly Clear" };
+  if (code === 2)  return { icon: Cloud,          color: "#94A3B8", label: "Partly Cloudy" };
+  if (code === 3)  return { icon: Cloud,          color: "#64748B", label: "Overcast" };
+  if (code <= 48)  return { icon: CloudFog,       color: "#94A3B8", label: "Foggy" };
+  if (code <= 55)  return { icon: CloudDrizzle,   color: "#60A5FA", label: "Drizzle" };
+  if (code <= 67)  return { icon: CloudRain,      color: "#3B82F6", label: "Rain" };
+  if (code <= 77)  return { icon: Snowflake,      color: "#7DD3FC", label: "Snow" };
+  if (code <= 82)  return { icon: CloudDrizzle,   color: "#60A5FA", label: "Showers" };
+  if (code <= 86)  return { icon: Snowflake,      color: "#BAE6FD", label: "Snow Showers" };
+  if (code <= 99)  return { icon: CloudLightning, color: "#8B5CF6", label: "Thunderstorm" };
+  return                  { icon: Thermometer,    color: "#64748B", label: "—" };
 }
 
 function uvLabel(uv: number): { label: string; color: string } {
@@ -221,7 +223,7 @@ function WeatherWidget({ address, lat, lng }: { address: string; lat?: number | 
 
       {/* Current conditions */}
       <div className="flex items-end gap-3 mb-3">
-        <div className="text-[38px] leading-none">{wx.emoji}</div>
+        <wx.icon size={40} color={wx.color} strokeWidth={1.5} />
         <div>
           <div className="text-[30px] font-bold text-[#0F172A] leading-none">{Math.round(cur.temperature_2m)}°C</div>
           <div className="text-[11px] text-[#64748B] mt-0.5">{wx.label}</div>
@@ -260,7 +262,7 @@ function WeatherWidget({ address, lat, lng }: { address: string; lat?: number | 
             return (
               <div key={d} className="flex-1 text-center bg-white/60 rounded-lg py-2 border border-white/80">
                 <div className="text-[9px] text-[#94A3B8] font-semibold">{DAY_NAMES[new Date(d).getDay()]}</div>
-                <div className="text-[15px] my-0.5">{fw.emoji}</div>
+                <div className="flex justify-center my-0.5"><fw.icon size={16} color={fw.color} strokeWidth={1.5} /></div>
                 <div className="text-[10px] font-bold text-[#0F172A]">{Math.round(weather.daily.temperature_2m_max[i + 1])}°</div>
                 <div className="text-[9px] text-[#94A3B8]">{Math.round(weather.daily.temperature_2m_min[i + 1])}°</div>
               </div>
