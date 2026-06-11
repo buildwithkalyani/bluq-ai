@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, Suspense } from "react";
-import { CheckCircle, AlertTriangle, X, Loader, FileText, Sparkles, RefreshCw, Upload, ClipboardList, Table2, GitBranch, Layers, ArrowLeft, PenLine, Plus, Lock, Bot, FolderOpen, Calculator, ScrollText, Milestone, BarChart3, Package, MapPin, Receipt, Home, Building2, Factory, Route, Train, Landmark, CircleDot } from "lucide-react";
+import { CheckCircle, AlertTriangle, X, Loader, FileText, Sparkles, RefreshCw, Upload, ClipboardList, Table2, GitBranch, Layers, ArrowLeft, PenLine, Plus, Lock, Bot, FolderOpen, Calculator, ScrollText, Milestone, BarChart3, Package, MapPin, Receipt, Home, Building2, Factory, Route, Train, Landmark, CircleDot, Ship, Warehouse, Waves } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { BLUQ_FIELDS } from "@/lib/mock-data";
@@ -115,26 +115,41 @@ const CONSTRUCTION_TYPES: Array<{
   bg: string;
   Icon: LucideIcon;
 }> = [
-  { id: "residential", label: "Residential",      color: "#2563EB", bg: "#EFF6FF", Icon: Home      },
-  { id: "commercial",  label: "Commercial",        color: "#0891B2", bg: "#ECFEFF", Icon: Building2 },
-  { id: "mixed",       label: "Mixed Use",         color: "#7C3AED", bg: "#F5F3FF", Icon: Layers    },
-  { id: "industrial",  label: "Industrial",        color: "#D97706", bg: "#FFFBEB", Icon: Factory   },
-  { id: "road",        label: "Road / Highway",    color: "#059669", bg: "#DCFCE7", Icon: Route     },
-  { id: "railway",     label: "Railway / Metro",   color: "#0F766E", bg: "#F0FDFA", Icon: Train     },
-  { id: "bridge",      label: "Bridge / Flyover",  color: "#9333EA", bg: "#FAF5FF", Icon: Landmark  },
-  { id: "tunnel",      label: "Tunnel",            color: "#64748B", bg: "#F8FAFC", Icon: CircleDot },
+  { id: "residential",           label: "Residential",           color: "#2563EB", bg: "#EFF6FF", Icon: Home      },
+  { id: "commercial",            label: "Commercial",             color: "#0891B2", bg: "#ECFEFF", Icon: Building2 },
+  { id: "mixed",                 label: "Mixed Use",              color: "#7C3AED", bg: "#F5F3FF", Icon: Layers    },
+  { id: "industrial",            label: "Industrial",             color: "#D97706", bg: "#FFFBEB", Icon: Factory   },
+  { id: "road",                  label: "Road / Highway",         color: "#059669", bg: "#DCFCE7", Icon: Route     },
+  { id: "metro",                  label: "Metro / Rapid Transit",  color: "#0F766E", bg: "#F0FDFA", Icon: Train     },
+  { id: "railway",               label: "Mainline Railway",        color: "#1E3A5F", bg: "#EFF6FF", Icon: Train     },
+  { id: "bridge",                label: "Bridge / Flyover",       color: "#9333EA", bg: "#FAF5FF", Icon: Landmark  },
+  { id: "tunnel",                label: "Tunnel",                 color: "#64748B", bg: "#F8FAFC", Icon: CircleDot },
+  { id: "port",                  label: "Port / Harbour",         color: "#0369A1", bg: "#F0F9FF", Icon: Ship      },
+  { id: "airport",               label: "Airport",                color: "#1D4ED8", bg: "#EFF6FF", Icon: Landmark  },
+  { id: "water_treatment",       label: "Water / Sewage Plant",   color: "#0891B2", bg: "#ECFEFF", Icon: Waves     },
+  { id: "mmlp",                  label: "MMLP / Logistics Park",  color: "#B45309", bg: "#FFFBEB", Icon: Warehouse },
+  { id: "icd",                   label: "ICD / Dry Port",         color: "#7C3AED", bg: "#F5F3FF", Icon: Package   },
+  { id: "liquid_cargo_terminal", label: "Liquid Cargo Terminal",  color: "#DC2626", bg: "#FEF2F2", Icon: Waves     },
 ];
 
 function inferConstructionType(buildingType: string): string {
   const b = (buildingType ?? "").toLowerCase();
-  if (b.includes("residential"))                       return "residential";
-  if (b.includes("commercial"))                        return "commercial";
-  if (b.includes("mixed"))                             return "mixed";
-  if (b.includes("industrial") || b.includes("warehouse")) return "industrial";
-  if (b.includes("road") || b.includes("highway"))    return "road";
-  if (b.includes("railway") || b.includes("metro"))   return "railway";
-  if (b.includes("bridge") || b.includes("flyover"))  return "bridge";
-  if (b.includes("tunnel"))                            return "tunnel";
+  if (b.includes("residential"))                                    return "residential";
+  if (b.includes("commercial"))                                     return "commercial";
+  if (b.includes("mixed"))                                          return "mixed";
+  if (b.includes("industrial"))                                     return "industrial";
+  if (b.includes("road") || b.includes("highway"))                  return "road";
+  if (b.includes("metro") || b.includes("rapid transit") || b.includes("mrts") || b.includes("cbtc")) return "metro";
+  if (b.includes("railway") || b.includes("mainline") || b.includes("indian railway") || b.includes("broad gauge") || b.includes("bg line")) return "railway";
+  if (b.includes("bridge") || b.includes("flyover"))                return "bridge";
+  if (b.includes("tunnel"))                                         return "tunnel";
+  if (b.includes("port") || b.includes("harbour") || b.includes("harbor")) return "port";
+  if (b.includes("airport"))                                        return "airport";
+  if (b.includes("water treatment") || b.includes("sewage") || b.includes("wtp") || b.includes("stp")) return "water_treatment";
+  if (b.includes("mmlp") || b.includes("logistics park") || b.includes("multimodal")) return "mmlp";
+  if (b.includes("icd") || b.includes("dry port") || b.includes("inland container") || b.includes("freight terminal")) return "icd";
+  if (b.includes("liquid") || b.includes("lpg") || b.includes("chemical jetty") || b.includes("oil terminal")) return "liquid_cargo_terminal";
+  if (b.includes("warehouse"))                                      return "industrial";
   return "";
 }
 
@@ -727,14 +742,22 @@ function RealImport({
       if (!savedJobId) setStep("ready");
     }
 
-    // Fetch fresh from backend in background
-    fetchDocuments(projectId, workspaceId)
+    // Fetch versions first to get cutoff date, then fetch only new staging docs
+    fetchScheduleVersions(projectId, workspaceId)
+      .catch(() => [] as ScheduleVersion[])
+      .then(versions => {
+        const lastGenerated = versions.length > 0
+          ? versions.reduce((a, b) => new Date(a.createdAt) > new Date(b.createdAt) ? a : b)
+          : null;
+        return fetchDocuments(projectId, workspaceId, lastGenerated?.createdAt);
+      })
       .then(docs => {
-        setExistingDocs(docs);
-        writeDocsCache(projectId, docs);
-        if (docs.length > 0 && !savedJobId) {
+        const fresh = docs.filter(d => d.folder?.toLowerCase().startsWith("schedules"));
+        setExistingDocs(fresh);
+        writeDocsCache(projectId, fresh);
+        if (fresh.length > 0 && !savedJobId) {
           setStep(prev => prev === "idle" ? "ready" : prev);
-        } else if (docs.length === 0 && !savedJobId) {
+        } else if (fresh.length === 0 && !savedJobId) {
           setStep("idle");
         }
       })
@@ -875,7 +898,7 @@ function RealImport({
     setErrorMsg("");
 
     try {
-      const docTypes = Array.from(new Set(files.map(f => f.docCategory).filter(Boolean)));
+      const docTypes = Array.from(new Set(files.map(f => f.docCategory).filter((c): c is string => Boolean(c))));
       const res = await generateSchedule({
         projectId,
         workspaceId,
@@ -914,7 +937,7 @@ function RealImport({
         ...(tunnelDiameter && { tunnelDiameter }),
         ...(tunnelMethod && { tunnelMethod }),
         ...(docTypes.length && { docTypes }),
-      } as Parameters<typeof generateSchedule>[0]);
+      });
 
       localStorage.setItem(`${SCHEDULE_JOB_PREFIX}${projectId}`, res.jobId);
       // Layout-level poller picks this up and polls in background
@@ -989,11 +1012,12 @@ function RealImport({
           <button
             onClick={() => {
               localStorage.removeItem(`${SCHEDULE_RESULT_PREFIX}${projectId}`);
-              setStep("idle"); setFiles([]); setJobStatus(null); setGenResult(null);
+              localStorage.removeItem(`bluq_docs_${projectId}`);
+              setStep("idle"); setFiles([]); setExistingDocs([]); setJobStatus(null); setGenResult(null);
             }}
             className="px-5 py-2.5 rounded-xl border border-[#E2E8F0] bg-white text-[#475569] text-[13px] font-semibold hover:bg-[#F8FAFC] transition-colors"
           >
-            Upload more files
+            Upload new files
           </button>
         </div>
       </div>
@@ -1384,6 +1408,7 @@ function RealImport({
         const isIndustrial = ct === "industrial";
         const isRoad      = ct === "road";
         const isRailway   = ct === "railway";
+        const isMetro     = ct === "metro";
         const isBridge    = ct === "bridge";
         const isTunnel    = ct === "tunnel";
 
@@ -1578,7 +1603,7 @@ function RealImport({
           )}
 
           {/* ── RAILWAY / METRO ── */}
-          {isRailway && (
+          {(isRailway || isMetro) && (
             <>
               <div className="flex items-start justify-between gap-4">
                 <div>

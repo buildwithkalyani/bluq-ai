@@ -21,7 +21,7 @@
 import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
 import { documents } from "../db/schema.js";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, gt } from "drizzle-orm";
 import { verifySession } from "../lib/verifySession.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -138,9 +138,10 @@ export async function documentsRoute(app: FastifyInstance) {
   // =========================================================================
   app.get("/documents", { preHandler: verifySession }, async (request, reply) => {
     try {
-      const { projectId, workspaceId } = request.query as {
+      const { projectId, workspaceId, since } = request.query as {
         projectId: string;
         workspaceId: string;
+        since?: string;
       };
 
       if (!projectId || !workspaceId) {
@@ -149,16 +150,20 @@ export async function documentsRoute(app: FastifyInstance) {
       if (!UUID_REGEX.test(projectId) || !UUID_REGEX.test(workspaceId)) {
         return reply.status(400).send({ error: "projectId and workspaceId must be valid UUIDs" });
       }
+      if (since && isNaN(Date.parse(since))) {
+        return reply.status(400).send({ error: "since must be a valid ISO date" });
+      }
+
+      const conditions = [
+        eq(documents.projectId, projectId),
+        eq(documents.workspaceId, workspaceId),
+        ...(since ? [gt(documents.createdAt, since)] : []),
+      ];
 
       const data = await db
         .select()
         .from(documents)
-        .where(
-          and(
-            eq(documents.projectId, projectId),
-            eq(documents.workspaceId, workspaceId)
-          )
-        )
+        .where(and(...conditions))
         .orderBy(desc(documents.createdAt));
 
       return data;
@@ -271,6 +276,73 @@ export async function documentsRoute(app: FastifyInstance) {
     } catch (err: any) {
       console.error("PATCH /documents/:id error:", err.message);
       return reply.status(500).send({ error: "Failed to update document" });
+    }
+  });
+
+  // =========================================================================
+  // GET /documents/:id/download-url — generate a signed download URL
+  // =========================================================================
+  app.get("/documents/:id/download-url", { preHandler: verifySession }, async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const { workspaceId } = request.query as { workspaceId?: string };
+
+      if (!UUID_REGEX.test(id)) {
+        return reply.status(400).send({ error: "id must be a valid UUID" });
+      }
+      if (!workspaceId || !UUID_REGEX.test(workspaceId)) {
+        return reply.status(400).send({ error: "workspaceId required" });
+      }
+
+      const [doc] = await db
+        .select({ fileUrl: documents.fileUrl })
+        .from(documents)
+        .where(and(eq(documents.id, id), eq(documents.workspaceId, workspaceId)));
+
+      if (!doc) {
+        return reply.status(404).send({ error: "Document not found" });
+      }
+
+      const supabaseUrl = process.env.SUPABASE_URL;
+      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (!supabaseUrl || !serviceRoleKey) {
+        return reply.status(500).send({ error: "Storage not configured" });
+      }
+
+      // Extract bare storage path from whatever format is stored in fileUrl.
+      // Handles both old full-URL format and new bare-path format.
+      let storagePath = doc.fileUrl;
+      const prefix = `${supabaseUrl}/storage/v1/object/`;
+      if (storagePath.startsWith(prefix)) {
+        storagePath = storagePath.slice(prefix.length);
+        // Strip bucket name prefix if present (e.g. "documents/workspace/...")
+        if (storagePath.startsWith(`${DOCUMENTS_BUCKET}/`)) {
+          storagePath = storagePath.slice(DOCUMENTS_BUCKET.length + 1);
+        }
+      }
+
+      const res = await fetch(
+        `${supabaseUrl}/storage/v1/object/sign/${DOCUMENTS_BUCKET}/${storagePath}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${serviceRoleKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ expiresIn: 300 }), // 5 min
+        }
+      );
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { message?: string };
+        return reply.status(500).send({ error: body.message ?? "Failed to generate download URL" });
+      }
+
+      const { signedURL } = await res.json() as { signedURL: string };
+      return { signedUrl: `${supabaseUrl}${signedURL}` };
+    } catch (err: any) {
+      console.error("GET /documents/:id/download-url error:", err.message);
+      return reply.status(500).send({ error: "Failed to generate download URL" });
     }
   });
 

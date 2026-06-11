@@ -1,0 +1,892 @@
+// Multi-Modal Logistics Park (MMLP) Task Library
+// Covers: Greenfield MMLP, expansion of existing logistics parks
+// Standards: MoRTH MMLP Guidelines 2019, MoR Guidelines, DPIIT Logistics Policy 2022
+// Reference projects: MMLP Bengaluru (NICDC), Dankuni, Nangal Chaudhary
+
+export type MMLPPhase =
+  | "surveys_investigations"
+  | "site_preparation"
+  | "rail_infrastructure"
+  | "road_connectivity"
+  | "warehouse_shed"
+  | "intermodal_yard"
+  | "utilities_services"
+  | "equipment_installation"
+  | "systems_technology"
+  | "commissioning_handover";
+
+export type MMLPType =
+  | "mmlp_greenfield"     // new MMLP on virgin land
+  | "mmlp_expansion"      // capacity expansion of existing logistics park
+  | "logistics_park";     // smaller private logistics park without full intermodal
+
+export type MMLPUnit =
+  | "Sqm" | "Cum" | "Rmt" | "No" | "MT" | "Lot" | "LS" | "Set" | "KVA" | "KW" | "Km";
+
+interface ProductivityRate { min: number; max: number; unit: string; }
+interface CrewMember { role: string; count: number; }
+interface Predecessor { taskCode: string; lagDays?: number; type: "FS" | "SS" | "FF" | "SF"; }
+
+export interface MMLPTaskTemplate {
+  code: string;
+  phase: MMLPPhase;
+  name: string;
+  unit: MMLPUnit;
+  productivityRate: ProductivityRate;
+  monsoonImpactFactor: number;
+  crew: CrewMember[];
+  equipment?: string[];
+  predecessors: Predecessor[];
+  isCodeRef: string[];
+  dsrRef: string;
+  safetyChecks: string[];
+  remarks: string;
+  taskCategory?: "A" | "B";
+  isCore: boolean;
+  leadTimeDays?: number;
+  requiresSpecialistContractor?: boolean;
+  specialistType?: string;
+  applicableMMLPTypes?: MMLPType[];
+  excludedMMLPTypes?: MMLPType[];
+  conditions?: Array<{ field: string; operator: "==" | "!=" | ">=" | "<=" | ">" | "<"; value: string | number | boolean; }>;
+}
+
+// ─── Phase 1: Surveys & Investigations ────────────────────────────────────────
+
+const SURVEY_TASKS: MMLPTaskTemplate[] = [
+  {
+    code: "ML-SI-01",
+    phase: "surveys_investigations",
+    name: "Topographic survey, traffic study and master planning",
+    unit: "Sqm",
+    productivityRate: { min: 50000, max: 100000, unit: "Sqm/day" },
+    monsoonImpactFactor: 1.2,
+    crew: [{ role: "Survey Engineer", count: 1 }, { role: "Surveyor", count: 3 }, { role: "Planner", count: 1 }],
+    equipment: ["Total station", "DGPS", "Drone"],
+    predecessors: [],
+    isCodeRef: ["MoRTH MMLP Guidelines 2019"],
+    dsrRef: "DSR 2021 Item 1.1",
+    safetyChecks: ["Site boundary demarcation", "Existing utility marking"],
+    remarks: "Master plan to be approved by NICDC / state nodal agency; traffic study for access road design; hinterland connectivity study mandatory",
+    taskCategory: "B",
+    isCore: true,
+  },
+  {
+    code: "ML-SI-02",
+    phase: "surveys_investigations",
+    name: "Geotechnical investigation",
+    unit: "No",
+    productivityRate: { min: 2, max: 4, unit: "Bore holes/day" },
+    monsoonImpactFactor: 1.4,
+    crew: [{ role: "Geotechnical Engineer", count: 1 }, { role: "Rig Operator", count: 1 }],
+    equipment: ["Bore hole rig", "SPT equipment"],
+    predecessors: [{ taskCode: "ML-SI-01", type: "FS" }],
+    isCodeRef: ["IS 1892", "IS 2132"],
+    dsrRef: "DSR 2021 Item 2.3",
+    safetyChecks: ["Bore hole barricading", "PPE"],
+    remarks: "Min 1 bore hole per 5000 sqm; pavement design for heavy vehicle loads (60T axle); check for expansive/soft soil for slab-on-grade",
+    taskCategory: "B",
+    isCore: true,
+  },
+  {
+    code: "ML-SI-03",
+    phase: "surveys_investigations",
+    name: "Railway connectivity feasibility and MoR preliminary approval",
+    unit: "LS",
+    productivityRate: { min: 60, max: 180, unit: "Days" },
+    monsoonImpactFactor: 1.0,
+    crew: [{ role: "Railway Consultant", count: 2 }, { role: "Project Manager", count: 1 }],
+    equipment: [],
+    predecessors: [{ taskCode: "ML-SI-01", type: "FS" }],
+    isCodeRef: ["Indian Railways General Rules", "MoR PFT/GFT policy"],
+    dsrRef: "MoR circular",
+    safetyChecks: ["MoR approval obtained before rail works begin"],
+    remarks: "MMLP and rail-linked ICD only; MoR in-principle approval mandatory; includes route survey, junction station identification, traffic projection",
+    taskCategory: "A",
+    isCore: true,
+    applicableMMLPTypes: ["mmlp_greenfield", "mmlp_expansion"],
+    requiresSpecialistContractor: true,
+    specialistType: "Railway consultant with MoR DPR experience",
+  },
+  {
+    code: "ML-SI-04",
+    phase: "surveys_investigations",
+    name: "Environmental and social impact assessment (EIA/SIA)",
+    unit: "LS",
+    productivityRate: { min: 90, max: 180, unit: "Days" },
+    monsoonImpactFactor: 1.0,
+    crew: [{ role: "Environmental Consultant", count: 2 }, { role: "Social Expert", count: 1 }],
+    equipment: [],
+    predecessors: [{ taskCode: "ML-SI-01", type: "FS" }],
+    isCodeRef: ["EIA Notification 2006", "Forest Conservation Act"],
+    dsrRef: "MoEF guidelines",
+    safetyChecks: ["EC obtained before construction begins"],
+    remarks: "MoEF Environmental Clearance mandatory if area > 50 ha; forest clearance if forest land involved; R&R plan if displacement involved",
+    taskCategory: "A",
+    isCore: true,
+  },
+];
+
+// ─── Phase 2: Site Preparation ────────────────────────────────────────────────
+
+const SITE_PREP_TASKS: MMLPTaskTemplate[] = [
+  {
+    code: "ML-SP-01",
+    phase: "site_preparation",
+    name: "Land acquisition, clearance and boundary wall",
+    unit: "Rmt",
+    productivityRate: { min: 20, max: 50, unit: "Rmt/day" },
+    monsoonImpactFactor: 1.4,
+    crew: [{ role: "Civil Engineer", count: 1 }, { role: "Mason", count: 6 }, { role: "Labour", count: 12 }],
+    equipment: ["Concrete mixer", "Vibrator"],
+    predecessors: [{ taskCode: "ML-SI-04", type: "FS" }],
+    isCodeRef: [],
+    dsrRef: "DSR 2021 Item 5.1",
+    safetyChecks: ["Land possession certificate", "Utility clearance"],
+    remarks: "Precast compound wall 2.4m ht with barbed wire; guard posts at gates; full perimeter before any internal works",
+    taskCategory: "B",
+    isCore: true,
+  },
+  {
+    code: "ML-SP-02",
+    phase: "site_preparation",
+    name: "Bulk earthworks — cut, fill and levelling",
+    unit: "Cum",
+    productivityRate: { min: 1500, max: 4000, unit: "Cum/day" },
+    monsoonImpactFactor: 2.0,
+    crew: [{ role: "Site Engineer", count: 1 }, { role: "Excavator Operator", count: 3 }, { role: "Dumper Driver", count: 6 }, { role: "Labour", count: 8 }],
+    equipment: ["Hydraulic excavator 30T", "Tipper 12T × 6", "Motor grader", "Vibratory roller 10T"],
+    predecessors: [{ taskCode: "ML-SP-01", type: "SS", lagDays: 14 }],
+    isCodeRef: ["IS 3764"],
+    dsrRef: "MORTH 2019 Item 301",
+    safetyChecks: ["Edge protection", "Slope stability", "CBR test on fill"],
+    remarks: "Platform level 300–600mm above HFL; fill in 300mm layers compacted to 95% Proctor; separate borrow area approval needed for large fills",
+    taskCategory: "B",
+    isCore: true,
+  },
+  {
+    code: "ML-SP-03",
+    phase: "site_preparation",
+    name: "Storm water drainage master system",
+    unit: "Rmt",
+    productivityRate: { min: 50, max: 120, unit: "Rmt/day" },
+    monsoonImpactFactor: 1.6,
+    crew: [{ role: "Civil Engineer", count: 1 }, { role: "Labour", count: 10 }],
+    equipment: ["Excavator", "Compactor"],
+    predecessors: [{ taskCode: "ML-SP-02", type: "SS", lagDays: 30 }],
+    isCodeRef: ["IS 4111", "CPHEEO Manual"],
+    dsrRef: "DSR 2021",
+    safetyChecks: ["Outfall NOC from local body", "Flood plain clearance"],
+    remarks: "RCC box drains + catch basins; design for 1-in-50-year storm; oil and grease separator at yard outfall mandatory",
+    taskCategory: "B",
+    isCore: true,
+  },
+];
+
+// ─── Phase 3: Rail Infrastructure ─────────────────────────────────────────────
+
+const RAIL_TASKS: MMLPTaskTemplate[] = [
+  {
+    code: "ML-RI-01",
+    phase: "rail_infrastructure",
+    name: "Rail siding earthworks and formation preparation",
+    unit: "Rmt",
+    productivityRate: { min: 100, max: 250, unit: "Rmt/day" },
+    monsoonImpactFactor: 2.0,
+    crew: [{ role: "Railway Engineer", count: 1 }, { role: "Operator", count: 3 }, { role: "Labour", count: 10 }],
+    equipment: ["Excavator", "Motor grader", "Roller", "Dumper"],
+    predecessors: [{ taskCode: "ML-SP-02", type: "FS", lagDays: 14 }],
+    isCodeRef: ["IRS GE-1", "Indian Railways Schedule of Dimensions"],
+    dsrRef: "MoR SOR",
+    safetyChecks: ["MoR formation approval", "Gradient not to exceed 1:400 in yard"],
+    remarks: "BG 1676mm gauge; gradient ≤ 1:400 in loading/unloading area; cinder/ballast cushion 300mm minimum; OHE mast foundation if electrified",
+    taskCategory: "B",
+    isCore: true,
+    applicableMMLPTypes: ["mmlp_greenfield", "mmlp_expansion"],
+  },
+  {
+    code: "ML-RI-02",
+    phase: "rail_infrastructure",
+    name: "Rail track laying — ballast, sleepers and rails",
+    unit: "Rmt",
+    productivityRate: { min: 50, max: 120, unit: "Rmt/day" },
+    monsoonImpactFactor: 1.5,
+    crew: [{ role: "Permanent Way Inspector", count: 1 }, { role: "Track Layer", count: 8 }, { role: "Labour", count: 10 }],
+    equipment: ["Rail laying machine", "Tamping machine", "Rail bender"],
+    predecessors: [{ taskCode: "ML-RI-01", type: "FS" }],
+    isCodeRef: ["IRS T-12", "IRS T-44 (PSC sleeper)"],
+    dsrRef: "MoR SOR",
+    safetyChecks: ["MoR track inspector sign-off", "Rail joint geometry check", "Buffer stop installation"],
+    remarks: "60 kg/m UIC rail; PSC sleepers at 650mm centres; elastic rail clips; welded joints; minimum 3 sidings for loading and unloading",
+    taskCategory: "B",
+    isCore: true,
+    leadTimeDays: 60,
+    applicableMMLPTypes: ["mmlp_greenfield", "mmlp_expansion"],
+  },
+  {
+    code: "ML-RI-03",
+    phase: "rail_infrastructure",
+    name: "Points, crossings and interlocking system",
+    unit: "No",
+    productivityRate: { min: 0.5, max: 1, unit: "No/day" },
+    monsoonImpactFactor: 1.2,
+    crew: [{ role: "Signalling Engineer", count: 1 }, { role: "Track Layer", count: 4 }],
+    equipment: ["Signal testing equipment"],
+    predecessors: [{ taskCode: "ML-RI-02", type: "SS", lagDays: 30 }],
+    isCodeRef: ["IRS S-34", "IRS SEM"],
+    dsrRef: "MoR SOR",
+    safetyChecks: ["MoR signals and interlocking inspection", "Derail clearance test"],
+    remarks: "1 in 8.5 or 1 in 12 turnouts; point machine; panel interlocking or relay interlocking; MoR open line approval before use",
+    taskCategory: "B",
+    isCore: true,
+    requiresSpecialistContractor: true,
+    specialistType: "MoR approved S&T contractor",
+    applicableMMLPTypes: ["mmlp_greenfield", "mmlp_expansion"],
+  },
+  {
+    code: "ML-RI-04",
+    phase: "rail_infrastructure",
+    name: "Railway connection to mainline — last mile link",
+    unit: "Km",
+    productivityRate: { min: 0.1, max: 0.3, unit: "Km/day" },
+    monsoonImpactFactor: 1.8,
+    crew: [{ role: "Railway Engineer", count: 1 }, { role: "Permanent Way Inspector", count: 1 }, { role: "Labour", count: 15 }],
+    equipment: ["Track laying machine", "Tamper", "Tie tamper"],
+    predecessors: [{ taskCode: "ML-RI-02", type: "FS", lagDays: 7 }],
+    isCodeRef: ["IRS GE-1"],
+    dsrRef: "MoR SOR",
+    safetyChecks: ["MoR block possession procedure", "Safety certificate before first movement"],
+    remarks: "Connection to nearest junction/station; MoR block possession required; cost shared per MoR policy; DG power for remote interlocking",
+    taskCategory: "B",
+    isCore: true,
+    leadTimeDays: 90,
+    requiresSpecialistContractor: true,
+    specialistType: "MoR approved EPC contractor",
+    applicableMMLPTypes: ["mmlp_greenfield", "mmlp_expansion"],
+  },
+  {
+    code: "ML-RI-05",
+    phase: "rail_infrastructure",
+    name: "Overhead electrification (OHE) in yard — if electrified zone",
+    unit: "Rmt",
+    productivityRate: { min: 30, max: 80, unit: "Rmt/day" },
+    monsoonImpactFactor: 1.3,
+    crew: [{ role: "OHE Engineer", count: 1 }, { role: "Electrician", count: 4 }, { role: "Labour", count: 6 }],
+    equipment: ["OHE tower wagon", "Tension machine"],
+    predecessors: [{ taskCode: "ML-RI-02", type: "SS", lagDays: 30 }],
+    isCodeRef: ["IRS ETL-108"],
+    dsrRef: "MoR SOR",
+    safetyChecks: ["OHE earthing continuity check", "25kV safety clearance certification"],
+    remarks: "25kV AC single phase; only in electrified sections; includes masts, cantilevers, contact wire, return conductor; MoR OHE inspection required",
+    taskCategory: "B",
+    isCore: false,
+    leadTimeDays: 45,
+    requiresSpecialistContractor: true,
+    specialistType: "MoR approved OHE contractor",
+    applicableMMLPTypes: ["mmlp_greenfield", "mmlp_expansion"],
+  },
+];
+
+// ─── Phase 4: Road Connectivity ────────────────────────────────────────────────
+
+const ROAD_TASKS: MMLPTaskTemplate[] = [
+  {
+    code: "ML-RC-01",
+    phase: "road_connectivity",
+    name: "Access road — external connectivity to NH/SH",
+    unit: "Km",
+    productivityRate: { min: 0.05, max: 0.15, unit: "Km/day" },
+    monsoonImpactFactor: 1.8,
+    crew: [{ role: "Highway Engineer", count: 1 }, { role: "Operator", count: 4 }, { role: "Labour", count: 12 }],
+    equipment: ["Paver", "Motor grader", "Roller", "Tipper"],
+    predecessors: [{ taskCode: "ML-SP-02", type: "FS" }],
+    isCodeRef: ["IRC 37", "IRC 58", "MoRTH 2019"],
+    dsrRef: "MORTH 2019",
+    safetyChecks: ["NOC from NH/SH authority for junction", "Geometric design approval"],
+    remarks: "Min 4-lane divided carriageway to nearest NH; design for 100T BLKT trailer loads; junction at grade or grade-separated per traffic volume",
+    taskCategory: "B",
+    isCore: true,
+  },
+  {
+    code: "ML-RC-02",
+    phase: "road_connectivity",
+    name: "Internal roads — rigid pavement (PQC) for heavy vehicles",
+    unit: "Sqm",
+    productivityRate: { min: 200, max: 500, unit: "Sqm/day" },
+    monsoonImpactFactor: 1.5,
+    crew: [{ role: "Highway Engineer", count: 1 }, { role: "Operator", count: 3 }, { role: "Labour", count: 10 }],
+    equipment: ["Slip form paver", "Texturing machine", "Curing compound sprayer"],
+    predecessors: [{ taskCode: "ML-SP-02", type: "FS", lagDays: 30 }],
+    isCodeRef: ["IRC 58", "IS 456"],
+    dsrRef: "MORTH 2019 Item 602",
+    safetyChecks: ["Cube strength ≥ M40 at 28 days", "Transverse joint sealing"],
+    remarks: "M40 PQC 300mm thickness; design for 100T reach stacker axle loads; 5m wide access lanes; turning radius ≥ 25m for trailers",
+    taskCategory: "B",
+    isCore: true,
+  },
+  {
+    code: "ML-RC-03",
+    phase: "road_connectivity",
+    name: "Weighbridge installation — static and dynamic",
+    unit: "No",
+    productivityRate: { min: 0.3, max: 0.7, unit: "No/week" },
+    monsoonImpactFactor: 1.0,
+    crew: [{ role: "Civil Engineer", count: 1 }, { role: "Fitter", count: 2 }],
+    equipment: ["Crane"],
+    predecessors: [{ taskCode: "ML-RC-01", type: "FS", lagDays: 30 }],
+    isCodeRef: ["Weights and Measures Act", "IS 9747"],
+    dsrRef: "DSR 2021",
+    safetyChecks: ["Legal metrology department calibration", "Load cell certification"],
+    remarks: "100T capacity static weighbridge at each gate; Legal Metrology Department stamp mandatory; dynamic weighbridge for trucks at entry",
+    taskCategory: "B",
+    isCore: true,
+    leadTimeDays: 45,
+  },
+  {
+    code: "ML-RC-04",
+    phase: "road_connectivity",
+    name: "Truck parking and marshalling area",
+    unit: "Sqm",
+    productivityRate: { min: 300, max: 700, unit: "Sqm/day" },
+    monsoonImpactFactor: 1.5,
+    crew: [{ role: "Civil Engineer", count: 1 }, { role: "Labour", count: 8 }],
+    equipment: ["Paver", "Roller"],
+    predecessors: [{ taskCode: "ML-RC-02", type: "SS", lagDays: 15 }],
+    isCodeRef: ["IRC 58"],
+    dsrRef: "DSR 2021",
+    safetyChecks: ["Fire hydrant access", "Emergency vehicle access"],
+    remarks: "Min capacity for 50% of daily truck turnaround; CCTV on parking area; separate bays for ADG (dangerous goods) vehicles",
+    taskCategory: "B",
+    isCore: true,
+  },
+];
+
+// ─── Phase 5: Warehouse & Shed ─────────────────────────────────────────────────
+
+const WAREHOUSE_TASKS: MMLPTaskTemplate[] = [
+  {
+    code: "ML-WS-01",
+    phase: "warehouse_shed",
+    name: "Pre-engineered building (PEB) warehouse — structure erection",
+    unit: "Sqm",
+    productivityRate: { min: 100, max: 250, unit: "Sqm/day" },
+    monsoonImpactFactor: 1.3,
+    crew: [{ role: "Structural Engineer", count: 1 }, { role: "Steel Erector", count: 8 }, { role: "Labour", count: 12 }],
+    equipment: ["Mobile crane 50T", "Bolt tightening tools", "Alignment equipment"],
+    predecessors: [{ taskCode: "ML-SP-02", type: "FS", lagDays: 21 }],
+    isCodeRef: ["IS 800", "IS 801", "NBC 2016"],
+    dsrRef: "DSR 2021 Item 8.1",
+    safetyChecks: ["Foundation bolt pre-check", "Crane lift plan", "Anchor bolt torque verification", "NBC wind load check"],
+    remarks: "Clear span 24–36m; eave height 9–12m for reach stackers; hot dip galvanised purlins; PUF insulated roofing panels; fire sprinkler provision from design stage",
+    taskCategory: "B",
+    isCore: true,
+    leadTimeDays: 60,
+    requiresSpecialistContractor: true,
+    specialistType: "PEB manufacturer (Interarch / Zamil / Kirby)",
+  },
+  {
+    code: "ML-WS-02",
+    phase: "warehouse_shed",
+    name: "Warehouse floor — industrial hardened slab",
+    unit: "Sqm",
+    productivityRate: { min: 500, max: 1200, unit: "Sqm/day" },
+    monsoonImpactFactor: 1.3,
+    crew: [{ role: "Civil Engineer", count: 1 }, { role: "Mason", count: 6 }, { role: "Labour", count: 15 }],
+    equipment: ["Laser screed", "Power trowel", "Batching plant"],
+    predecessors: [{ taskCode: "ML-WS-01", type: "SS", lagDays: 14 }],
+    isCodeRef: ["IS 456", "TR 34 (Concrete industrial floors)"],
+    dsrRef: "DSR 2021 Item 6.1",
+    safetyChecks: ["Floor flatness (TR34 Class FM2)", "Curing period 28 days before forklift use"],
+    remarks: "M40 concrete 200mm; wire mesh reinforced; 6m × 6m joint pattern; epoxy hardener finish; flatness to TR34 FM2 (Fm ≥ 30); loading dock platform 1.2m ht",
+    taskCategory: "B",
+    isCore: true,
+  },
+  {
+    code: "ML-WS-03",
+    phase: "warehouse_shed",
+    name: "Loading docks, dock levellers and dock shelters",
+    unit: "No",
+    productivityRate: { min: 2, max: 5, unit: "No/week" },
+    monsoonImpactFactor: 1.0,
+    crew: [{ role: "Civil Engineer", count: 1 }, { role: "Fitter", count: 2 }, { role: "Labour", count: 4 }],
+    equipment: ["Crane", "Welding machine"],
+    predecessors: [{ taskCode: "ML-WS-02", type: "FS", lagDays: 7 }],
+    isCodeRef: [],
+    dsrRef: "DSR 2021",
+    safetyChecks: ["Dock leveller safety legs", "Vehicle restraint system", "Dock light"],
+    remarks: "Hydraulic dock leveller ±300mm range; inflatable dock shelter; min 1 dock per 1000 sqm warehouse; grade-level doors for high-cube containers",
+    taskCategory: "B",
+    isCore: true,
+    leadTimeDays: 45,
+  },
+  {
+    code: "ML-WS-04",
+    phase: "warehouse_shed",
+    name: "Cold storage / temperature-controlled warehouse",
+    unit: "Sqm",
+    productivityRate: { min: 30, max: 80, unit: "Sqm/day" },
+    monsoonImpactFactor: 1.0,
+    crew: [{ role: "MEP Engineer", count: 1 }, { role: "Refrigeration Technician", count: 3 }, { role: "Labour", count: 6 }],
+    equipment: ["Crane", "Refrigeration tools"],
+    predecessors: [{ taskCode: "ML-WS-01", type: "SS", lagDays: 30 }],
+    isCodeRef: ["IS 6944", "NBC Part 8"],
+    dsrRef: "DSR 2021",
+    safetyChecks: ["Refrigerant leak test", "Temperature uniformity test", "Ammonia detection system"],
+    remarks: "Only if cold chain handling in scope; 0°C to 4°C for perishables; PUF 120mm panel; refrigeration plant sized for peak load + 20% standby",
+    taskCategory: "B",
+    isCore: false,
+  },
+  {
+    code: "ML-WS-05",
+    phase: "warehouse_shed",
+    name: "Bonded warehouse / CFS shed — customs-compliant construction",
+    unit: "Sqm",
+    productivityRate: { min: 20, max: 50, unit: "Sqm/day" },
+    monsoonImpactFactor: 1.2,
+    crew: [{ role: "Civil Engineer", count: 1 }, { role: "Mason", count: 4 }, { role: "Labour", count: 8 }],
+    equipment: ["Batching plant", "Vibrator"],
+    predecessors: [{ taskCode: "ML-WS-01", type: "SS", lagDays: 21 }],
+    isCodeRef: ["Customs Act 1962", "CBIC circular"],
+    dsrRef: "DSR 2021",
+    safetyChecks: ["CBIC/Customs department inspection and approval of shed", "Double lock provision on all doors"],
+    remarks: "Separate from general warehouse; tamper-proof construction; CCTV mandatory; CBIC approval of shed before bonding; RCC walls + steel roof",
+    taskCategory: "B",
+    isCore: false,
+    requiresSpecialistContractor: false,
+  },
+  {
+    code: "ML-WS-06",
+    phase: "warehouse_shed",
+    name: "Office and amenity block — civil works",
+    unit: "Sqm",
+    productivityRate: { min: 15, max: 30, unit: "Sqm/day" },
+    monsoonImpactFactor: 1.3,
+    crew: [{ role: "Civil Engineer", count: 1 }, { role: "Mason", count: 5 }, { role: "Labour", count: 10 }],
+    equipment: ["Batching plant", "Vibrator"],
+    predecessors: [{ taskCode: "ML-SP-02", type: "FS", lagDays: 21 }],
+    isCodeRef: ["NBC 2016", "IS 456"],
+    dsrRef: "DSR 2021",
+    safetyChecks: ["Structural certificate", "Fire NOC"],
+    remarks: "G+2 typically; includes admin, operations control, customs office, truck driver rest room, canteen; fire NOC before occupation",
+    taskCategory: "B",
+    isCore: true,
+  },
+];
+
+// ─── Phase 6: Intermodal Yard ──────────────────────────────────────────────────
+
+const YARD_TASKS: MMLPTaskTemplate[] = [
+  {
+    code: "ML-IY-01",
+    phase: "intermodal_yard",
+    name: "Container/cargo yard pavement — heavy-duty PQC",
+    unit: "Sqm",
+    productivityRate: { min: 200, max: 450, unit: "Sqm/day" },
+    monsoonImpactFactor: 1.5,
+    crew: [{ role: "Highway Engineer", count: 1 }, { role: "Operator", count: 3 }, { role: "Labour", count: 12 }],
+    equipment: ["Slip form paver", "Dowel bar inserter", "Texturing machine"],
+    predecessors: [{ taskCode: "ML-SP-02", type: "FS", lagDays: 45 }],
+    isCodeRef: ["IRC 58", "IS 456"],
+    dsrRef: "MORTH 2019 Item 602",
+    safetyChecks: ["CBR of subgrade ≥ 8%", "Cube strength M45 at 28 days", "Tie bar and dowel bar placement verification"],
+    remarks: "M45 PQC 350–400mm for RTG/reach stacker loads (4-high stacking); grade to drain 0.5%; 300mm granular sub-base; joints at 4.5m × 4.5m",
+    taskCategory: "B",
+    isCore: true,
+  },
+  {
+    code: "ML-IY-02",
+    phase: "intermodal_yard",
+    name: "Reefer plug points — electrical infrastructure in yard",
+    unit: "No",
+    productivityRate: { min: 10, max: 25, unit: "No/week" },
+    monsoonImpactFactor: 1.0,
+    crew: [{ role: "Electrical Engineer", count: 1 }, { role: "Electrician", count: 3 }],
+    equipment: ["Cable laying tools"],
+    predecessors: [{ taskCode: "ML-IY-01", type: "SS", lagDays: 30 }],
+    isCodeRef: ["IS 3043", "IEC 60309"],
+    dsrRef: "DSR 2021",
+    safetyChecks: ["Earth leakage protection per socket", "IP67 rating for outdoor use"],
+    remarks: "415V 3-phase reefer sockets; 1 socket per 2 TEU capacity in reefer area; monitoring panel for power consumption; 20–40% of container park typically reefer-capable",
+    taskCategory: "B",
+    isCore: false,
+    conditions: [{ field: "hasReefer", operator: "==", value: true }],
+  },
+  {
+    code: "ML-IY-03",
+    phase: "intermodal_yard",
+    name: "Container stacking area marking, signage and road markings",
+    unit: "Sqm",
+    productivityRate: { min: 500, max: 1500, unit: "Sqm/day" },
+    monsoonImpactFactor: 1.1,
+    crew: [{ role: "Supervisor", count: 1 }, { role: "Labour", count: 4 }],
+    equipment: ["Line marking machine"],
+    predecessors: [{ taskCode: "ML-IY-01", type: "FS", lagDays: 7 }],
+    isCodeRef: [],
+    dsrRef: "DSR 2021",
+    safetyChecks: ["Bay numbering system matches TOS/CTMS", "Pedestrian crossing markings"],
+    remarks: "ISO container bay markings; hazmat segregation zones; RTG lane markings; retroreflective thermoplastic paint; coordinate with CTMS/TOS layout",
+    taskCategory: "B",
+    isCore: true,
+  },
+];
+
+// ─── Phase 7: Utilities & Services ────────────────────────────────────────────
+
+const UTILITIES_TASKS: MMLPTaskTemplate[] = [
+  {
+    code: "ML-UT-01",
+    phase: "utilities_services",
+    name: "HT power supply — substation and distribution",
+    unit: "KVA",
+    productivityRate: { min: 500, max: 2000, unit: "KVA/week" },
+    monsoonImpactFactor: 1.0,
+    crew: [{ role: "Electrical Engineer", count: 1 }, { role: "Electrician", count: 4 }, { role: "Labour", count: 4 }],
+    equipment: ["Crane", "Cable pulling machine"],
+    predecessors: [{ taskCode: "ML-SP-02", type: "FS", lagDays: 30 }],
+    isCodeRef: ["IS 2026", "CEA Regulations 2010"],
+    dsrRef: "DSR 2021",
+    safetyChecks: ["CEA energisation permit", "Earth resistance < 1 Ω"],
+    remarks: "33/11kV receiving substation; ring main units for zonal distribution; 100% DG backup for critical systems (TOS, reefer, customs); APFC for PF correction",
+    taskCategory: "B",
+    isCore: true,
+    leadTimeDays: 90,
+  },
+  {
+    code: "ML-UT-02",
+    phase: "utilities_services",
+    name: "Water supply — borewell or municipal connection, OHT, distribution",
+    unit: "LS",
+    productivityRate: { min: 30, max: 90, unit: "Days" },
+    monsoonImpactFactor: 1.4,
+    crew: [{ role: "Civil Engineer", count: 1 }, { role: "Plumber", count: 2 }, { role: "Labour", count: 4 }],
+    equipment: ["Boring rig", "Pump set"],
+    predecessors: [{ taskCode: "ML-SP-02", type: "FS", lagDays: 14 }],
+    isCodeRef: ["IS 1172", "NBC Part 9"],
+    dsrRef: "DSR 2021",
+    safetyChecks: ["Water quality test", "Yield test for bore wells"],
+    remarks: "OHT 2 days storage; fire fighting reserve as per TAC; treated effluent recycled for flushing and yard washing; ZLD preferred for large parks",
+    taskCategory: "B",
+    isCore: true,
+  },
+  {
+    code: "ML-UT-03",
+    phase: "utilities_services",
+    name: "Fire protection — hydrant system, sprinklers, detection",
+    unit: "Sqm",
+    productivityRate: { min: 200, max: 500, unit: "Sqm/day" },
+    monsoonImpactFactor: 1.0,
+    crew: [{ role: "Fire Protection Engineer", count: 1 }, { role: "Plumber", count: 3 }, { role: "Labour", count: 6 }],
+    equipment: ["Pressure testing pump"],
+    predecessors: [{ taskCode: "ML-WS-01", type: "SS", lagDays: 30 }],
+    isCodeRef: ["NBC Part 4", "TAC guidelines", "IS 15105"],
+    dsrRef: "DSR 2021",
+    safetyChecks: ["Hydraulic test at 1.5× working pressure", "Fire NOC from local Fire Department", "Sprinkler head spacing ≤ 4.6m"],
+    remarks: "Automatic sprinkler (ESFR for high-rack) + internal hydrant + external hydrant ring; FM 200 for server room; fire pump room 24/7 power",
+    taskCategory: "B",
+    isCore: true,
+    requiresSpecialistContractor: true,
+    specialistType: "NFPA/NBC certified fire protection contractor",
+  },
+  {
+    code: "ML-UT-04",
+    phase: "utilities_services",
+    name: "Telecom — fibre optic backbone and structured cabling",
+    unit: "Rmt",
+    productivityRate: { min: 300, max: 700, unit: "Rmt/day" },
+    monsoonImpactFactor: 1.1,
+    crew: [{ role: "Telecom Engineer", count: 1 }, { role: "Cable Technician", count: 3 }],
+    equipment: ["Cable pulling machine", "OTDR tester"],
+    predecessors: [{ taskCode: "ML-WS-01", type: "SS", lagDays: 30 }],
+    isCodeRef: ["TEC standards"],
+    dsrRef: "DSR 2021",
+    safetyChecks: ["OTDR end-to-end loss test", "ISP PoP approval"],
+    remarks: "Min 2 × 24-core OF backbone; Cat6A structured cabling; redundant ISP connections; Wi-Fi 6 for warehouse and yard; 5G ready conduit",
+    taskCategory: "B",
+    isCore: true,
+  },
+];
+
+// ─── Phase 8: Equipment Installation ──────────────────────────────────────────
+
+const EQUIPMENT_TASKS: MMLPTaskTemplate[] = [
+  {
+    code: "ML-EQ-01",
+    phase: "equipment_installation",
+    name: "Reach stacker / empty container handler supply and commissioning",
+    unit: "No",
+    productivityRate: { min: 0.5, max: 1, unit: "No/week" },
+    monsoonImpactFactor: 1.0,
+    crew: [{ role: "Mechanical Engineer", count: 1 }, { role: "OEM Technician", count: 2 }],
+    equipment: ["50T mobile crane for unloading"],
+    predecessors: [{ taskCode: "ML-IY-01", type: "FS", lagDays: 14 }],
+    isCodeRef: ["IS 4137", "CMVR for registration"],
+    dsrRef: "DSR 2021",
+    safetyChecks: ["Load test 125% SWL", "Operator competency certificate", "CMVR registration"],
+    remarks: "45T lift capacity reach stacker; 4-high stacking; OEM PDI before dispatch; CMVR registration in state; min 2 per operational area",
+    taskCategory: "B",
+    isCore: true,
+    leadTimeDays: 180,
+    requiresSpecialistContractor: true,
+    specialistType: "OEM delivery and commissioning team (Kalmar / Konecranes / Hyster)",
+  },
+  {
+    code: "ML-EQ-02",
+    phase: "equipment_installation",
+    name: "Rail Mounted Gantry (RMG) or Rubber Tyred Gantry (RTG) crane",
+    unit: "No",
+    productivityRate: { min: 0.2, max: 0.5, unit: "No/week" },
+    monsoonImpactFactor: 1.0,
+    crew: [{ role: "Mechanical Engineer", count: 1 }, { role: "Electrical Engineer", count: 1 }, { role: "OEM Technician", count: 4 }],
+    equipment: ["Heavy crane for assembly"],
+    predecessors: [{ taskCode: "ML-IY-01", type: "FS", lagDays: 30 }],
+    isCodeRef: ["IS 3177", "IS 807", "FEM standards"],
+    dsrRef: "DSR 2021",
+    safetyChecks: ["Load test at 125% SWL", "Anti-collision system test", "Windspeed cutoff interlock", "IEI inspection certificate"],
+    remarks: "6+1 wide, 5-high RTG; or RMG on rail; leadTime includes fabrication; OEM on-site commissioning mandatory; IEI third-party inspection",
+    taskCategory: "B",
+    isCore: false,
+    leadTimeDays: 365,
+    requiresSpecialistContractor: true,
+    specialistType: "OEM (Konecranes / ZPMC / Kalmar)",
+    conditions: [{ field: "hasRTG", operator: "==", value: true }],
+  },
+  {
+    code: "ML-EQ-03",
+    phase: "equipment_installation",
+    name: "Electric forklifts and order pickers for warehouse operations",
+    unit: "No",
+    productivityRate: { min: 1, max: 3, unit: "No/week" },
+    monsoonImpactFactor: 1.0,
+    crew: [{ role: "Mechanical Engineer", count: 1 }, { role: "OEM Technician", count: 1 }],
+    equipment: [],
+    predecessors: [{ taskCode: "ML-WS-02", type: "FS", lagDays: 14 }],
+    isCodeRef: ["IS 13873 (forklift safety)"],
+    dsrRef: "DSR 2021",
+    safetyChecks: ["Operator licence (DGFASLI)", "Battery charging area ventilation", "Load test certificate"],
+    remarks: "3–5T electric counterbalance forklifts; battery exchange or opportunity charging; charging area with acid-resistant flooring and exhaust",
+    taskCategory: "B",
+    isCore: true,
+    leadTimeDays: 60,
+  },
+  {
+    code: "ML-EQ-04",
+    phase: "equipment_installation",
+    name: "Automated Storage and Retrieval System (ASRS) — if specified",
+    unit: "Set",
+    productivityRate: { min: 0.1, max: 0.3, unit: "Set/week" },
+    monsoonImpactFactor: 1.0,
+    crew: [{ role: "ASRS Engineer", count: 2 }, { role: "Software Integrator", count: 2 }, { role: "Structural Engineer", count: 1 }],
+    equipment: ["Crane", "Precision levelling tools"],
+    predecessors: [{ taskCode: "ML-WS-01", type: "FS", lagDays: 30 }],
+    isCodeRef: ["FEM 9.831", "IS 800"],
+    dsrRef: "DSR 2021",
+    safetyChecks: ["Rack load certification", "WMS integration test", "Emergency stop validation"],
+    remarks: "Mini-load or unit-load ASRS; floor flatness critical (TR34 FM1); WMS integration mandatory; OEM design drives building geometry — commission ASRS vendor before PEB design",
+    taskCategory: "B",
+    isCore: false,
+    leadTimeDays: 540,
+    requiresSpecialistContractor: true,
+    specialistType: "ASRS OEM (Dematic / SSI Schäfer / Kardex)",
+    conditions: [{ field: "hasASRS", operator: "==", value: true }],
+  },
+];
+
+// ─── Phase 9: Systems & Technology ────────────────────────────────────────────
+
+const SYSTEMS_TASKS: MMLPTaskTemplate[] = [
+  {
+    code: "ML-SY-01",
+    phase: "systems_technology",
+    name: "Terminal Operating System (TOS) / Warehouse Management System (WMS)",
+    unit: "Set",
+    productivityRate: { min: 60, max: 120, unit: "Days" },
+    monsoonImpactFactor: 1.0,
+    crew: [{ role: "IT Project Manager", count: 1 }, { role: "System Integrator", count: 3 }],
+    equipment: ["Servers", "Workstations"],
+    predecessors: [{ taskCode: "ML-UT-04", type: "FS", lagDays: 14 }],
+    isCodeRef: [],
+    dsrRef: "Contract specification",
+    safetyChecks: ["Disaster recovery test", "UAT sign-off", "Data security review"],
+    remarks: "TOS for container/freight yard; WMS for warehouse; integrate with rail booking, customs (ICEGATE), weighbridge, CCTV; cloud-hosted preferred",
+    taskCategory: "A",
+    isCore: true,
+    leadTimeDays: 90,
+    requiresSpecialistContractor: true,
+    specialistType: "TOS/WMS software vendor",
+  },
+  {
+    code: "ML-SY-02",
+    phase: "systems_technology",
+    name: "Gate automation — RFID, OCR, boom barriers and CCTV",
+    unit: "No",
+    productivityRate: { min: 0.5, max: 1, unit: "Gates/week" },
+    monsoonImpactFactor: 1.0,
+    crew: [{ role: "IT Engineer", count: 1 }, { role: "Civil Engineer", count: 1 }, { role: "Electrician", count: 2 }],
+    equipment: ["Camera mounting equipment"],
+    predecessors: [{ taskCode: "ML-RC-01", type: "FS", lagDays: 60 }],
+    isCodeRef: [],
+    dsrRef: "Contract specification",
+    safetyChecks: ["Traffic flow simulation test", "CCTV 30-day storage verification"],
+    remarks: "OCR for container number + truck plate; RFID tag reader; truck appointment system; integration with TOS; min 30-day CCTV retention",
+    taskCategory: "B",
+    isCore: true,
+    leadTimeDays: 60,
+    requiresSpecialistContractor: true,
+    specialistType: "Gate automation specialist",
+  },
+  {
+    code: "ML-SY-03",
+    phase: "systems_technology",
+    name: "CCTV surveillance — yard, warehouse and perimeter",
+    unit: "No",
+    productivityRate: { min: 10, max: 25, unit: "Cameras/week" },
+    monsoonImpactFactor: 1.0,
+    crew: [{ role: "Security System Engineer", count: 1 }, { role: "Electrician", count: 2 }],
+    equipment: [],
+    predecessors: [{ taskCode: "ML-WS-06", type: "SS", lagDays: 30 }],
+    isCodeRef: [],
+    dsrRef: "DSR 2021",
+    safetyChecks: ["Night vision coverage test", "Recording system continuity test"],
+    remarks: "IP cameras; 4MP minimum; PTZ on yard corners and gates; NVR with 90-day storage for customs/CBIC compliance; control room in office block",
+    taskCategory: "B",
+    isCore: true,
+    leadTimeDays: 30,
+  },
+];
+
+// ─── Phase 10: Commissioning & Handover ───────────────────────────────────────
+
+const COMMISSIONING_TASKS: MMLPTaskTemplate[] = [
+  {
+    code: "ML-CH-01",
+    phase: "commissioning_handover",
+    name: "Railway open line inspection and MoR certificate of fitness",
+    unit: "LS",
+    productivityRate: { min: 30, max: 90, unit: "Days" },
+    monsoonImpactFactor: 1.0,
+    crew: [{ role: "Railway Manager", count: 1 }, { role: "MoR Inspector (external)", count: 2 }],
+    equipment: [],
+    predecessors: [{ taskCode: "ML-RI-03", type: "FS" }, { taskCode: "ML-RI-04", type: "FS" }],
+    isCodeRef: ["Indian Railways Act 1989", "General Rules"],
+    dsrRef: "MoR circular",
+    safetyChecks: ["All safety certificates in order", "Emergency contact with nearest loco shed established"],
+    remarks: "Mandatory before first rake movement; MoR DRM inspection; speed restriction certificate; buffer stop inspection; fire extinguisher on loco",
+    taskCategory: "A",
+    isCore: true,
+    applicableMMLPTypes: ["mmlp_greenfield", "mmlp_expansion"],
+  },
+  {
+    code: "ML-CH-02",
+    phase: "commissioning_handover",
+    name: "Customs / CBIC in-principle approval for bonded operations",
+    unit: "LS",
+    productivityRate: { min: 60, max: 180, unit: "Days" },
+    monsoonImpactFactor: 1.0,
+    crew: [{ role: "Customs Consultant", count: 1 }, { role: "Project Manager", count: 1 }],
+    equipment: [],
+    predecessors: [{ taskCode: "ML-WS-05", type: "FS" }],
+    isCodeRef: ["Customs Act 1962", "CBIC circular 18/2019"],
+    dsrRef: "CBIC requirement",
+    safetyChecks: ["Physical verification by Customs officer", "CCTV and security infrastructure verified"],
+    remarks: "Only if bonded warehouse or CFS operations planned; CBIC site inspection; Electronic Cargo Tracking System (ECTS) integration required",
+    taskCategory: "A",
+    isCore: false,
+  },
+  {
+    code: "ML-CH-03",
+    phase: "commissioning_handover",
+    name: "Trial operations — simulated cargo movement and system integration test",
+    unit: "LS",
+    productivityRate: { min: 14, max: 30, unit: "Days" },
+    monsoonImpactFactor: 1.0,
+    crew: [{ role: "Operations Manager", count: 1 }, { role: "IT Manager", count: 1 }, { role: "Equipment Operator", count: 4 }],
+    equipment: [],
+    predecessors: [{ taskCode: "ML-SY-01", type: "FS" }, { taskCode: "ML-EQ-01", type: "FS" }],
+    isCodeRef: [],
+    dsrRef: "Contract specification",
+    safetyChecks: ["Emergency drill completed", "All operators certified"],
+    remarks: "Full end-to-end trial: gate-in → yard → warehouse → gate-out; test TOS/WMS/weighbridge integration; snag list closure before commercial operations",
+    taskCategory: "A",
+    isCore: true,
+  },
+  {
+    code: "ML-CH-04",
+    phase: "commissioning_handover",
+    name: "Statutory approvals — fire NOC, factory licence, consent to operate",
+    unit: "LS",
+    productivityRate: { min: 30, max: 90, unit: "Days" },
+    monsoonImpactFactor: 1.0,
+    crew: [{ role: "Project Manager", count: 1 }, { role: "Environmental Consultant", count: 1 }],
+    equipment: [],
+    predecessors: [{ taskCode: "ML-CH-03", type: "FS" }],
+    isCodeRef: ["Factories Act 1948", "Environment Protection Act 1986", "Fire Services Act"],
+    dsrRef: "State authority requirements",
+    safetyChecks: ["All statutory inspections completed", "Insurance in place"],
+    remarks: "Fire NOC from Fire Department; Factories licence if workers > 10 with power; SPCB consent to operate for ETP/STP if on site; trade licence from ULB",
+    taskCategory: "A",
+    isCore: true,
+  },
+];
+
+// ─── All Tasks ────────────────────────────────────────────────────────────────
+
+export const ALL_MMLP_TASKS: MMLPTaskTemplate[] = [
+  ...SURVEY_TASKS,
+  ...SITE_PREP_TASKS,
+  ...RAIL_TASKS,
+  ...ROAD_TASKS,
+  ...WAREHOUSE_TASKS,
+  ...YARD_TASKS,
+  ...UTILITIES_TASKS,
+  ...EQUIPMENT_TASKS,
+  ...SYSTEMS_TASKS,
+  ...COMMISSIONING_TASKS,
+];
+
+// ─── Type Configurations ───────────────────────────────────────────────────────
+
+export interface MMLPTypeConfig {
+  type: MMLPType;
+  label: string;
+  description: string;
+  keyRegulations: string[];
+  approvalBody: string;
+}
+
+export const MMLP_TYPES: Record<MMLPType, MMLPTypeConfig> = {
+  mmlp_greenfield: {
+    type: "mmlp_greenfield",
+    label: "Multi-Modal Logistics Park (Greenfield)",
+    description: "Full MMLP on new site with rail, road, warehouse and intermodal yard per MoRTH guidelines",
+    keyRegulations: ["MoRTH MMLP Guidelines 2019", "DPIIT National Logistics Policy 2022", "MoR Railway Siding Rules", "CBIC CFS regulations"],
+    approvalBody: "NICDC / State Nodal Agency + MoR + MoEF EC + CBIC (if bonded)",
+  },
+  mmlp_expansion: {
+    type: "mmlp_expansion",
+    label: "MMLP Capacity Expansion",
+    description: "Additional capacity (sheds, yard, rail sidings) at an existing operational logistics park",
+    keyRegulations: ["MoRTH MMLP Guidelines 2019", "MoR Railway Siding Rules"],
+    approvalBody: "MoR DRM approval for rail + local authority for civil",
+  },
+  logistics_park: {
+    type: "logistics_park",
+    label: "Private Logistics Park",
+    description: "Smaller private logistics park — warehouse, road access, yard; no mandatory rail connectivity",
+    keyRegulations: ["NBC 2016", "Fire NOC", "Local body approvals"],
+    approvalBody: "Local municipality + Fire Department + SPCB",
+  },
+};
+
+// ─── Helper Functions ──────────────────────────────────────────────────────────
+
+export function getMMLPTasks(mmlpType: MMLPType): MMLPTaskTemplate[] {
+  return ALL_MMLP_TASKS.filter((task) => {
+    if (task.applicableMMLPTypes && !task.applicableMMLPTypes.includes(mmlpType)) return false;
+    if (task.excludedMMLPTypes && task.excludedMMLPTypes.includes(mmlpType)) return false;
+    return true;
+  });
+}
+
+export function getCoreMMLPTasks(mmlpType: MMLPType): MMLPTaskTemplate[] {
+  return getMMLPTasks(mmlpType).filter((t) => t.isCore);
+}
