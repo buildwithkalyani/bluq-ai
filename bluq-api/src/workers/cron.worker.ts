@@ -1,9 +1,47 @@
 import cron from "node-cron";
 import { db } from "../db/client.js";
-import { tasks, users } from "../db/schema.js";
+import { tasks, users, projects } from "../db/schema.js";
 import { eq, and, lte, gte, lt, ne, isNotNull } from "drizzle-orm";
-import { triggerMorningPrompt, triggerEveningPrompt } from "./whatsapp.worker.js";
+import { triggerMorningPrompt, triggerEveningPrompt, triggerContractorMorningPrompt } from "./whatsapp.worker.js";
 import { sendText } from "../lib/whatsapp-send.js";
+
+interface ProjectContractor {
+  id: string;
+  name: string;
+  phone: string;
+  trade: string;
+}
+
+interface ContractorInfo {
+  phone: string;
+  workspaceId: string;
+  projectId: string;
+  trade: string | null;
+}
+
+async function getActiveContractors(): Promise<ContractorInfo[]> {
+  const rows = await db
+    .select({ id: projects.id, workspaceId: projects.workspaceId, settingsJson: projects.settingsJson })
+    .from(projects)
+    .where(eq(projects.status, "active"));
+
+  const contractors: ContractorInfo[] = [];
+  for (const row of rows) {
+    const settings = row.settingsJson as { contractors?: ProjectContractor[] } | null;
+    if (!settings?.contractors) continue;
+    for (const c of settings.contractors) {
+      if (c.phone) {
+        contractors.push({
+          phone: c.phone.replace(/^\+/, ""),
+          workspaceId: row.workspaceId,
+          projectId: row.id,
+          trade: c.trade ?? null,
+        });
+      }
+    }
+  }
+  return contractors;
+}
 
 // ---------------------------------------------------------------------------
 // MORNING CRON — 7:00am IST
@@ -94,8 +132,21 @@ async function runMorningCron(): Promise<void> {
     }
   }
 
+  // Send morning check-in to contractors in project settings who aren't system users
+  const activeContractors = await getActiveContractors();
+  let contractorCount = 0;
+  for (const c of activeContractors) {
+    if (byPhone.has(c.phone)) continue; // already messaged via task-based sweep
+    try {
+      await triggerContractorMorningPrompt(c.phone, c.workspaceId, c.projectId, c.trade);
+      contractorCount++;
+    } catch (err: any) {
+      console.error(`[cron] Contractor morning prompt failed for ${c.phone}:`, err.message);
+    }
+  }
+
   console.log(
-    `[cron] Morning done — ${byPhone.size} prompts sent, ${delayedByPhone.size} delay alerts sent`
+    `[cron] Morning done — ${byPhone.size} user prompts, ${contractorCount} contractor prompts, ${delayedByPhone.size} delay alerts`
   );
 }
 
@@ -120,7 +171,7 @@ async function runEveningCron(): Promise<void> {
       )
     );
 
-  const phones = [...new Set(activeTasks.map((r) => r.userPhone!).filter(Boolean))];
+  const phones = [...new Set(activeTasks.map((r) => r.userPhone).filter((p): p is string => !!p))];
 
   for (const phone of phones) {
     try {
@@ -130,7 +181,21 @@ async function runEveningCron(): Promise<void> {
     }
   }
 
-  console.log(`[cron] Evening done — attempted ${phones.length}`);
+  // Send evening check-in to contractors in project settings who aren't system users
+  const activeContractors = await getActiveContractors();
+  const phoneSet = new Set(phones);
+  let contractorCount = 0;
+  for (const c of activeContractors) {
+    if (phoneSet.has(c.phone)) continue; // already messaged via task-based sweep
+    try {
+      await triggerEveningPrompt(c.phone);
+      contractorCount++;
+    } catch (err: any) {
+      console.error(`[cron] Contractor evening prompt failed for ${c.phone}:`, err.message);
+    }
+  }
+
+  console.log(`[cron] Evening done — ${phones.length} user prompts, ${contractorCount} contractor prompts`);
 }
 
 // ---------------------------------------------------------------------------

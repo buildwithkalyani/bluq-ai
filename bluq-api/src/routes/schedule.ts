@@ -17,7 +17,7 @@
 import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
 import { scheduleVersions, documents, tasks, gapCheckFeedback, users } from "../db/schema.js";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, like } from "drizzle-orm";
 import { aiSchedulerQueue } from "../lib/queues.js";
 import type { ScheduleJobData } from "../workers/ai-scheduler.worker.js";
 import { verifySession } from "../lib/verifySession.js";
@@ -38,7 +38,7 @@ export async function scheduleRoute(app: FastifyInstance) {
   // =========================================================================
   // POST /schedule/generate — trigger schedule generation
   // =========================================================================
-  app.post("/schedule/generate", async (request, reply) => {
+  app.post("/schedule/generate", { preHandler: verifySession }, async (request, reply) => {
     try {
       const body = request.body as {
         projectId: string;
@@ -49,7 +49,24 @@ export async function scheduleRoute(app: FastifyInstance) {
         regionCode?: string;
         city?: string;
         buildingType?: string;
+        constructionType?: string;
         extractionRuns?: number;
+        // Tunnel-specific overrides
+        tunnelLength?:   string;
+        tunnelDiameter?: string;
+        tunnelMethod?:   string;
+        // Railway / Metro overrides
+        trackLength?:    string;
+        stationCount?:   string;
+        trackGauge?:     string;
+        // Highway overrides
+        roadLength?:     string;
+        laneCount?:      string;
+        pavementType?:   string;
+        // Bridge overrides
+        totalSpan?:      string;
+        pierCount?:      string;
+        deckType?:       string;
       };
 
       // Validate required fields
@@ -64,21 +81,22 @@ export async function scheduleRoute(app: FastifyInstance) {
         });
       }
 
-      // Check that the project has at least one document uploaded
+      // Check that the project has at least one document in the Schedules staging folder
       const projectDocs = await db
         .select({ id: documents.id })
         .from(documents)
         .where(
           and(
             eq(documents.projectId, body.projectId),
-            eq(documents.workspaceId, body.workspaceId)
+            eq(documents.workspaceId, body.workspaceId),
+            like(documents.folder, "Schedules%")
           )
         );
 
       if (projectDocs.length === 0) {
         return reply.status(400).send({
-          error: "No documents uploaded",
-          suggestion: "Please upload at least one document (drawings PDF, scope of work, or BOQ) before generating a schedule.",
+          error: "No documents in Schedules folder",
+          suggestion: "Upload documents via the Schedule tab before generating. Documents in Drawings/Reports/BOQs folders are not used for schedule generation.",
         });
       }
 
@@ -103,7 +121,20 @@ export async function scheduleRoute(app: FastifyInstance) {
         regionCode: body.regionCode,
         city: body.city,
         buildingType: body.buildingType,
+        constructionType: body.constructionType,
         extractionRuns: body.extractionRuns || 1,
+        tunnelLength:   body.tunnelLength,
+        tunnelDiameter: body.tunnelDiameter,
+        tunnelMethod:   body.tunnelMethod,
+        trackLength:    body.trackLength,
+        stationCount:   body.stationCount,
+        trackGauge:     body.trackGauge,
+        roadLength:     body.roadLength,
+        laneCount:      body.laneCount,
+        pavementType:   body.pavementType,
+        totalSpan:      body.totalSpan,
+        pierCount:      body.pierCount,
+        deckType:       body.deckType,
       };
 
       const job = await aiSchedulerQueue.add("generate-schedule", jobData, {
@@ -129,7 +160,7 @@ export async function scheduleRoute(app: FastifyInstance) {
   // =========================================================================
   // GET /schedule/status/:jobId — poll for job progress
   // =========================================================================
-  app.get("/schedule/status/:jobId", async (request, reply) => {
+  app.get("/schedule/status/:jobId", { preHandler: verifySession }, async (request, reply) => {
     try {
       const { jobId } = request.params as { jobId: string };
 
@@ -217,7 +248,7 @@ export async function scheduleRoute(app: FastifyInstance) {
   // =========================================================================
   // GET /schedule/versions — list all schedule versions for a project
   // =========================================================================
-  app.get("/schedule/versions", async (request, reply) => {
+  app.get("/schedule/versions", { preHandler: verifySession }, async (request, reply) => {
     try {
       const { projectId, workspaceId } = request.query as {
         projectId: string;
@@ -265,7 +296,7 @@ export async function scheduleRoute(app: FastifyInstance) {
   // =========================================================================
   // GET /schedule/versions/:id — get full schedule JSON for a version
   // =========================================================================
-  app.get("/schedule/versions/:id", async (request, reply) => {
+  app.get("/schedule/versions/:id", { preHandler: verifySession }, async (request, reply) => {
     try {
       const { id } = request.params as { id: string };
       if (!UUID_REGEX.test(id)) {
@@ -879,7 +910,7 @@ export async function scheduleRoute(app: FastifyInstance) {
 
   // POST /schedule/baseline — lock a version as baseline
   // =========================================================================
-  app.post("/schedule/baseline", async (request, reply) => {
+  app.post("/schedule/baseline", { preHandler: verifySession }, async (request, reply) => {
     try {
       const body = request.body as {
         scheduleVersionId: string;
@@ -918,6 +949,15 @@ export async function scheduleRoute(app: FastifyInstance) {
           suggestion: "Generate a new schedule version if you need to make changes.",
         });
       }
+
+      // Demote all previous baselines for this project
+      await db
+        .update(scheduleVersions)
+        .set({ isBaseline: false })
+        .where(and(
+          eq(scheduleVersions.projectId, version.projectId),
+          eq(scheduleVersions.workspaceId, body.workspaceId)
+        ));
 
       // Lock as baseline
       const [updated] = await db

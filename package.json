@@ -10,6 +10,7 @@
     "setup": "npm install && cd bluq-api && npm install"
   },
   "dependencies": {
+    "@next/swc-linux-x64-gnu": "^16.2.7",
     "@types/pg": "^8.18.0",
     "@upstash/redis": "^1.37.0",
     "better-auth": "^1.5.5",

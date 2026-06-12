@@ -37,7 +37,7 @@ import { Worker, Job } from "bullmq";
 import { redisConnection } from "../lib/redis.js";
 import { db } from "../db/client.js";
 import { documents, tasks, scheduleVersions, taskDependencies } from "../db/schema.js";
-import { eq, and } from "drizzle-orm";
+import { eq, and, like, inArray } from "drizzle-orm";
 
 // Pipeline modules
 import { parseFiles, fetchFileBuffer } from "../lib/parsers.js";
@@ -47,6 +47,11 @@ import { calculateSchedule, type ScheduleResult, type ScheduledTask } from "../l
 import { generateNovelTasks } from "../lib/novel-task-generator.js";
 import { checkTaskGaps, type GapCheckResult } from "../lib/gap-checker.js";
 import { getIO } from "../lib/socket.js";
+
+// Infra pipeline modules
+import { extractInfrastructureParameters, type InfrastructureType } from "../lib/infra/infrastructure-parameter-extractor.js";
+import { runInfrastructureRulesEngine } from "../lib/infra/infrastructure-rules-engine.js";
+import { calculateInfraSchedule } from "../lib/infra/infra-duration-calculator.js";
 
 // ---------------------------------------------------------------------------
 // JOB TYPES
@@ -64,6 +69,27 @@ export interface ScheduleJobData {
   regionCode?: string;         // if PM selected region manually
   city?: string;
   buildingType?: string;       // if PM selected type manually
+  constructionType?: string;   // "road" | "railway" | "bridge" | "port" | "airport" | "water_treatment" | "residential" | etc.
+
+  // Tunnel-specific overrides (sent by import-csv page when user fills the tunnel form)
+  tunnelLength?:   string;    // total tunnel length in metres (applied to TunnelParameters.totalLengthM)
+  tunnelDiameter?: string;    // internal finished diameter in metres (applied to TunnelParameters.internalDiameterM)
+  tunnelMethod?:   string;    // "natm" | "tbm" | "cutcover" (frontend) → normalised to TunnelParameters.excavationMethod
+
+  // Railway / Metro overrides (sent by import-csv page when user fills the track form)
+  trackLength?:   string;    // route length in km → RailwayParameters.totalLengthKm / MetroParameters.totalLengthKm
+  stationCount?:  string;    // station count → RailwayParameters.numberOfStations / MetroParameters.numberOfStations
+  trackGauge?:    string;    // "broad" | "metre" | "standard" (frontend) → normalised to enum
+
+  // Highway overrides
+  roadLength?:    string;    // total route length in km → HighwayParameters.totalLengthKm
+  laneCount?:     string;    // number of lanes → HighwayParameters.numberOfLanes
+  pavementType?:  string;    // "flexible" | "rigid" | "composite" → HighwayParameters.pavementType
+
+  // Bridge overrides
+  totalSpan?:     string;    // total bridge length in m → BridgeParameters.totalLengthM
+  pierCount?:     string;    // number of piers → BridgeParameters.numberOfPiers
+  deckType?:      string;    // "psc" | "steel" | "composite" | "cable" → BridgeParameters.superstructureType
 
   // Config
   extractionRuns?: number;     // 1 or 2 (for majority vote determinism)
@@ -154,13 +180,14 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     .where(
       and(
         eq(documents.projectId, projectId),
-        eq(documents.workspaceId, workspaceId)
+        eq(documents.workspaceId, workspaceId),
+        like(documents.folder, "Schedules%")
       )
     );
 
   if (projectDocuments.length === 0) {
     throw new Error(
-      "No documents found for this project. Please upload drawings, scope of work, or BOQ before generating a schedule."
+      "No documents found in the Schedules folder. Upload documents via the Schedule tab before generating."
     );
   }
   console.log(`[worker] Step 1 completed in ${Date.now() - step1Start}ms`);
@@ -235,124 +262,272 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
   console.log(`[worker] Step 2 completed in ${Date.now() - step2Start}ms`);
 
   // =========================================================================
-  // STEP 3: Extract parameters via Claude
+  // STEP 3–6: Branched pipeline — infra vs building
   // =========================================================================
-  await updateProgress(job, 3, totalSteps, "AI is reading your documents...");
-  const step3Start = Date.now();
 
-  const extractionResult = await extractParameters(parsed, apiKey, {
-    runs: job.data.extractionRuns || 1,
-    projectRegion: job.data.regionCode as any,
-    projectCity: job.data.city,
-  });
+  const infraType = resolveInfraType(job.data.constructionType);
 
-  if (!extractionResult.success || !extractionResult.parameters) {
-    throw new Error(
-      `Failed to extract project parameters: ${extractionResult.error || "Unknown error"}`
+  let allTasks: ScheduledTask[] = [];
+  let schedulingWarnings: string[] = [];
+  let aiReasoning = "";
+  let totalDurationDays = 0;
+  let gapCheck: GapCheckResult = {
+    coverageAssessment: "complete",
+    suspectedGaps: [],
+    notes: "Gap check not run for infrastructure projects — task libraries are domain-specific.",
+  };
+
+  if (infraType) {
+    // -----------------------------------------------------------------------
+    // INFRASTRUCTURE PIPELINE
+    // -----------------------------------------------------------------------
+
+    // Step 3: Extract infra parameters via Claude
+    await updateProgress(job, 3, totalSteps, `AI is reading your ${infraType} project documents...`);
+    const step3Start = Date.now();
+
+    const parsedDocs = parsed.map(p => ({ name: p.fileName, content: p.contents.map((c: any) => c.text ?? "").join("\n") }));
+    const infraParams = await extractInfrastructureParameters(
+      infraType,
+      parsedDocs,
+      job.data.extractionRuns ?? 1,
     );
-  }
 
-  // Apply any manual overrides from the frontend
-  const params = applyOverrides(extractionResult.parameters, job.data);
+    // Apply date overrides
+    if (job.data.city) (infraParams as any).region = job.data.city;
 
-  console.log(
-    `[worker] Extracted params: ${params.buildingType}, ${params.floors} floors, ` +
-    `${params.regionCode}, soil=${params.soilType}, confidence=${params.confidence.overall}`
-  );
-  console.log(
-    `[worker] Area params: totalArea=${params.totalArea} sqm, typicalFloorArea=${params.typicalFloorArea} sqm, ` +
-    `totalUnits=${params.totalUnits}, wings=${params.wings ? JSON.stringify(params.wings.map(w => `${w.name}:G+${w.floors}`)) : "none"}`
-  );
-  console.log(`[worker] Step 3 completed in ${Date.now() - step3Start}ms`);
+    // Apply tunnel-specific overrides when user filled the form fields
+    if (infraType === "tunnel") {
+      const tp = infraParams as import("../lib/infra/infrastructure-parameter-extractor.js").TunnelParameters;
+      if (job.data.tunnelLength   && !isNaN(Number(job.data.tunnelLength)))   tp.totalLengthM      = Number(job.data.tunnelLength);
+      if (job.data.tunnelDiameter && !isNaN(Number(job.data.tunnelDiameter))) tp.internalDiameterM = Number(job.data.tunnelDiameter);
+      if (job.data.tunnelMethod) {
+        // Frontend sends "cutcover"; TunnelParameters expects "cut_and_cover"
+        const m = job.data.tunnelMethod;
+        tp.excavationMethod = m === "cutcover" ? "cut_and_cover" : (m as "natm" | "tbm");
+      }
+    }
 
-  // =========================================================================
-  // STEP 4: Select tasks deterministically
-  // =========================================================================
-  await updateProgress(job, 4, totalSteps, "Selecting construction tasks...");
-  const step4Start = Date.now();
+    // Apply railway overrides — frontend gauge values: "broad" | "metre" | "standard"
+    if (infraType === "railway") {
+      const rp = infraParams as import("../lib/infra/infrastructure-parameter-extractor.js").RailwayParameters;
+      if (job.data.trackLength  && !isNaN(Number(job.data.trackLength)))  rp.totalLengthKm    = Number(job.data.trackLength);
+      if (job.data.stationCount && !isNaN(Number(job.data.stationCount))) rp.numberOfStations = Number(job.data.stationCount);
+      if (job.data.trackGauge) {
+        const g = job.data.trackGauge;
+        rp.trackGauge =
+          g === "broad"    ? "broad_gauge"    :
+          g === "metre"    ? "metre_gauge"    :
+          g === "standard" ? "standard_gauge" :
+          rp.trackGauge;
+      }
+    }
 
-  const rulesResult: RulesEngineResult = selectTasks(params);
+    // Apply metro overrides — gaugeMM is numeric for MetroParameters
+    if (infraType === "metro") {
+      const mp = infraParams as import("../lib/infra/infrastructure-parameter-extractor.js").MetroParameters;
+      if (job.data.trackLength  && !isNaN(Number(job.data.trackLength)))  mp.totalLengthKm    = Number(job.data.trackLength);
+      if (job.data.stationCount && !isNaN(Number(job.data.stationCount))) mp.numberOfStations = Number(job.data.stationCount);
+      if (job.data.trackGauge) {
+        const g = job.data.trackGauge;
+        mp.gaugeMM =
+          g === "broad"    ? 1676 :
+          g === "metre"    ? 1000 :
+          g === "standard" ? 1435 :
+          mp.gaugeMM;
+      }
+    }
 
-  console.log(`[worker] Rules engine:\n${printTaskSummary(rulesResult)}`);
+    // Apply highway overrides
+    if (infraType === "highway") {
+      const hp = infraParams as import("../lib/infra/infrastructure-parameter-extractor.js").HighwayParameters;
+      if (job.data.roadLength  && !isNaN(Number(job.data.roadLength)))  hp.totalLengthKm  = Number(job.data.roadLength);
+      if (job.data.laneCount   && !isNaN(Number(job.data.laneCount)))   hp.numberOfLanes  = Number(job.data.laneCount);
+      if (job.data.pavementType) {
+        const p = job.data.pavementType;
+        if (p === "flexible" || p === "rigid" || p === "composite") hp.pavementType = p;
+      }
+    }
 
-  if (rulesResult.tasks.length === 0) {
-    throw new Error("Rules engine returned zero tasks. This should not happen — please report this bug.");
-  }
-  console.log(`[worker] Step 4 completed in ${Date.now() - step4Start}ms`);
+    // Apply bridge overrides — frontend deckType values map to BridgeParameters.superstructureType
+    if (infraType === "bridge") {
+      const bp = infraParams as import("../lib/infra/infrastructure-parameter-extractor.js").BridgeParameters;
+      if (job.data.totalSpan && !isNaN(Number(job.data.totalSpan))) bp.totalLengthM  = Number(job.data.totalSpan);
+      if (job.data.pierCount && !isNaN(Number(job.data.pierCount))) bp.numberOfPiers = Number(job.data.pierCount);
+      if (job.data.deckType) {
+        const d = job.data.deckType;
+        bp.superstructureType =
+          d === "psc"       ? "psc_girder"         :
+          d === "steel"     ? "steel_truss"         :
+          d === "composite" ? "composite"           :
+          d === "cable"     ? "cable_stayed"        :
+          bp.superstructureType;
+      }
+    }
+    console.log(`[worker] Infra params extracted: ${JSON.stringify(infraParams).slice(0, 200)}...`);
+    console.log(`[worker] Step 3 completed in ${Date.now() - step3Start}ms`);
 
-  // Kick off gap check in parallel with duration calculation — does not add to wall-clock time
-  const gapCheckPromise = checkTaskGaps(rulesResult.tasks, params, apiKey);
+    // Step 4: Select tasks via infra rules engine
+    await updateProgress(job, 4, totalSteps, "Selecting infrastructure tasks...");
+    const step4Start = Date.now();
 
-  // =========================================================================
-  // STEP 5: Calculate durations and schedule
-  // =========================================================================
-  await updateProgress(job, 5, totalSteps, "Calculating durations and scheduling...");
-  const step5Start = Date.now();
+    const infraRulesResult = runInfrastructureRulesEngine(infraType, infraParams);
 
-  const scheduleResult: ScheduleResult = calculateSchedule(rulesResult.tasks, params);
+    if (infraRulesResult.selectedTasks.length === 0) {
+      throw new Error("Infrastructure rules engine returned zero tasks. Check task library configuration.");
+    }
 
-  console.log(
-    `[worker] Schedule: ${scheduleResult.summary.totalTasks} tasks, ` +
-    `${scheduleResult.summary.totalDurationDays} days, ` +
-    `${scheduleResult.summary.criticalPathTasks} on critical path, ` +
-    `${scheduleResult.summary.totalMonsoonImpactDays} monsoon impact days`
-  );
-  console.log(
-    `[worker] Compression: natural=${scheduleResult.summary.compressionSummary.naturalDays}d, ` +
-    `minimum=${scheduleResult.summary.compressionSummary.minimumPossibleDays}d, ` +
-    `requested=${scheduleResult.summary.compressionSummary.requestedDays}d, ` +
-    `factor=${scheduleResult.summary.compressionSummary.compressionFactor.toFixed(3)}, ` +
-    `feasible=${scheduleResult.summary.compressionSummary.feasible}`
-  );
-  console.log(`[worker] Step 5 completed in ${Date.now() - step5Start}ms`);
+    console.log(`[worker] Infra rules engine: ${infraRulesResult.totalTaskCount} tasks selected`);
+    if (infraRulesResult.longLeadItems.length > 0) {
+      console.log(
+        `[worker] Long-lead items: ${infraRulesResult.longLeadItems.map(t => `${t.code}(${t.leadTimeDays}d)`).join(", ")}`
+      );
+    }
+    console.log(`[worker] Step 4 completed in ${Date.now() - step4Start}ms`);
 
-  // =========================================================================
-  // STEP 6: Handle novel scope items (optional AI step)
-  // =========================================================================
-  await updateProgress(job, 6, totalSteps, "Checking for non-standard scope items...");
-  const step6Start = Date.now();
+    // Step 5: Calculate durations and schedule
+    await updateProgress(job, 5, totalSteps, "Calculating durations and scheduling...");
+    const step5Start = Date.now();
 
-  let novelTasks: ScheduledTask[] = [];
-  let placementWarnings: string[] = [];
+    const effectiveStartDate = job.data.startDate ?? new Date().toISOString().split("T")[0];
+    const infraSchedule = calculateInfraSchedule(infraRulesResult, infraType, infraParams, effectiveStartDate);
 
-  if (params.novelScopeItems.length > 0) {
+    allTasks = infraSchedule.tasks;
+    totalDurationDays = infraSchedule.totalDurationDays;
+
+    if (infraRulesResult.longLeadItems.length > 0) {
+      schedulingWarnings.push(
+        `Long-lead procurement items: ${infraRulesResult.longLeadItems
+          .map(t => `${t.name} (${t.leadTimeDays} days lead time)`)
+          .join("; ")}. Start procurement immediately.`
+      );
+    }
+
     console.log(
-      `[worker] ${params.novelScopeItems.length} novel scope items found:`,
-      params.novelScopeItems.join(", ")
+      `[worker] Infra schedule: ${allTasks.length} tasks, ${totalDurationDays} days, ` +
+      `${infraSchedule.criticalPathTasks} critical path tasks`
     );
+    console.log(`[worker] Step 5 completed in ${Date.now() - step5Start}ms`);
 
-    // Call Claude Haiku to generate tasks for items not in the 143-task library.
-    // Novel tasks are placed at the correct phase boundary (not appended at end).
-    // The PM sees them with an "AI-generated, needs review" badge.
-    const novelResult = await generateNovelTasks(
-      params.novelScopeItems,
-      params,
-      apiKey,
-      scheduleResult.tasks,
+    // Step 6: No novel task generation for infra (task libraries are comprehensive)
+    await updateProgress(job, 6, totalSteps, "Finalising infrastructure schedule...");
+
+    aiReasoning =
+      `Infrastructure type: ${infraType}. ` +
+      `Extracted parameters from ${parsedDocs.length} document(s). ` +
+      `Selected ${allTasks.length} tasks using infrastructure rules engine. ` +
+      `Schedule duration: ${totalDurationDays} days. ` +
+      `Critical path tasks: ${infraSchedule.criticalPathTasks}. ` +
+      (infraRulesResult.longLeadItems.length > 0
+        ? `Long-lead items requiring early procurement: ${infraRulesResult.longLeadItems.map(t => t.name).join(", ")}.`
+        : "No long-lead procurement items flagged.");
+
+  } else {
+    // -----------------------------------------------------------------------
+    // BUILDING PIPELINE (existing, unchanged)
+    // -----------------------------------------------------------------------
+
+    // Step 3: Extract parameters via Claude
+    await updateProgress(job, 3, totalSteps, "AI is reading your documents...");
+    const step3Start = Date.now();
+
+    const extractionResult = await extractParameters(parsed, apiKey, {
+      runs: job.data.extractionRuns || 1,
+      projectRegion: job.data.regionCode as any,
+      projectCity: job.data.city,
+    });
+
+    if (!extractionResult.success || !extractionResult.parameters) {
+      throw new Error(
+        `Failed to extract project parameters: ${extractionResult.error || "Unknown error"}`
+      );
+    }
+
+    const params = applyOverrides(extractionResult.parameters, job.data);
+
+    console.log(
+      `[worker] Extracted params: ${params.buildingType}, ${params.floors} floors, ` +
+      `${params.regionCode}, soil=${params.soilType}, confidence=${params.confidence.overall}`
     );
+    console.log(`[worker] Step 3 completed in ${Date.now() - step3Start}ms`);
 
-    novelTasks = novelResult.tasks;
-    placementWarnings = novelResult.placementWarnings;
+    // Step 4: Select tasks deterministically
+    await updateProgress(job, 4, totalSteps, "Selecting construction tasks...");
+    const step4Start = Date.now();
 
-    if (novelTasks.length > 0) {
-      console.log(`[worker] Generated ${novelTasks.length} novel tasks via Claude Haiku`);
+    const rulesResult: RulesEngineResult = selectTasks(params);
+
+    console.log(`[worker] Rules engine:\n${printTaskSummary(rulesResult)}`);
+
+    if (rulesResult.tasks.length === 0) {
+      throw new Error("Rules engine returned zero tasks. This should not happen — please report this bug.");
     }
-    if (placementWarnings.length > 0) {
-      console.warn(`[worker] ${placementWarnings.length} novel task(s) could not be placed:`, placementWarnings);
+    console.log(`[worker] Step 4 completed in ${Date.now() - step4Start}ms`);
+
+    const gapCheckPromise = checkTaskGaps(rulesResult.tasks, params, apiKey);
+
+    // Step 5: Calculate durations
+    await updateProgress(job, 5, totalSteps, "Calculating durations and scheduling...");
+    const step5Start = Date.now();
+
+    const scheduleResult: ScheduleResult = calculateSchedule(rulesResult.tasks, params);
+
+    console.log(
+      `[worker] Schedule: ${scheduleResult.summary.totalTasks} tasks, ` +
+      `${scheduleResult.summary.totalDurationDays} days, ` +
+      `${scheduleResult.summary.criticalPathTasks} on critical path`
+    );
+    console.log(`[worker] Step 5 completed in ${Date.now() - step5Start}ms`);
+
+    // Step 6: Novel tasks
+    await updateProgress(job, 6, totalSteps, "Checking for non-standard scope items...");
+    const step6Start = Date.now();
+
+    let novelTasks: ScheduledTask[] = [];
+    let placementWarnings: string[] = [];
+
+    if (params.novelScopeItems.length > 0) {
+      const novelResult = await generateNovelTasks(
+        params.novelScopeItems,
+        params,
+        apiKey,
+        scheduleResult.tasks,
+      );
+      novelTasks = novelResult.tasks;
+      placementWarnings = novelResult.placementWarnings;
     }
+
+    gapCheck = await gapCheckPromise;
+    console.log(`[worker] Step 6 completed in ${Date.now() - step6Start}ms`);
+
+    allTasks = [...scheduleResult.tasks, ...novelTasks];
+    schedulingWarnings = [...rulesResult.warnings, ...placementWarnings];
+    totalDurationDays = scheduleResult.summary.totalDurationDays;
+
+    if (gapCheck.coverageAssessment === "significant_gaps") {
+      schedulingWarnings.push(
+        "AI gap check flagged potential missing tasks. Review gapCheck field before sharing schedule with contractor."
+      );
+    }
+    for (const gap of gapCheck.suspectedGaps) {
+      if (gap.confidence === "high" && !gap.alreadyCovered) {
+        schedulingWarnings.push(`High confidence gap detected: ${gap.taskName}. Verify task library coverage.`);
+      }
+    }
+
+    aiReasoning =
+      `Extracted parameters: ${params.buildingType}, ${params.floors} floors, ${params.regionCode}. ` +
+      `Selected ${allTasks.length} tasks using ${rulesResult.rulesApplied.length} rules. ` +
+      `Schedule duration: ${scheduleResult.summary.totalDurationDays} days. ` +
+      `Critical path: ${scheduleResult.summary.criticalPathTasks} tasks. ` +
+      `Confidence: ${params.confidence.overall}.`;
   }
-
-  // Collect gap check result (was running in parallel since Step 4)
-  const gapCheck: GapCheckResult = await gapCheckPromise;
-  console.log(`[worker] Step 6 completed in ${Date.now() - step6Start}ms`);
 
   // =========================================================================
   // STEP 7: Save to database
   // =========================================================================
   await updateProgress(job, 7, totalSteps, "Saving schedule...");
   const step7Start = Date.now();
-
-  const allTasks = [...scheduleResult.tasks, ...novelTasks];
 
   // Get next version number for this project
   const existingVersions = await db
@@ -364,27 +539,9 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     ? Math.max(...existingVersions.map(v => v.versionNumber)) + 1
     : 1;
 
-  // Aggregate all warnings from every source
-  const allWarnings: string[] = [
-    ...rulesResult.warnings,
-    ...placementWarnings,
-  ];
-
-  // Gap check warnings
-  if (gapCheck.coverageAssessment === "significant_gaps") {
-    allWarnings.push(
-      "AI gap check flagged potential missing tasks. Review gapCheck field before sharing schedule with contractor."
-    );
-  }
-  for (const gap of gapCheck.suspectedGaps) {
-    if (gap.confidence === "high" && !gap.alreadyCovered) {
-      allWarnings.push(`High confidence gap detected: ${gap.taskName}. Verify task library coverage.`);
-    }
-  }
-
   // Save the schedule version (full snapshot as JSON)
   const scheduleJson = {
-    parameters: params,
+    infraType: infraType ?? null,
     tasks: allTasks.map(t => ({
       code: t.code,
       originalCode: t.originalCode,
@@ -404,16 +561,20 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
       source: t.source,
       monsoonImpactFactor: t.monsoonImpactFactor,
     })),
-    summary: scheduleResult.summary,
-    rulesApplied: rulesResult.rulesApplied,
-    warnings: allWarnings,
-    novelScopeItems: params.novelScopeItems,
+    warnings: schedulingWarnings,
     parseSummary,
     gapCheck,
-    compressionSummary: scheduleResult.summary.compressionSummary,
-    resourceSummary: scheduleResult.resourceSummary,
-    spatialAnalysis: scheduleResult.spatialAnalysis,
+    totalDurationDays,
   };
+
+  // Archive staging docs to versioned folder before inserting version
+  const stagingDocIds = projectDocuments.map(d => d.id);
+  if (stagingDocIds.length > 0) {
+    await db
+      .update(documents)
+      .set({ folder: `schedule_v${nextVersion}` })
+      .where(inArray(documents.id, stagingDocIds));
+  }
 
   const [savedVersion] = await db
     .insert(scheduleVersions)
@@ -422,16 +583,9 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
       projectId,
       versionNumber: nextVersion,
       scheduleJson,
-      aiReasoning: `Extracted parameters: ${params.buildingType}, ${params.floors} floors, ${params.regionCode}. ` +
-        `Selected ${allTasks.length} tasks using ${rulesResult.rulesApplied.length} rules. ` +
-        `Schedule duration: ${scheduleResult.summary.totalDurationDays} days. ` +
-        `Critical path: ${scheduleResult.summary.criticalPathTasks} tasks. ` +
-        `Confidence: ${params.confidence.overall}.`,
+      aiReasoning: aiReasoning,
       aiRisks: {
-        warnings: rulesResult.warnings,
-        novelScopeItems: params.novelScopeItems,
-        monsoonImpact: `${scheduleResult.summary.totalMonsoonImpactDays} extra days due to monsoon`,
-        timelineCompression: scheduleResult.summary.timelineCompression,
+        warnings: schedulingWarnings,
       },
       isBaseline: false,    // PM needs to review and lock as baseline
       isLocked: false,
@@ -446,23 +600,103 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     return crew.map((c) => `${c.count} ${c.role}`).join(", ");
   };
 
-  // Map granular task-library phase codes → 6 display phases used in Gantt
+  // Map granular task-library phase codes → display phases used in Gantt
   const PHASE_DISPLAY: Record<string, string> = {
-    site_preparation: "Site Preparation",
-    foundation: "Foundation",
-    plinth: "Foundation",
-    superstructure: "Structure",
-    masonry: "Structure",
-    plumbing: "MEP",
-    electrical: "MEP",
-    special_systems: "MEP",
-    plastering: "Finishing",
-    waterproofing: "Finishing",
-    flooring: "Finishing",
-    doors_windows: "Finishing",
-    painting: "Finishing",
-    external_works: "Finishing",
-    approvals_handover: "Handover",
+    // Building phases
+    site_preparation:      "Site Preparation",
+    foundation:            "Foundation",
+    plinth:                "Foundation",
+    superstructure:        "Structure",
+    masonry:               "Structure",
+    plumbing:              "MEP",
+    electrical:            "MEP",
+    special_systems:       "MEP",
+    plastering:            "Finishing",
+    waterproofing:         "Finishing",
+    flooring:              "Finishing",
+    doors_windows:         "Finishing",
+    painting:              "Finishing",
+    external_works:        "Finishing",
+    approvals_handover:    "Handover",
+    // Port phases
+    surveys_investigations:   "Surveys & Investigations",
+    marine_works:             "Marine Works",
+    reclamation:              "Reclamation",
+    quay_berth:               "Quay & Berth",
+    yard_pavement:            "Yard & Pavement",
+    terminal_buildings:       "Terminal Buildings",
+    utilities:                "Utilities",
+    equipment_installation:   "Equipment Installation",
+    navigational_aids:        "Navigational Aids",
+    commissioning_handover:   "Commissioning & Handover",
+    // Airport phases
+    earthworks_grading:       "Earthworks",
+    runway_taxiway_pavement:  "Runway & Taxiway",
+    drainage:                 "Drainage",
+    terminal_building:        "Terminal Building",
+    atc_facilities:           "ATC Facilities",
+    perimeter_security:       "Perimeter & Security",
+    // Highway phases
+    earthworks:               "Earthworks",
+    drainage_structures:      "Drainage",
+    pavement_layers:          "Pavement",
+    structures:               "Structures",
+    safety_furniture:         "Safety & Furniture",
+    toll_its:                 "Toll & ITS",
+    // Bridge phases
+    foundation_piling:        "Foundation & Piling",
+    substructure:             "Substructure",
+    superstructure_bridge:    "Superstructure",
+    deck_finishes:            "Deck & Finishes",
+    approaches:               "Approaches",
+    // Metro phases
+    viaduct_structure:        "Viaduct",
+    station_civil:            "Stations",
+    track_works:              "Track Works",
+    systems_electromechanical:"Systems & E&M",
+    depot:                    "Depot",
+    testing_commissioning:    "Testing & Commissioning",
+    // WTP phases
+    site_preparation_wtp:     "Site Preparation",
+    civil_structures:         "Civil Structures",
+    mechanical_equipment:     "Mechanical Equipment",
+    piping_valves:            "Piping & Valves",
+    electrical_instrumentation: "Electrical & Instrumentation",
+    // MMLP phases
+    rail_infrastructure:      "Rail Infrastructure",
+    road_connectivity:        "Road Connectivity",
+    warehouse_shed:           "Warehouse & Sheds",
+    intermodal_yard:          "Intermodal Yard",
+    utilities_services:       "Utilities",
+    systems_technology:       "Systems & Technology",
+    // ICD phases
+    civil_earthworks:         "Civil & Earthworks",
+    pavement_yard:            "Pavement & Yard",
+    rail_siding:              "Rail Siding",
+    customs_facilities:       "Customs Facilities",
+    warehousing_sheds:        "Warehousing & Sheds",
+    systems_gate:             "Systems & Gate",
+    // Liquid Cargo Terminal phases
+    regulatory_approvals:     "Regulatory Approvals",
+    marine_structures:        "Marine Structures",
+    pipeline_piping:          "Pipeline & Piping",
+    storage_tanks:            "Storage Tanks",
+    fire_safety_systems:      "Fire & Safety Systems",
+    // Tunnel phases
+    portal_works:             "Portal Works",
+    tunnel_excavation:        "Tunnel Excavation",
+    primary_support:          "Primary Support",
+    waterproofing_lining:     "Waterproofing & Lining",
+    drainage_invert:          "Drainage & Invert",
+    mep_safety:               "MEP & Safety",
+    road_rail_finishing:      "Road / Rail Finishing",
+    // Mainline Railway phases
+    land_acquisition:         "Land Acquisition",
+    bridges_culverts:         "Bridges & Culverts",
+    track_laying:             "Track Works",        // shares display name with metro track_works
+    station_works:            "Stations",           // shares display name with metro station_civil
+    signalling_telecom:       "Signalling & Telecom",
+    traction_power:           "Traction & Power",
   };
 
   const taskInserts = allTasks.map((t, index) => ({
@@ -564,7 +798,7 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     versionNumber: nextVersion,
     scheduleVersionId: savedVersion.id,
     taskCount: insertedTasks.length,
-    compressionFeasible: scheduleResult.summary.compressionSummary?.feasible ?? true,
+    compressionFeasible: true,
   });
 
   console.log(`[worker] Pipeline total: ${Date.now() - pipelineStart}ms`);
@@ -572,7 +806,7 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
   return {
     scheduleVersionId: savedVersion.id,
     taskCount: insertedTasks.length,
-    durationDays: scheduleResult.summary.totalDurationDays,
+    durationDays: totalDurationDays,
   };
 }
 
@@ -580,6 +814,44 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
 // ---------------------------------------------------------------------------
 // HELPERS
 // ---------------------------------------------------------------------------
+
+// Maps frontend constructionType string → InfrastructureType enum used by infra pipeline.
+// Returns null for building types (residential, commercial, etc.) which use the existing pipeline.
+function resolveInfraType(constructionType?: string): InfrastructureType | null {
+  const map: Record<string, InfrastructureType> = {
+    road:                   "highway",
+    highway:                "highway",
+    railway:                "railway",
+    metro:                  "metro",
+    bridge:                 "bridge",
+    port:                   "port",
+    harbour:                "port",
+    airport:                "airport",
+    water_treatment:        "water_treatment",
+    sewage_treatment:       "water_treatment",
+    wtp:                    "water_treatment",
+    stp:                    "water_treatment",
+    mmlp:                   "mmlp",
+    logistics_park:         "mmlp",
+    multimodal:             "mmlp",
+    icd:                    "icd",
+    dry_port:               "icd",
+    freight_terminal:       "icd",
+    goods_shed:             "icd",
+    liquid_cargo_terminal:  "liquid_cargo_terminal",
+    liquid_terminal:        "liquid_cargo_terminal",
+    chemical_jetty:         "liquid_cargo_terminal",
+    lpg_terminal:           "liquid_cargo_terminal",
+    oil_terminal:           "liquid_cargo_terminal",
+    tunnel:                 "tunnel",
+    road_tunnel:            "tunnel",
+    railway_tunnel:         "tunnel",
+    water_tunnel:           "tunnel",
+    hill_tunnel:            "tunnel",
+  };
+  if (!constructionType) return null;
+  return map[constructionType.toLowerCase()] ?? null;
+}
 
 /**
  * Apply manual overrides from the frontend to extracted parameters.

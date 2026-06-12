@@ -535,14 +535,15 @@ export interface BackendDocument {
   createdAt: string;
 }
 
-/** GET /documents?projectId=&workspaceId= → BackendDocument[] */
+/** GET /documents?projectId=&workspaceId=&since= → BackendDocument[] */
 export async function fetchDocuments(
   projectId: string,
-  workspaceId: string
+  workspaceId: string,
+  since?: string
 ): Promise<BackendDocument[]> {
-  return apiFetch<BackendDocument[]>(
-    `/documents?projectId=${projectId}&workspaceId=${workspaceId}`
-  );
+  const params = new URLSearchParams({ projectId, workspaceId });
+  if (since) params.set("since", since);
+  return apiFetch<BackendDocument[]>(`/documents?${params}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -865,6 +866,12 @@ export async function getDocumentUploadUrl(
   return apiFetch(`/documents/upload-url?${params}`);
 }
 
+export async function getDocumentDownloadUrl(id: string, workspaceId: string): Promise<string> {
+  const params = new URLSearchParams({ workspaceId });
+  const data = await apiFetch<{ signedUrl: string }>(`/documents/${id}/download-url?${params}`);
+  return data.signedUrl;
+}
+
 export async function deleteDocument(id: string, workspaceId: string): Promise<void> {
   const token = await getAuthToken();
   const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "";
@@ -1002,6 +1009,39 @@ export async function generateSchedule(data: {
   endDate?: string;
   buildingType?: string;
   city?: string;
+  // Infra routing — determines which task library pipeline runs
+  constructionType?: string;
+  // Building-specific context (backend ignores extras, passes through to Claude)
+  floors?: string | number;
+  basement?: string | boolean;
+  wings?: string | number;
+  workingShift?: string;
+  concreteMethod?: string;
+  useCrane?: string | boolean;
+  monsoon?: string | boolean;
+  priority?: string;
+  // Road / highway
+  roadLength?: string | number;
+  laneCount?: string | number;
+  pavementType?: string;
+  // Railway / metro
+  trackLength?: string | number;
+  stationCount?: string | number;
+  trackGauge?: string;
+  // Bridge
+  totalSpan?: string | number;
+  pierCount?: string | number;
+  deckType?: string;
+  // Industrial
+  clearHeight?: string | number;
+  spanLength?: string | number;
+  // Tunnel
+  tunnelLength?: string | number;
+  tunnelDiameter?: string | number;
+  tunnelMethod?: string;
+  // Misc
+  docTypes?: string[];
+  extractionRuns?: number;
 }): Promise<ScheduleGenerateResult> {
   return apiPost<ScheduleGenerateResult>("/schedule/generate", data);
 }

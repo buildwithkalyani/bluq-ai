@@ -12,7 +12,7 @@ import { useSearchParams } from "next/navigation";
 import { useWorkspace } from "@/context/workspace";
 import {
   fetchProjects, fetchDocuments, isRealProject, registerDocument,
-  updateDocumentApproval, type BackendProject,
+  updateDocumentApproval, deleteDocument, getDocumentDownloadUrl, type BackendProject,
 } from "@/lib/api-client";
 import { uploadFileToStorage } from "@/lib/supabase-storage";
 
@@ -42,6 +42,7 @@ interface Folder {
   color: string;
   bg: string;
   isBuiltin?: boolean;
+  isReadOnly?: boolean;
 }
 
 type SortDirection = "asc" | "desc";
@@ -86,11 +87,10 @@ const FOLDER_DOC_TYPES: Record<string, string[]> = {
 };
 
 const INITIAL_FOLDERS: Folder[] = [
-  { id: "drawings",  name: "Drawings",  description: "Architectural, Structural, MEP", Icon: Ruler,      color: "#2563EB", bg: "#EFF6FF", isBuiltin: true },
-  { id: "reports",   name: "Reports",   description: "Progress, Geo, Environmental",   Icon: FileText,   color: "#7C3AED", bg: "#F5F3FF", isBuiltin: true },
-  { id: "permits",   name: "Permits",   description: "Building, NOC, Safety",           Icon: ScrollText, color: "#0891B2", bg: "#ECFEFF", isBuiltin: true },
-  { id: "boqs",      name: "BOQs",      description: "Master, Civil, MEP, Structural",  Icon: BarChart2,  color: "#059669", bg: "#ECFDF5", isBuiltin: true },
-  { id: "schedules", name: "Schedules", description: "AI-generated schedule source docs", Icon: Archive, color: "#4F46E5", bg: "#EEF2FF", isBuiltin: true },
+  { id: "drawings", name: "Drawings", description: "Architectural, Structural, MEP", Icon: Ruler,      color: "#2563EB", bg: "#EFF6FF", isBuiltin: true },
+  { id: "reports",  name: "Reports",  description: "Progress, Geo, Environmental",   Icon: FileText,   color: "#7C3AED", bg: "#F5F3FF", isBuiltin: true },
+  { id: "permits",  name: "Permits",  description: "Building, NOC, Safety",           Icon: ScrollText, color: "#0891B2", bg: "#ECFEFF", isBuiltin: true },
+  { id: "boqs",     name: "BOQs",     description: "Master, Civil, MEP, Structural",  Icon: BarChart2,  color: "#059669", bg: "#ECFDF5", isBuiltin: true },
 ];
 
 const CUSTOM_FOLDER_PALETTE: Array<{ color: string; bg: string }> = [
@@ -189,9 +189,10 @@ function DocumentsPageContent() {
   const [activeFolderId, setActiveFolderId] = useState<string>(() => {
     if (!folderParam) return "drawings";
     const normalized = folderParam.toLowerCase();
-    if (normalized.startsWith("schedules")) return "schedules";
-    const known = ["drawings", "reports", "permits", "boqs", "schedules"];
-    return known.includes(normalized) ? normalized : "drawings";
+    const known = ["drawings", "reports", "permits", "boqs"];
+    if (known.includes(normalized)) return normalized;
+    if (/^schedule_v\d+$/i.test(normalized)) return normalized;
+    return "drawings";
   });
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: null, direction: "asc" });
@@ -244,10 +245,11 @@ function DocumentsPageContent() {
   useEffect(() => {
     if (real && activeProjectId && workspaceId) {
       fetchDocuments(activeProjectId, workspaceId).then(docs => {
-        setFiles(docs.map((d, i) => ({
+        const mapped = docs.map((d, i) => ({
           id: i + 1,
           folderId: (() => {
             const f = d.folder ?? "drawings";
+            if (/^schedule_v\d+$/i.test(f)) return f.toLowerCase();
             if (f.toLowerCase().startsWith("schedules")) return "schedules";
             return f;
           })(),
@@ -261,7 +263,36 @@ function DocumentsPageContent() {
           ver: "v1",
           url: d.fileUrl,
           backendId: d.id,
-        })));
+        }));
+        setFiles(mapped);
+
+        // Dynamically add schedule_v* folders from archived docs
+        const versionFolderIds = Array.from(
+          new Set(mapped.filter(f => /^schedule_v\d+$/.test(f.folderId)).map(f => f.folderId))
+        ).sort((a, b) => {
+          const na = parseInt(a.replace("schedule_v", ""));
+          const nb = parseInt(b.replace("schedule_v", ""));
+          return na - nb;
+        });
+        setFolders(prev => {
+          const existingIds = new Set(prev.map(f => f.id));
+          const newFolders: Folder[] = versionFolderIds
+            .filter(id => !existingIds.has(id))
+            .map(id => {
+              const vNum = id.replace("schedule_v", "");
+              return {
+                id,
+                name: `Schedule V${vNum} Docs`,
+                description: `Documents used for Schedule V${vNum}`,
+                Icon: Archive,
+                color: "#4F46E5",
+                bg: "#EEF2FF",
+                isBuiltin: false,
+                isReadOnly: true,
+              };
+            });
+          return newFolders.length > 0 ? [...prev, ...newFolders] : prev;
+        });
       }).catch(console.error);
     }
   }, [activeProjectId, workspaceId, real]);
@@ -409,13 +440,11 @@ function DocumentsPageContent() {
     setUploadError(null);
     try {
       const storagePath = await uploadFileToStorage(uploadFile, activeProjectId, workspaceId);
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-      const fileUrl = `${supabaseUrl}/storage/v1/object/documents/${storagePath}`;
       const saved = await registerDocument({
         workspaceId,
         projectId: activeProjectId,
         fileName: displayName,
-        fileUrl,
+        fileUrl: storagePath,   // store bare path; signed URLs generated on demand by backend
         fileType: uploadDocType,
         fileSize: uploadFile.size,
         folder: activeFolderId,
@@ -430,7 +459,6 @@ function DocumentsPageContent() {
           : `${Math.round(uploadFile.size / 1024)} KB`,
         uploadedBy: uploader,
         approvedBy: null, approvalStatus: "pending", ver: uploadFileVersion,
-        url: fileUrl,
       }, ...prev]);
       addAudit("uploaded", saved.fileName, activeFolderId, uploader, uploadFileVersion);
       resetUploadState();
@@ -451,8 +479,14 @@ function DocumentsPageContent() {
   const handleDelete = (id: number) => {
     const f = files.find(x => x.id === id);
     if (window.confirm("Delete this document?")) {
-      setFiles(files.filter(x => x.id !== id));
+      setFiles(prev => prev.filter(x => x.id !== id));
       if (f) addAudit("deleted", f.name, f.folderId, "Current User");
+      if (f?.backendId && workspaceId) {
+        deleteDocument(f.backendId, workspaceId).catch(() => {
+          // Revert on failure
+          setFiles(prev => [f, ...prev]);
+        });
+      }
     }
     setMenuOpenId(null);
   };
@@ -542,12 +576,14 @@ function DocumentsPageContent() {
             </span>
           )}
         </div>
+        {!activeFolder?.isReadOnly && (
         <button
           onClick={openUploadModal}
           className="bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg px-4 py-2 text-[12px] font-bold flex items-center gap-1.5 transition-colors"
         >
           <Plus size={13} /> Upload
         </button>
+        )}
       </div>
 
       {/* KPI strip */}
@@ -611,12 +647,18 @@ function DocumentsPageContent() {
                           {count}
                         </span>
                       )}
+                      {folder.isReadOnly ? (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#F1F5F9] text-[#94A3B8] uppercase tracking-wide">
+                          archived
+                        </span>
+                      ) : (
                       <button
                         onClick={e => { e.stopPropagation(); setFolderMenuOpenId(folderMenuOpenId === folder.id ? null : folder.id); setConfirmDeleteFolderId(null); }}
                         className="w-5 h-5 flex items-center justify-center rounded text-[#CBD5E1] hover:text-[#64748B] hover:bg-[#F1F5F9] transition-colors opacity-0 group-hover:opacity-100"
                       >
                         <MoreVertical size={11} />
                       </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1164,22 +1206,34 @@ function DocumentsPageContent() {
             {(() => {
               const f = files.find(x => x.id === menuOpenId);
               if (!f) return null;
+              const isArchived = activeFolder?.isReadOnly;
               return (
                 <>
+                  {!isArchived && (
                   <button onClick={() => { startEdit(f); setMenuOpenId(null); setMenuPos(null); }}
                     className="w-full text-left px-3 py-2 text-[13px] text-[#0F172A] hover:bg-[#F8FAFC] flex items-center gap-2">
                     <Pencil size={12} className="text-[#64748B]" /> Edit
                   </button>
-                  {f.url && (
-                    <button onClick={() => { window.open(f.url); setMenuOpenId(null); setMenuPos(null); }}
+                  )}
+                  {f.backendId && (
+                    <button onClick={async () => {
+                      setMenuOpenId(null); setMenuPos(null);
+                      if (!workspaceId) return;
+                      try {
+                        const url = await getDocumentDownloadUrl(f.backendId!, workspaceId);
+                        window.open(url);
+                      } catch { alert("Could not generate download link. Try again."); }
+                    }}
                       className="w-full text-left px-3 py-2 text-[13px] text-[#0F172A] hover:bg-[#F8FAFC] flex items-center gap-2">
                       <Download size={12} className="text-[#64748B]" /> Download
                     </button>
                   )}
+                  {!isArchived && (
                   <button onClick={() => { handleDelete(f.id); setMenuPos(null); }}
                     className="w-full text-left px-3 py-2 text-[13px] text-[#DC2626] hover:bg-[#FEF2F2] flex items-center gap-2">
                     <Trash2 size={12} /> Delete
                   </button>
+                  )}
                 </>
               );
             })()}
