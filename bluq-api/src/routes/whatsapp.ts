@@ -20,7 +20,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { whatsappQueue } from "../lib/queues.js";
 import { db } from "../db/client.js";
 import { whatsappUpdates, tasks, dprPhotos, projects } from "../db/schema.js";
-import { sendText, sendTemplate } from "../lib/whatsapp-send.js";
+import { sendTemplate } from "../lib/whatsapp-send.js";
 import { eq, and, desc } from "drizzle-orm";
 import { verifySession } from "../lib/verifySession.js";
 
@@ -244,7 +244,7 @@ export async function whatsappRoute(app: FastifyInstance) {
     const normalised = phone.replace(/^\+/, "");
 
     try {
-      await sendTemplate(normalised, "contractor_welcome", "en", [
+      await sendTemplate(normalised, "contractor_welcome_new", "en_US", [
         {
           type: "body",
           parameters: [

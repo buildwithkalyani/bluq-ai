@@ -51,15 +51,259 @@ const AREA_H = 28;
 const HEADER_H = 44;
 const SUB_ROW_H = 36;
 
-const PHASE_ORDER = ["Site Preparation", "Foundation", "Structure", "MEP", "Finishing", "Handover"];
+// Ordered list covering building + all infra project types.
+// Phases present in a schedule are filtered from this list at render time.
+const PHASE_ORDER = [
+  // Pre-construction (all types)
+  "Surveys & Investigations",
+  "Regulatory Approvals",
+  "Land Acquisition",
+  "Site Preparation",
+  "Earthworks",
+  "Civil & Earthworks",
+  // Tunnel underground works
+  "Portal Works",
+  "Tunnel Excavation",
+  "Primary Support",
+  "Waterproofing & Lining",
+  // Foundation / substructure
+  "Foundation",
+  "Foundation & Piling",
+  "Reclamation",
+  // Marine / offshore
+  "Marine Works",
+  "Marine Structures",
+  "Quay & Berth",
+  // Building structure
+  "Structure",
+  "Substructure",
+  "Superstructure",
+  // Rail / transit
+  "Viaduct",
+  "Rail Infrastructure",
+  "Rail Siding",
+  "Bridges & Culverts",
+  "Stations",
+  "Track Works",
+  "Signalling & Telecom",
+  "Traction & Power",
+  "Depot",
+  // Pavement / roads
+  "Runway & Taxiway",
+  "Pavement",
+  "Pavement & Yard",
+  "Yard & Pavement",
+  "Road Connectivity",
+  "Road / Rail Finishing",
+  // Storage & processing
+  "Storage Tanks",
+  "Pipeline & Piping",
+  "Civil Structures",
+  // Buildings & facilities
+  "Terminal Buildings",
+  "Terminal Building",
+  "Warehouse & Sheds",
+  "Warehousing & Sheds",
+  "Customs Facilities",
+  "Intermodal Yard",
+  // MEP & technical systems
+  "MEP & Safety",
+  "MEP",
+  "Mechanical Equipment",
+  "Piping & Valves",
+  "Fire & Safety Systems",
+  "Electrical & Instrumentation",
+  "Systems & E&M",
+  "Systems & Technology",
+  "Systems & Gate",
+  "ATC Facilities",
+  // Equipment
+  "Equipment Installation",
+  "Navigational Aids",
+  // Civil finishes & safety
+  "Structures",
+  "Deck & Finishes",
+  "Approaches",
+  "Drainage & Invert",
+  "Drainage",
+  "Perimeter & Security",
+  "Safety & Furniture",
+  "Toll & ITS",
+  "Utilities",
+  // Finishing & handover
+  "Finishing",
+  "Testing & Commissioning",
+  "Commissioning & Handover",
+  "Handover",
+];
+
+// Fixed accent colors per phase — shown as a left-edge color strip on group headers.
+// Building phases use neutral tones; infra phases use bolder, domain-specific colors.
+const PHASE_COLOR_MAP: Record<string, string> = {
+  // Pre-construction
+  "Surveys & Investigations":   "#64748B",
+  "Regulatory Approvals":       "#E11D48",
+  "Land Acquisition":           "#DC2626",
+  "Site Preparation":           "#64748B",
+  "Earthworks":                 "#B45309",
+  "Civil & Earthworks":         "#B45309",
+  // Tunnel
+  "Portal Works":               "#78716C",
+  "Tunnel Excavation":          "#92400E",
+  "Primary Support":            "#475569",
+  "Waterproofing & Lining":     "#4B5563",
+  // Foundation
+  "Foundation":                 "#78716C",
+  "Foundation & Piling":        "#78716C",
+  "Reclamation":                "#D97706",
+  // Marine
+  "Marine Works":               "#0369A1",
+  "Marine Structures":          "#0369A1",
+  "Quay & Berth":               "#0891B2",
+  // Structure
+  "Structure":                  "#2563EB",
+  "Substructure":               "#1D4ED8",
+  "Superstructure":             "#4338CA",
+  "Viaduct":                    "#6D28D9",
+  // Rail
+  "Rail Infrastructure":        "#334155",
+  "Rail Siding":                "#334155",
+  "Bridges & Culverts":         "#7C3AED",
+  "Stations":                   "#4338CA",
+  "Track Works":                "#1E293B",
+  "Signalling & Telecom":       "#6D28D9",
+  "Traction & Power":           "#F97316",
+  "Depot":                      "#4B5563",
+  // Runway / pavement / road
+  "Runway & Taxiway":           "#4338CA",
+  "Pavement":                   "#374151",
+  "Pavement & Yard":            "#374151",
+  "Yard & Pavement":            "#374151",
+  "Road Connectivity":          "#374151",
+  "Road / Rail Finishing":      "#374151",
+  // Storage
+  "Storage Tanks":              "#C2410C",
+  "Pipeline & Piping":          "#0F766E",
+  "Civil Structures":           "#1D4ED8",
+  // Buildings / facilities
+  "Terminal Buildings":         "#7C3AED",
+  "Terminal Building":          "#7C3AED",
+  "Warehouse & Sheds":          "#B45309",
+  "Warehousing & Sheds":        "#B45309",
+  "Customs Facilities":         "#DC2626",
+  "Intermodal Yard":            "#374151",
+  // MEP / systems
+  "MEP & Safety":               "#0F766E",
+  "MEP":                        "#0F766E",
+  "Mechanical Equipment":       "#C2410C",
+  "Piping & Valves":            "#0F766E",
+  "Fire & Safety Systems":      "#B91C1C",
+  "Electrical & Instrumentation":"#6D28D9",
+  "Systems & E&M":              "#6D28D9",
+  "Systems & Technology":       "#6D28D9",
+  "Systems & Gate":             "#059669",
+  "ATC Facilities":             "#6D28D9",
+  // Equipment
+  "Equipment Installation":     "#C2410C",
+  "Navigational Aids":          "#2563EB",
+  // Civil finishes
+  "Structures":                 "#1D4ED8",
+  "Deck & Finishes":            "#7C3AED",
+  "Approaches":                 "#475569",
+  "Drainage & Invert":          "#0891B2",
+  "Drainage":                   "#0891B2",
+  "Perimeter & Security":       "#475569",
+  "Safety & Furniture":         "#CA8A04",
+  "Toll & ITS":                 "#059669",
+  "Utilities":                  "#0891B2",
+  // Finishing / handover
+  "Finishing":                  "#7C3AED",
+  "Testing & Commissioning":    "#059669",
+  "Commissioning & Handover":   "#059669",
+  "Handover":                   "#059669",
+};
+
+const DEFAULT_PHASE_COLOR = "#94A3B8";
 
 const PHASE_KEYWORDS: [string, string[]][] = [
+  // Building phases
   ["Site Preparation", ["site survey","demarcation","layout","site clearing","clearing","grubbing","excavation","earthwork","dewatering","temporary fencing","temporary office","site office","mobilisation","mobilization","hoarding"]],
-  ["Foundation", ["pile","piling","bored pile","driven pile","footing","foundation","raft","plinth","grade beam","pile cap","underpinning","anti-termite","damp proof"]],
-  ["Structure", ["column","beam","slab","rcc","rc ","reinforced concrete","reinforcement","rebar","formwork","shuttering","shutter","centering","concrete","casting","concreting","pour","structural wall","core wall","shear wall","lift core","staircase","stair","lintel","sunshade","parapet"]],
-  ["MEP", ["plumbing","sanitary","drainage","sewage","water supply","fire fighting","fire sprinkler","electrical","wiring","conduit","cable","switchboard","panel","mep","hvac","air conditioning","duct","ductwork","ventilation","elevator","lift installation","escalator","bms"]],
-  ["Finishing", ["plaster","plastering","render","paint","painting","putty","tile","tiling","flooring","marble","granite","vitrified","false ceiling","gypsum","drywall","partition","interior","waterproof","waterproofing","cladding","facade","glazing","aluminium","aluminum","window","door","carpentry","woodwork","cabinet","railing","handrail","landscaping","finishing"]],
-  ["Handover", ["handover","commissioning","testing","snag","snagging","defect","punch list","inspection","noc","certificate","completion","final inspection","trial run"]],
+  ["Foundation", ["bored pile","driven pile","footing","foundation","raft","plinth","grade beam","pile cap","underpinning","anti-termite","damp proof"]],
+  ["Structure", ["column","beam","slab","rcc","rc ","reinforced concrete","reinforcement","rebar","formwork","shuttering","centering","casting","concreting","structural wall","core wall","shear wall","lift core","staircase","lintel","sunshade","parapet"]],
+  ["MEP", ["plumbing","sanitary","water supply","fire fighting","fire sprinkler","electrical","wiring","conduit","switchboard","panel","mep","hvac","air conditioning","duct","ductwork","ventilation","elevator","lift installation","escalator","bms"]],
+  ["Finishing", ["plaster","plastering","render","paint","putty","tile","tiling","flooring","marble","granite","vitrified","false ceiling","gypsum","drywall","partition","interior","waterproof","waterproofing","cladding","facade","glazing","aluminium","aluminum","window","door","carpentry","woodwork","cabinet","railing","handrail","landscaping","finishing"]],
+  ["Handover", ["snag","snagging","defect","punch list","punch","completion"]],
+  // Infra — pre-construction
+  ["Surveys & Investigations", ["survey","hydrographic","bathymetric","geotechnical","investigation","eia","environmental impact","soil test","bore log"]],
+  ["Regulatory Approvals", ["peso","pngrb","oisd","cbic","gazette","licence","approval","hazop","feed","dpr","detailed project report","noc","clearance"]],
+  ["Land Acquisition", ["land acquisition","larr","land award","land possession","revenue","compensation","resettlement","r&r","sarfaesi","demarcation"]],
+  ["Earthworks", ["earthwork","earthfill","embankment","cut and fill","grading","subgrade","compaction","lime treatment"]],
+  ["Civil & Earthworks", ["earthwork","earthfill","embankment","compaction","grading"]],
+  // Marine
+  ["Marine Works", ["dredg","breakwater","quay","berth","marine","cofferdam","reclamation","piling marine","wharf"]],
+  ["Marine Structures", ["jetty","trestle","dolphin","mooring","fender","berthing","offshore pile","marine pile"]],
+  ["Quay & Berth", ["quay","berth","copng","fender","bollard"]],
+  // Structure / infra structure
+  ["Foundation & Piling", ["pile","piling","well foundation","caisson","pile cap"]],
+  ["Substructure", ["pier","abutment","substructure","pier cap","well cap"]],
+  ["Superstructure", ["girder","span","deck","launching","erection","balanced cantilever","cable stayed","truss","steel superstructure"]],
+  ["Viaduct", ["viaduct","elevated","precast segmental","u-girder","box girder elevated"]],
+  // Rail / transit
+  ["Rail Infrastructure", ["rail track","railway track","rail siding","rail link","mor","last mile rail","ballast","sleeper","fish plate"]],
+  ["Rail Siding", ["rail siding","siding","wagon","locomotive","track yard"]],
+  ["Bridges & Culverts", ["minor bridge","major bridge","culvert","rob","rub","road over bridge","road under bridge","viaduct rail","railway bridge","psc girder","steel truss bridge","well foundation railway"]],
+  ["Stations", ["station","station box","concourse","platform","cut and cover station","station building","passenger amenity","pab","fob","foot over bridge"]],
+  ["Track Works", ["track laying","track alignment","traction","third rail","overhead catenary","ohe","ballast laying","psc sleeper","lwr","long welded rail","flash butt","thermit weld","tamping","dtm","track geometry"]],
+  ["Signalling & Telecom", ["electronic interlocking","ei installation","relay interlocking","colour light signal","axle counter","track circuit","abs","automatic block","ofc","optical fibre","telecom","rdso signal","signal commissioning"]],
+  ["Traction & Power", ["ohe mast","ohe wiring","catenary","contact wire","traction substation","tss","switching station","25kv","overhead electrification","cea clearance","electric traction"]],
+  ["Depot", ["depot","rolling stock","stabling","maintenance shed","loco shed","running room","crew lobby"]],
+  // Runway / road
+  ["Runway & Taxiway", ["runway","taxiway","apron","pcn","pavement classification","runway marking","tora","toda"]],
+  ["Pavement", ["pavement","bm layer","dbm","bituminous","gsb","wbm","granular sub base","pqc","dry lean concrete","dlc","road surface"]],
+  ["Pavement & Yard", ["pavement","yard paving","concrete pavement","pcc","rigid pavement","yard surface"]],
+  ["Road Connectivity", ["road","approach road","internal road","rcc road","flexibility pavement","road widening"]],
+  // Storage / processing
+  ["Storage Tanks", ["storage tank","ast","api 650","floating roof","fixed roof","bullet","sphere","mounded","tank farm","bund wall","dyke"]],
+  ["Pipeline & Piping", ["pipeline","piping","manifold","loading arm","submarine pipe","underground pipe","vapor recovery","vru","fire line","header"]],
+  ["Civil Structures", ["clarifier","sedimentation","filtration","flocculation","aeration tank","sump","pump house","civil structure"]],
+  // Facilities
+  ["Terminal Buildings", ["terminal building","cfs building","transit shed","admin block","terminal","cargo shed"]],
+  ["Terminal Building", ["terminal building","passenger terminal","terminal","airport terminal"]],
+  ["Warehouse & Sheds", ["warehouse","shed","peb","pre-engineered","cold storage","reefer","godown"]],
+  ["Warehousing & Sheds", ["warehouse","transit shed","cfs","container freight","customs shed","examination shed"]],
+  ["Customs Facilities", ["customs","examination","x-ray","scanner","cbic","bonded","icegate"]],
+  ["Intermodal Yard", ["container yard","cy","stacking","rtg","rmg","reach stacker","fork lift","intermodal"]],
+  // MEP / systems
+  ["Mechanical Equipment", ["pump","compressor","blower","aeration","diffuser","membrane","mbr","filter media","mechanical equipment","vaporiser","loading arm install"]],
+  ["Piping & Valves", ["piping","valves","gate valve","butterfly valve","pipe laying","flanged joint","pressure test"]],
+  ["Fire & Safety Systems", ["firewater","foam","fire ring main","fds","gas detection","esd","emergency shutdown","safety valve","fire suppression"]],
+  ["Electrical & Instrumentation", ["scada","instrumentation","plc","dcs","cable tray","earthing","bonding","hazardous area","atex","metering","flow meter","custody transfer"]],
+  ["Systems & E&M", ["signaling","cbtc","traction power","overhead equipment","signalling","trackside","communication system metro"]],
+  ["Systems & Technology", ["tos","wms","tms","erp","software","gate management","rfid","weighbridge"]],
+  ["Systems & Gate", ["gate","rfid gate","boom barrier","weigh bridge","truck","tms","tos","icegate integration"]],
+  ["ATC Facilities", ["atc","air traffic control","ils","instrument landing","dvor","ndb","approach lighting","papi","reil","vhf","radar"]],
+  // Equipment
+  ["Equipment Installation", ["sts crane","rtg install","rmg install","reach stacker","forklift","gantry crane","hoist","material handling","equipment erection"]],
+  ["Navigational Aids", ["navigational aid","aids to navigation","aton","buoy","lighthouse","channel marker","vts","vessel traffic"]],
+  // Tunnel
+  ["Portal Works", ["portal","portal face","portal headwall","approach cutting","wingwall","adit","launch shaft","tbm launch"]],
+  ["Tunnel Excavation", ["tunnel excavation","natm","drill blast","drill and blast","tbm","tunnel boring","cut and cover","face advance","mucking","spoil disposal","geological mapping","probe drilling","cross-passage"]],
+  ["Primary Support", ["rock bolt","shotcrete","steel rib","lattice girder","primary support","h-frame","instrumentation convergence","extensometer","geotechnical monitoring"]],
+  ["Waterproofing & Lining", ["waterproof membrane","hdpe membrane","drainage fleece","secondary lining","cast in situ lining","travelling formwork","contact grouting","pressure tunnel","steel liner"]],
+  ["Drainage & Invert", ["invert concrete","invert slab","side drainage channel","sump","dewatering pump","penstock","surge shaft"]],
+  ["MEP & Safety", ["jet fan","ventilation shaft","tunnel lighting","led luminaire","fire detection","deluge","water mist","scada tunnel","tms","sos telephone","pa system","cctv tunnel","electrification tunnel","ohe tunnel","hydromechanical"]],
+  ["Road / Rail Finishing", ["carriageway pavement","anti-skid","road marking tunnel","signage tunnel","track laying tunnel","ballasted track tunnel","slab track tunnel","tunnel finishing"]],
+  // Infra finishes / handover
+  ["Deck & Finishes", ["deck slab","wearing coat","waterproofing deck","expansion joint","crash barrier","approach slab"]],
+  ["Approaches", ["approach road","approach embankment","approach viaduct","ramp"]],
+  ["Drainage", ["drainage","storm water","culvert","cross drain","side drain","box drain","soakage pit"]],
+  ["Perimeter & Security", ["perimeter wall","boundary wall","fencing","cctv","access control","security","boom gate","perimeter"]],
+  ["Safety & Furniture", ["guard rail","crash barrier","road marking","signage","signboard","delineator","rumble strip","road furniture"]],
+  ["Toll & ITS", ["toll","fas tag","its","variable message","electronic toll","plaza","toll gantry"]],
+  ["Utilities", ["utility","power supply","hv line","transformer","substation","water supply","overhead tank","stp on site","sewage"]],
+  // Commissioning
+  ["Testing & Commissioning", ["testing","commissioning","trial run","trial","functional test","integration test","cmrs","dgca","oisd audit","peso final","crs inspection","morth safety audit","hydraulic pressure test","fire noc tunnel","emergency response drill"]],
+  ["Commissioning & Handover", ["commissioning","handover","certificate","completion","noc","final inspection","handover","punch list","first product","first train","first flight","tunnel readiness certificate","operational handover"]],
 ];
 
 function detectPhase(name: string): string {
@@ -726,7 +970,36 @@ function TaskDetailPanel({ task, deps, tasks, onClose, onEditClick, onDelete, cr
   );
 }
 
-const PHASE_OPTIONS = ["Site Preparation","Foundation","Structure","MEP","Finishing","Handover"];
+const PHASE_OPTIONS = [
+  // Building
+  "Site Preparation","Foundation","Structure","MEP","Finishing","Handover",
+  // Common infra
+  "Surveys & Investigations","Regulatory Approvals","Land Acquisition","Earthworks","Civil & Earthworks",
+  // Marine / port / LCT
+  "Marine Works","Marine Structures","Quay & Berth","Reclamation",
+  "Storage Tanks","Pipeline & Piping","Fire & Safety Systems",
+  "Terminal Buildings","Equipment Installation","Navigational Aids",
+  // Airport
+  "Runway & Taxiway","Terminal Building","ATC Facilities","Perimeter & Security",
+  // Highway / bridge
+  "Foundation & Piling","Substructure","Superstructure","Deck & Finishes",
+  "Approaches","Pavement","Road Connectivity","Structures","Drainage","Safety & Furniture","Toll & ITS",
+  // Metro
+  "Viaduct","Stations","Track Works","Depot","Systems & E&M",
+  // Mainline Railway
+  "Bridges & Culverts","Signalling & Telecom","Traction & Power",
+  // MMLP / ICD
+  "Rail Infrastructure","Rail Siding","Warehouse & Sheds","Warehousing & Sheds",
+  "Customs Facilities","Intermodal Yard","Pavement & Yard","Yard & Pavement",
+  "Systems & Technology","Systems & Gate",
+  // WTP
+  "Civil Structures","Mechanical Equipment","Piping & Valves","Electrical & Instrumentation",
+  // Tunnel
+  "Portal Works","Tunnel Excavation","Primary Support","Waterproofing & Lining",
+  "Drainage & Invert","MEP & Safety","Road / Rail Finishing",
+  // Cross-type
+  "Utilities","Testing & Commissioning","Commissioning & Handover",
+];
 
 function DonutRing({ pct, size = 20, color = "#2563EB" }: { pct: number; size?: number; color?: string }) {
   const r = (size - 4) / 2;
@@ -1184,8 +1457,8 @@ function GanttChartContent() {
   // Slip detection drives the reoptimize banner
   const slipSummary = useMemo(() => detectSlip(tasks.filter(t => !t.parentTaskId)), [tasks]);
 
-  // Filter
-  const filteredTasks = tasks.filter((t) => {
+  // Filter — memoized so downstream useMemos don't re-run on every render
+  const filteredTasks = useMemo(() => tasks.filter((t) => {
     if (t.milestone) return false;
     if (!t.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
     if (filterContractor !== "All" && t.contractor !== filterContractor) return false;
@@ -1199,7 +1472,7 @@ function GanttChartContent() {
       }
     }
     return true;
-  });
+  }), [tasks, searchTerm, filterContractor, filterSpace, filterStatus]);
 
   const { chartStart, totalDays } = useMemo(() => {
     if (filteredTasks.length === 0) {
@@ -1225,6 +1498,13 @@ function GanttChartContent() {
   }, [filteredTasks, deps, showCriticalPath]);
 
   const groupedData = useMemo(() => {
+    const childrenOf = new Map<string, ScheduleTask[]>();
+    filteredTasks.forEach(t => {
+      if (t.parentTaskId) {
+        const arr = childrenOf.get(t.parentTaskId);
+        if (arr) arr.push(t); else childrenOf.set(t.parentTaskId, [t]);
+      }
+    });
     const phaseMap: Record<string, Record<string, ScheduleTask[]>> = {};
     filteredTasks.filter(t => !t.parentTaskId).forEach((t) => {
       const phase = t.phase || "Other";
@@ -1232,7 +1512,7 @@ function GanttChartContent() {
       if (!phaseMap[phase]) phaseMap[phase] = {};
       if (!phaseMap[phase][area]) phaseMap[phase][area] = [];
       phaseMap[phase][area].push(t);
-      filteredTasks.filter(s => s.parentTaskId === t.id).forEach(s => phaseMap[phase][area].push(s));
+      (childrenOf.get(t.id) ?? []).forEach(s => phaseMap[phase][area].push(s));
     });
     const toEntry = (phaseKey: string): [string, [string, ScheduleTask[]][]] =>
       [phaseKey, Object.entries(phaseMap[phaseKey])];
@@ -1846,7 +2126,8 @@ const handleSaveModal = (data: any, newPreds: any) => {
                 return (
                   <div key={`col-${phase}`}>
                     <div className="flex items-center border-b bg-[#F8FAFC] cursor-pointer hover:bg-[#F1F5F9] transition-colors" style={{ height: GROUP_H }} onClick={() => togglePhase(phase)}>
-                      <div className="flex items-center gap-1.5 min-w-0 flex-1 pl-3 h-full">
+                      <div className="w-[3px] shrink-0 h-full" style={{ background: PHASE_COLOR_MAP[phase] ?? DEFAULT_PHASE_COLOR }} />
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1 pl-2 h-full">
                         <span className="text-[10px] text-[#94A3B8] shrink-0">{collapsed ? "▶" : "▼"}</span>
                         <span className="text-[14px] font-semibold text-[#1E293B] truncate">{phase}</span>
                       </div>
@@ -1966,6 +2247,7 @@ const handleSaveModal = (data: any, newPreds: any) => {
                 const phaseTasks = areas.flatMap(([, ts]) => ts);
                 const phaseSpan = spanOf(phaseTasks);
                 const phaseColor = rollupColor(phaseTasks);
+                const phaseAccent = PHASE_COLOR_MAP[phase] ?? DEFAULT_PHASE_COLOR;
                 const phaseLeftPx  = phaseSpan ? diffDays(chartStart, phaseSpan.start) * pixelsPerDay : 0;
                 const phaseWidthPx = phaseSpan ? Math.max(4, diffDays(phaseSpan.start, phaseSpan.end) * pixelsPerDay) : 0;
                 const phaseHasCritical = phaseTasks.some(t => criticalPathTasks.has(t.id));
@@ -1976,18 +2258,18 @@ const handleSaveModal = (data: any, newPreds: any) => {
                       {phaseSpan && (
                         <div className="absolute transition-opacity"
                           style={{ top: 8, left: phaseLeftPx, width: phaseWidthPx, height: GROUP_H - 16, opacity: phaseBarOpacity }}>
-                          <div className="absolute inset-0 rounded overflow-hidden" style={{ background: `${phaseColor}20`, border: `1.5px solid ${phaseColor}` }}>
+                          <div className="absolute inset-0 rounded overflow-hidden" style={{ background: `${phaseAccent}18`, border: `1.5px solid ${phaseAccent}` }}>
                             <div className="absolute left-0 top-0 bottom-0 rounded-l" style={{ width: `${phaseSpan.avg}%`, background: phaseColor }} />
                             {phaseWidthPx >= 40 && (
                               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                                 <span className="text-[10px] font-bold whitespace-nowrap px-1"
-                                  style={{ color: phaseSpan.avg >= 50 ? "white" : phaseColor, textShadow: phaseSpan.avg >= 50 ? "0 1px 4px rgba(0,0,0,0.6)" : "none" }}>{phaseSpan.avg}%</span>
+                                  style={{ color: phaseSpan.avg >= 50 ? "white" : phaseAccent, textShadow: phaseSpan.avg >= 50 ? "0 1px 4px rgba(0,0,0,0.6)" : "none" }}>{phaseSpan.avg}%</span>
                               </div>
                             )}
                           </div>
                           {phaseWidthPx < 40 && (
                             <span className="absolute top-1/2 -translate-y-1/2 text-[10px] font-bold pointer-events-none whitespace-nowrap"
-                              style={{ left: phaseWidthPx + 4, color: phaseColor }}>{phaseSpan.avg}%</span>
+                              style={{ left: phaseWidthPx + 4, color: phaseAccent }}>{phaseSpan.avg}%</span>
                           )}
                         </div>
                       )}

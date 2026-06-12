@@ -326,13 +326,13 @@ async function handleEodPhotosAsk(state: WaState): Promise<void> {
   await setState(state);
 }
 
-async function handleEodComplete(state: WaState, waUpdateId: string | null): Promise<void> {
+async function handleEodComplete(state: WaState, waUpdateId: string | null): Promise<string | null> {
   const text = `✅ Sab note ho gaya. Acha kaam kiya! Kal milte hain. 🙏`;
   await sendText(state.phone, text);
   state.flowPhase = "complete";
   await setState(state);
 
-  await writeEodToDb(state, waUpdateId);
+  return writeEodToDb(state, waUpdateId);
 }
 
 // ---------------------------------------------------------------------------
@@ -362,7 +362,7 @@ function parseLabourCount(workers: string | undefined): number | null {
   return nums.reduce((sum, n) => sum + parseInt(n, 10), 0);
 }
 
-async function writeEodToDb(state: WaState, waUpdateId: string | null): Promise<void> {
+async function writeEodToDb(state: WaState, waUpdateId: string | null): Promise<string | null> {
   const today = new Date().toISOString().split("T")[0];
   const { completionStatus, completedQuantity, workers, materials, issueDesc } =
     state.eodData;
@@ -420,8 +420,8 @@ async function writeEodToDb(state: WaState, waUpdateId: string | null): Promise<
       ? "Work not started today"
       : materialSummary ?? `${pct}% complete`;
 
-  // Insert DPR
-  await db.insert(dprs).values({
+  // Insert DPR — return id so photo can be linked
+  const [dprRow] = await db.insert(dprs).values({
     workspaceId: state.workspaceId,
     projectId: state.projectId,
     taskId: state.taskId,
@@ -435,11 +435,12 @@ async function writeEodToDb(state: WaState, waUpdateId: string | null): Promise<
     delayDays: completionStatus === "not_started" ? 1 : null,
     source: "whatsapp",
     whatsappUpdateId: waUpdateId ?? undefined,
-  });
+  }).returning({ id: dprs.id });
 
   console.log(
     `[whatsapp-worker] EOD saved — task ${state.taskId}: ${pct}% → ${newStatus}`
   );
+  return dprRow?.id ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -718,16 +719,15 @@ async function processMessage(job: Job<WhatsappJobData>): Promise<void> {
       if (messageText === "skip_photos" || messageType === "image") {
         state.eodData.photos = messageType === "image";
         await setState(state);
-        // Save EOD data to DB first, then handle photo
-        await handleEodComplete(state, waUpdateId);
-        // Download and save the photo if one was sent
+        // Save EOD data to DB first, then link photo to the returned DPR id
+        const savedDprId = await handleEodComplete(state, waUpdateId);
         if (messageType === "image" && mediaId) {
           await downloadAndSavePhoto({
             mediaId,
             mediaMimeType: mediaMimeType ?? "image/jpeg",
             workspaceId: state.workspaceId,
             projectId: state.projectId,
-            dprId: null,  // DPR just created — linked via projectId
+            dprId: savedDprId,
           });
         }
       } else {
@@ -940,6 +940,33 @@ export async function triggerMorningPrompt(
     taskTitle,
     area,
     contractor,
+    flowPhase: "idle",
+    eodData: {},
+    lastUpdated: new Date().toISOString(),
+  };
+  await setState(state);
+  await sendMorningPrompt(state);
+}
+
+/**
+ * Send morning prompt to a project contractor (stored in settingsJson, not a system user).
+ * Sets minimal state so the reply flow works correctly.
+ */
+export async function triggerContractorMorningPrompt(
+  phone: string,
+  workspaceId: string,
+  projectId: string,
+  trade: string | null,
+): Promise<void> {
+  const state: WaState = {
+    phone,
+    userId: "",
+    workspaceId,
+    projectId,
+    taskId: "",
+    taskTitle: trade ?? "Site work",
+    area: null,
+    contractor: trade,
     flowPhase: "idle",
     eodData: {},
     lastUpdated: new Date().toISOString(),

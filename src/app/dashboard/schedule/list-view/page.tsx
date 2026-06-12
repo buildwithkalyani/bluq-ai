@@ -14,7 +14,44 @@ import { Card, StatusBadge, Btn } from "@/components/ui/bluq-ui";
 import { fetchTasks, fetchProject, isRealProject, createTask, updateTask, deleteTask } from "@/lib/api-client";
 import { useWorkspace } from "@/context/workspace";
 
-const PHASE_ORDER = ["Site Preparation", "Foundation", "Structure", "MEP", "Finishing", "Handover"];
+const PHASE_ORDER = [
+  "Surveys & Investigations","Regulatory Approvals","Land Acquisition","Site Preparation","Earthworks","Civil & Earthworks",
+  "Portal Works","Tunnel Excavation","Primary Support","Waterproofing & Lining",
+  "Foundation","Foundation & Piling","Reclamation",
+  "Marine Works","Marine Structures","Quay & Berth",
+  "Structure","Substructure","Superstructure","Viaduct",
+  "Rail Infrastructure","Rail Siding","Bridges & Culverts","Stations","Track Works","Signalling & Telecom","Traction & Power","Depot",
+  "Runway & Taxiway","Pavement","Pavement & Yard","Yard & Pavement","Road Connectivity","Road / Rail Finishing",
+  "Storage Tanks","Pipeline & Piping","Civil Structures",
+  "Terminal Buildings","Terminal Building","Warehouse & Sheds","Warehousing & Sheds","Customs Facilities","Intermodal Yard",
+  "MEP & Safety","MEP","Mechanical Equipment","Piping & Valves","Fire & Safety Systems","Electrical & Instrumentation",
+  "Systems & E&M","Systems & Technology","Systems & Gate","ATC Facilities",
+  "Equipment Installation","Navigational Aids",
+  "Structures","Deck & Finishes","Approaches","Drainage & Invert","Drainage","Perimeter & Security","Safety & Furniture","Toll & ITS","Utilities",
+  "Finishing","Testing & Commissioning","Commissioning & Handover","Handover",
+];
+
+const PHASE_COLOR_MAP: Record<string, string> = {
+  "Surveys & Investigations":"#64748B","Regulatory Approvals":"#E11D48","Land Acquisition":"#DC2626","Site Preparation":"#64748B",
+  "Earthworks":"#B45309","Civil & Earthworks":"#B45309",
+  "Portal Works":"#78716C","Tunnel Excavation":"#92400E","Primary Support":"#475569","Waterproofing & Lining":"#4B5563",
+  "Foundation":"#78716C","Foundation & Piling":"#78716C","Reclamation":"#D97706",
+  "Marine Works":"#0369A1","Marine Structures":"#0369A1","Quay & Berth":"#0891B2",
+  "Structure":"#2563EB","Substructure":"#1D4ED8","Superstructure":"#4338CA","Viaduct":"#6D28D9",
+  "Rail Infrastructure":"#334155","Rail Siding":"#334155","Bridges & Culverts":"#7C3AED","Stations":"#4338CA","Track Works":"#1E293B","Signalling & Telecom":"#6D28D9","Traction & Power":"#F97316","Depot":"#4B5563",
+  "Runway & Taxiway":"#4338CA","Pavement":"#374151","Pavement & Yard":"#374151","Yard & Pavement":"#374151","Road Connectivity":"#374151","Road / Rail Finishing":"#374151",
+  "Storage Tanks":"#C2410C","Pipeline & Piping":"#0F766E","Civil Structures":"#1D4ED8",
+  "Terminal Buildings":"#7C3AED","Terminal Building":"#7C3AED",
+  "Warehouse & Sheds":"#B45309","Warehousing & Sheds":"#B45309","Customs Facilities":"#DC2626","Intermodal Yard":"#374151",
+  "MEP & Safety":"#0F766E","MEP":"#0F766E","Mechanical Equipment":"#C2410C","Piping & Valves":"#0F766E",
+  "Fire & Safety Systems":"#B91C1C","Electrical & Instrumentation":"#6D28D9",
+  "Systems & E&M":"#6D28D9","Systems & Technology":"#6D28D9","Systems & Gate":"#059669","ATC Facilities":"#6D28D9",
+  "Equipment Installation":"#C2410C","Navigational Aids":"#2563EB",
+  "Structures":"#1D4ED8","Deck & Finishes":"#7C3AED","Approaches":"#475569",
+  "Drainage & Invert":"#0891B2","Drainage":"#0891B2","Perimeter & Security":"#475569","Safety & Furniture":"#CA8A04","Toll & ITS":"#059669","Utilities":"#0891B2",
+  "Finishing":"#7C3AED","Testing & Commissioning":"#059669","Commissioning & Handover":"#059669","Handover":"#059669",
+};
+const DEFAULT_PHASE_COLOR = "#94A3B8";
 type StatusKey = keyof typeof STATUS_CONFIG;
 type StatusFilter = StatusKey | "All";
 
@@ -360,20 +397,25 @@ function ListViewPageContent() {
                   <tr
                     className="bg-[#F1F5F9] border-b border-[#E2E8F0] cursor-pointer hover:bg-[#e8eaed] transition-colors"
                     onClick={() => togglePhase(phase)}>
-                    <td className="px-4 py-2 text-[10px] text-[#94A3B8]">
-                      {phaseCollapsed ? "▶" : "▼"}
+                    <td className="py-2 text-[10px] text-[#94A3B8]" style={{ paddingLeft: 0 }}>
+                      <div className="flex items-center h-full gap-2">
+                        <div className="w-[3px] self-stretch rounded-r" style={{ background: PHASE_COLOR_MAP[phase] ?? DEFAULT_PHASE_COLOR, minHeight: 28 }} />
+                        <span>{phaseCollapsed ? "▶" : "▼"}</span>
+                      </div>
                     </td>
                     <td colSpan={5} className="px-4 py-2 font-semibold text-[#0F172A] text-[13px]">
                       {phase}
                       <span className="text-[#94A3B8] font-normal ml-2 text-[11px]">— {avg}% avg</span>
                     </td>
                     <td className="px-4 py-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-20 h-1.5 bg-[#E2E8F0] rounded-full overflow-hidden">
-                          <div className="h-full rounded-full bg-[#2563EB]" style={{ width: `${avg}%` }} />
+                      {(() => { const c = PHASE_COLOR_MAP[phase] ?? DEFAULT_PHASE_COLOR; return (
+                        <div className="flex items-center gap-2">
+                          <div className="w-20 h-1.5 bg-[#E2E8F0] rounded-full overflow-hidden">
+                            <div className="h-full rounded-full" style={{ width: `${avg}%`, background: c }} />
+                          </div>
+                          <span className="text-[10px] font-bold tabular-nums" style={{ color: c }}>{avg}%</span>
                         </div>
-                        <span className="text-[10px] font-bold text-[#2563EB] tabular-nums">{avg}%</span>
-                      </div>
+                      ); })()}
                     </td>
                     <td colSpan={2} />
                   </tr>
@@ -640,7 +682,7 @@ function ListViewPageContent() {
                   <select value={newTask.phase} onChange={e => setNewTask({ ...newTask, phase: e.target.value })}
                     className="w-full bg-white border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#2563EB]">
                     <option value="">Select phase…</option>
-                    {["Site Preparation","Foundation","Structure","MEP","Finishing","Handover"].map(p =>
+                    {PHASE_ORDER.map(p =>
                       <option key={p} value={p}>{p}</option>)}
                   </select>
                 </div>
