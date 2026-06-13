@@ -841,10 +841,11 @@ function RealImport({
     if (!incoming) return;
     const valid = Array.from(incoming).filter(f => ALLOWED_EXTS.has(fileExt(f.name)));
     if (!valid.length) return;
-    setFiles(prev => [
-      ...prev,
-      ...valid.map(f => ({ file: f, status: "pending" as const, progress: 0, docCategory: category })),
-    ]);
+    setFiles(prev => {
+      const existingNames = new Set(prev.map(f => f.file.name));
+      const deduped = valid.filter(f => !existingNames.has(f.name));
+      return [...prev, ...deduped.map(f => ({ file: f, status: "pending" as const, progress: 0, docCategory: category }))];
+    });
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -865,6 +866,12 @@ function RealImport({
     for (let i = 0; i < files.length; i++) {
       const entry = files[i];
       if (entry.status !== "pending") continue;
+
+      // Skip if same filename already exists in this project — prevents double-upload
+      if (existingDocs.some(d => d.fileName === entry.file.name)) {
+        setFiles(prev => prev.map((f, idx) => idx === i ? { ...f, status: "done", progress: 100 } : f));
+        continue;
+      }
 
       setFiles(prev => prev.map((f, idx) => idx === i ? { ...f, status: "uploading", progress: 0 } : f));
 
