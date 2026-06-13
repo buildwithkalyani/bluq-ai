@@ -737,13 +737,14 @@ function RealImport({
     }
 
     const savedJobRaw = localStorage.getItem(`${SCHEDULE_JOB_PREFIX}${projectId}`);
+    let savedJobId: string | null = null;
     if (savedJobRaw) {
       try {
         const parsed = JSON.parse(savedJobRaw);
         const tooOld = parsed?.startedAt && (Date.now() - parsed.startedAt > 2 * 60 * 60 * 1000);
         if (tooOld) localStorage.removeItem(`${SCHEDULE_JOB_PREFIX}${projectId}`);
-        else setStep("generating");
-      } catch { setStep("generating"); } // old plain-string format
+        else { savedJobId = parsed?.jobId ?? savedJobRaw; setStep("generating"); }
+      } catch { savedJobId = savedJobRaw; setStep("generating"); } // old plain-string format
     }
 
     // Show cached docs instantly so previously uploaded files appear immediately
