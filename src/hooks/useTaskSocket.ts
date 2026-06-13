@@ -85,11 +85,11 @@ interface UseTaskSocketOptions {
 export function useTaskSocket({ projectId, workspaceId, setTasks, onScheduleGenerated }: UseTaskSocketOptions): void {
   const socketRef = useRef<Socket | null>(null);
   const { data: session } = authClient.useSession();
+  const token = (session as any)?.session?.token as string | undefined;
 
   useEffect(() => {
     // Guard: need a valid UUID project ID and an authenticated session
     if (!projectId || !UUID_REGEX.test(projectId)) return;
-    const token = (session as any)?.session?.token;
     if (!token) return;
 
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
@@ -157,5 +157,5 @@ export function useTaskSocket({ projectId, workspaceId, setTasks, onScheduleGene
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [projectId, workspaceId, session, setTasks, onScheduleGenerated]);
+  }, [projectId, workspaceId, token, setTasks, onScheduleGenerated]);
 }

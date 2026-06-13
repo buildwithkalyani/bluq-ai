@@ -31,12 +31,14 @@ import { uploadFileToStorage } from "@/lib/supabase-storage";
 function readDocsCache(projectId: string): BackendDocument[] | null {
   try {
     const raw = localStorage.getItem(`bluq_docs_${projectId}`);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : (parsed?.docs ?? null);
   } catch { return null; }
 }
 function writeDocsCache(projectId: string, docs: BackendDocument[]): void {
   try {
-    localStorage.setItem(`bluq_docs_${projectId}`, JSON.stringify(docs));
+    localStorage.setItem(`bluq_docs_${projectId}`, JSON.stringify({ docs, savedAt: Date.now() }));
   } catch {}
 }
 
@@ -726,14 +728,24 @@ function RealImport({
     const savedResult = localStorage.getItem(`${SCHEDULE_RESULT_PREFIX}${projectId}`);
     if (savedResult) {
       try {
-        setGenResult(JSON.parse(savedResult));
+        const parsed = JSON.parse(savedResult);
+        // handle both old format (raw result) and new format ({ result, savedAt })
+        setGenResult(parsed?.result ?? parsed);
         setStep("done");
         return;
       } catch { localStorage.removeItem(`${SCHEDULE_RESULT_PREFIX}${projectId}`); }
     }
 
-    const savedJobId = localStorage.getItem(`${SCHEDULE_JOB_PREFIX}${projectId}`);
-    if (savedJobId) setStep("generating");
+    const savedJobRaw = localStorage.getItem(`${SCHEDULE_JOB_PREFIX}${projectId}`);
+    let savedJobId: string | null = null;
+    if (savedJobRaw) {
+      try {
+        const parsed = JSON.parse(savedJobRaw);
+        const tooOld = parsed?.startedAt && (Date.now() - parsed.startedAt > 2 * 60 * 60 * 1000);
+        if (tooOld) localStorage.removeItem(`${SCHEDULE_JOB_PREFIX}${projectId}`);
+        else { savedJobId = parsed?.jobId ?? savedJobRaw; setStep("generating"); }
+      } catch { savedJobId = savedJobRaw; setStep("generating"); } // old plain-string format
+    }
 
     // Show cached docs instantly so previously uploaded files appear immediately
     const cachedDocs = readDocsCache(projectId);
@@ -939,7 +951,7 @@ function RealImport({
         ...(docTypes.length && { docTypes }),
       });
 
-      localStorage.setItem(`${SCHEDULE_JOB_PREFIX}${projectId}`, res.jobId);
+      localStorage.setItem(`${SCHEDULE_JOB_PREFIX}${projectId}`, JSON.stringify({ jobId: res.jobId, startedAt: Date.now() }));
       // Layout-level poller picks this up and polls in background
       window.dispatchEvent(
         new CustomEvent("bluq_schedule_started", { detail: { projectId, jobId: res.jobId } })
