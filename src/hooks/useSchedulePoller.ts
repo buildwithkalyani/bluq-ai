@@ -26,7 +26,7 @@ export function useSchedulePoller() {
 
         if (status.status === "completed") {
           localStorage.removeItem(`${SCHEDULE_JOB_PREFIX}${projectId}`);
-          localStorage.setItem(`${SCHEDULE_RESULT_PREFIX}${projectId}`, JSON.stringify(status.result));
+          localStorage.setItem(`${SCHEDULE_RESULT_PREFIX}${projectId}`, JSON.stringify({ result: status.result, savedAt: Date.now() }));
           stopPolling(projectId);
           window.dispatchEvent(
             new CustomEvent("bluq_schedule_done", { detail: { projectId, result: status.result } })
@@ -56,12 +56,26 @@ export function useSchedulePoller() {
 
   useEffect(() => {
     // Resume any jobs already in localStorage (page refresh / prior navigation)
-    for (let i = 0; i < localStorage.length; i++) {
+    const TWO_HOURS = 2 * 60 * 60 * 1000;
+    for (let i = localStorage.length - 1; i >= 0; i--) {
       const key = localStorage.key(i);
-      if (key?.startsWith(SCHEDULE_JOB_PREFIX)) {
-        const projectId = key.slice(SCHEDULE_JOB_PREFIX.length);
-        const jobId = localStorage.getItem(key);
-        if (jobId) startPolling(projectId, jobId);
+      if (!key?.startsWith(SCHEDULE_JOB_PREFIX)) continue;
+      const projectId = key.slice(SCHEDULE_JOB_PREFIX.length);
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed?.startedAt) {
+          if (Date.now() - parsed.startedAt > TWO_HOURS) {
+            localStorage.removeItem(key); // stale — job definitely finished or died
+            continue;
+          }
+          startPolling(projectId, parsed.jobId);
+        } else {
+          startPolling(projectId, raw); // old format: plain jobId string
+        }
+      } catch {
+        startPolling(projectId, raw); // old format fallback
       }
     }
 

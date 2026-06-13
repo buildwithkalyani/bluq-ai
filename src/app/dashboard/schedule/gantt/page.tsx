@@ -557,7 +557,7 @@ function ActivityFeed({ updates, onClose, onTaskFocus }: { updates: ActivityUpda
 // ─────────────────────────────────────────────────────────────
 // Gantt Row — with baseline ghost bar
 // ─────────────────────────────────────────────────────────────
-function GanttRow({ t, selected, chartStart, pixelsPerDay, onSelect, onUpdateDates, isOnCriticalPath, showCriticalPath, onStartConnection, onDropConnection, onDropEndpointMove, drawingDep, movingDep, showBaseline, rowAbsoluteY }: any) {
+function GanttRow({ t, selected, chartStart, pixelsPerDay, onSelect, onUpdateDates, isOnCriticalPath, showCriticalPath, onStartConnection, onDropConnection, onDropEndpointMove, drawingDep, movingDep, showBaseline, rowAbsoluteY, isExporting }: any) {
   const [isDragging, setIsDragging] = useState(false);
   const [hovered, setHovered] = useState(false);
   const dragRef = useRef({ mode: "move", startX: 0, initStart: "", initEnd: "" });
@@ -620,7 +620,7 @@ function GanttRow({ t, selected, chartStart, pixelsPerDay, onSelect, onUpdateDat
         if (movingDep) { onDropEndpointMove && onDropEndpointMove(t.id); }
       }}
       className={`flex border-b border-[#E2E8F0] cursor-pointer transition-colors ${selected ? "bg-blue-50" : "hover:bg-[#F8FAFC]"}`}
-      style={{ height: rowH, width: "100%", opacity }}
+      style={{ height: rowH, width: "100%", opacity, ...(isExporting ? {} : { contentVisibility: "auto" as any, containIntrinsicSize: `auto ${rowH}px` as any }) }}
     >
       <div className="relative w-full h-full">
         {/* Baseline ghost bar — sits behind, dashed */}
@@ -2168,7 +2168,7 @@ const handleSaveModal = (data: any, newPreds: any) => {
                             rows.push(
                               <div key={`name-${t.id}`}
                                 className={`flex items-center border-b cursor-pointer ${selectedId === t.id ? "bg-blue-50" : "hover:bg-[#F8FAFC]"}`}
-                                style={{ height: ROW_H, opacity: showCriticalPath && !criticalPathTasks.has(t.id) ? 0.4 : 1 }}
+                                style={{ height: ROW_H, opacity: showCriticalPath && !criticalPathTasks.has(t.id) ? 0.4 : 1, ...(isExporting ? {} : { contentVisibility: "auto" as any, containIntrinsicSize: `auto ${ROW_H}px` as any }) }}
                                 onClick={() => setSelectedId(t.id)}
                               >
                                 <div className="flex items-center gap-1 flex-1 min-w-0 pl-2 h-full">
@@ -2194,7 +2194,7 @@ const handleSaveModal = (data: any, newPreds: any) => {
                                   <div key={`name-${s.id}`}
                                     onClick={() => setSelectedId(s.id)}
                                     className={`flex items-center border-b cursor-pointer ${selectedId === s.id ? "bg-blue-50" : "hover:bg-[#F8FAFC]"}`}
-                                    style={{ height: SUB_ROW_H, opacity: showCriticalPath && !criticalPathTasks.has(s.id) ? 0.4 : 1 }}
+                                    style={{ height: SUB_ROW_H, opacity: showCriticalPath && !criticalPathTasks.has(s.id) ? 0.4 : 1, ...(isExporting ? {} : { contentVisibility: "auto" as any, containIntrinsicSize: `auto ${SUB_ROW_H}px` as any }) }}
                                   >
                                     <div className="flex items-center gap-1 flex-1 min-w-0 pl-2 h-full">
                                     <span className="text-[10px] text-[#94A3B8] font-mono shrink-0 w-[38px] text-right pr-1.5">{wbsMap[s.id]}</span>
@@ -2313,7 +2313,7 @@ const handleSaveModal = (data: any, newPreds: any) => {
                                 onSelect={() => setSelectedId(t.id)} onUpdateDates={canEdit ? handleUpdateDates : undefined}
                                 isOnCriticalPath={criticalPathTasks.has(t.id)} showCriticalPath={showCriticalPath}
                                 showBaseline={showBaseline} drawingDep={drawingDep} movingDep={movingDep}
-                                rowAbsoluteY={taskYMap[t.id]}
+                                rowAbsoluteY={taskYMap[t.id]} isExporting={isExporting}
                                 onStartConnection={canEdit ? (fromId: string, side: "start"|"end", barX: number, barY: number) => {
                                   setDrawingDep({ fromId, fromSide: side, x: barX, y: barY });
                                 } : undefined}
@@ -2358,7 +2358,7 @@ const handleSaveModal = (data: any, newPreds: any) => {
                                   onSelect={() => setSelectedId(s.id)} onUpdateDates={canEdit ? handleUpdateDates : undefined}
                                   isOnCriticalPath={criticalPathTasks.has(s.id)} showCriticalPath={showCriticalPath}
                                   showBaseline={showBaseline} drawingDep={drawingDep} movingDep={movingDep}
-                                  rowAbsoluteY={taskYMap[s.id]}
+                                  rowAbsoluteY={taskYMap[s.id]} isExporting={isExporting}
                                   onStartConnection={canEdit ? (fromId: string, side: "start"|"end", barX: number, barY: number) => {
                                     setDrawingDep({ fromId, fromSide: side, x: barX, y: barY });
                                   } : undefined}

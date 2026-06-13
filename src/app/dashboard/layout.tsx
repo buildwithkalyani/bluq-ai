@@ -991,8 +991,26 @@ function ContentSkeleton() {
   );
 }
 
+function evictStaleCache() {
+  const MAX_AGE = 7 * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - MAX_AGE;
+  const PREFIXES = ["bluq_gantt_", "bluq_schedule_result_", "bluq_docs_"];
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const key = localStorage.key(i);
+    if (!key || !PREFIXES.some(p => key.startsWith(p))) continue;
+    try {
+      const val = JSON.parse(localStorage.getItem(key)!);
+      const ts = val?.lastFetchedAt ?? val?.savedAt;
+      if (!ts || ts < cutoff) localStorage.removeItem(key);
+    } catch { localStorage.removeItem(key); }
+  }
+}
+
 function DashboardShell({ children }: { children: React.ReactNode }) {
   const { loading } = useWorkspace();
+
+  useEffect(() => { evictStaleCache(); }, []);
+
   return (
     <div className="h-screen flex flex-col bg-[#F6F8FA] text-[#24292f]">
       <Suspense fallback={null}>

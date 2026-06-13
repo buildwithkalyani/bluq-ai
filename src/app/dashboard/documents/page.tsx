@@ -910,7 +910,7 @@ function DocumentsPageContent() {
                   ? historyFilter.replace(/\.\w+$/, "").replace(/_v\d+$/i, "").toLowerCase() === fBase
                   : false;
                 return (
-                  <div key={f.id} className={`bg-white border rounded-xl overflow-hidden hover:shadow-md transition-all group relative ${isHistoryTarget ? "border-[#7C3AED] ring-1 ring-[#7C3AED]" : "border-[#E2E8F0] hover:border-[#CBD5E1]"}`}>
+                  <div key={f.id} className={`bg-white border rounded-xl overflow-hidden hover:shadow-md transition-all group relative ${isHistoryTarget ? "border-[#7C3AED] ring-1 ring-[#7C3AED]" : "border-[#E2E8F0] hover:border-[#CBD5E1]"}`} style={{ contentVisibility: "auto" as any, containIntrinsicSize: "auto 240px" as any }}>
                     {/* Preview area */}
                     <div className="relative h-[160px] flex items-center justify-center" style={{ background: `${fmtStyle.bar}18` }}>
                       <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: fmtStyle.badge, color: fmtStyle.text }}>
