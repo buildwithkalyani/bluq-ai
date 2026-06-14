@@ -1,7 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
-import { tasks, taskDependencies, projects } from "../db/schema.js";
-import { eq, and, ne, lte, gte, isNull } from "drizzle-orm";
+import { tasks, taskDependencies, projects, scheduleVersions } from "../db/schema.js";
+import { eq, and, ne, lte, gte, isNull, desc } from "drizzle-orm";
 import { verifySession } from "../lib/verifySession.js";
 import { detectPhase } from "../lib/detect-phase.js";
 
@@ -84,8 +84,19 @@ export async function tasksRoute(app: FastifyInstance) {
       if (scheduleVersionId && !UUID_REGEX.test(scheduleVersionId)) {
         return reply.status(400).send({ error: "scheduleVersionId must be a valid UUID" });
       }
+      // If no versionId passed, default to the baseline version for this project
+      let resolvedVersionId = scheduleVersionId;
+      if (!resolvedVersionId) {
+        const [baseline] = await db
+          .select({ id: scheduleVersions.id })
+          .from(scheduleVersions)
+          .where(and(eq(scheduleVersions.projectId, projectId), eq(scheduleVersions.isBaseline, true)))
+          .limit(1);
+        resolvedVersionId = baseline?.id;
+      }
+
       const conditions = [eq(tasks.projectId, projectId), eq(tasks.workspaceId, workspaceId)];
-      if (scheduleVersionId) conditions.push(eq(tasks.scheduleVersionId, scheduleVersionId));
+      if (resolvedVersionId) conditions.push(eq(tasks.scheduleVersionId, resolvedVersionId));
       return db.select().from(tasks).where(and(...conditions));
     } catch (err: any) {
       console.error("GET /tasks error:", err.message, err.cause);
