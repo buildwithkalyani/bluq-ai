@@ -111,7 +111,33 @@ return tasks;
 
 ---
 
-## 5. Backend Pagination (Do Soon)
+## 5. Gantt Double Fetch on Navigation
+
+**What:** Every Gantt navigation triggers two task fetches — one without versionId (baseline lookup), one after `ProjectAwareSubTabs` adds versionId via `router.replace`.
+
+**Fix:** Store `lastVersionId_${projectId}` in localStorage when Gantt loads. Include it in all navigation URLs (sidebar, overview card, project switcher). `ProjectAwareSubTabs` detects versionId already set → skips `router.replace` → one fetch only.
+
+**Effort:** Half a day.
+
+**Trigger:** Performance optimisation — not urgent, data is correct after Bug 1 fix.
+
+---
+
+## 6. Predecessor Dependency Lookup Fails Silently on Import
+
+**What:** When importing a schedule, task dependencies are resolved by matching predecessor names. If a name doesn't match exactly (trailing space, typo, special characters), the dependency is silently skipped — import shows success but Gantt is missing arrows.
+
+**File:** `bluq-api/src/routes/tasks.ts:351`
+
+**Fix:** Collect all unresolved predecessor names and return them in the API response. Frontend shows a warning after import listing which dependencies couldn't be resolved.
+
+**Effort:** Half a day.
+
+**Trigger:** Low priority — only affects imports with predecessor columns. XER/MPP files from Primavera usually have clean names.
+
+---
+
+## 7. Backend Pagination (Do Soon)
 
 **What:** All list endpoints return entire table with no LIMIT.
 

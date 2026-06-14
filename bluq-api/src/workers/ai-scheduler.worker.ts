@@ -576,6 +576,12 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
       .where(inArray(documents.id, stagingDocIds));
   }
 
+  // Demote all previous baselines for this project before inserting new version
+  await db
+    .update(scheduleVersions)
+    .set({ isBaseline: false })
+    .where(and(eq(scheduleVersions.projectId, projectId), eq(scheduleVersions.workspaceId, workspaceId)));
+
   const [savedVersion] = await db
     .insert(scheduleVersions)
     .values({
@@ -587,7 +593,7 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
       aiRisks: {
         warnings: schedulingWarnings,
       },
-      isBaseline: false,    // PM needs to review and lock as baseline
+      isBaseline: true,
       isLocked: false,
       generatedBy: "ai",
       uploadedBy: userId !== "system" ? userId : null,
