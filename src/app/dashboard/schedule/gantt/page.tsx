@@ -1247,6 +1247,7 @@ function GanttChartContent() {
   const [depIds, setDepIds] = useState<Record<string, string>>({});
   const [scheduleVersion, setScheduleVersion] = useState<ScheduleVersion | null>(null);
   const [dataLoading, setDataLoading] = useState(false);
+  const [loadedForProject, setLoadedForProject] = useState<string | null>(null);
   const depIdKey = (from: string, to: string) => `${from}__${to}`;
 
   // Activity feed — mock data only in design mode; real mode shows empty until socket/API wired
@@ -1299,6 +1300,7 @@ function GanttChartContent() {
         setTasks(cached.tasks);
         setDeps(cached.deps);
         setDepIds(cached.depIds);
+        setLoadedForProject(projectIdParam);
       } else {
         setDataLoading(true);
       }
@@ -1316,6 +1318,7 @@ function GanttChartContent() {
         setDeps(freshDeps);
         setDepIds(freshDepIds);
         setDataLoading(false);
+        setLoadedForProject(projectIdParam);
         writeGanttCache(projectIdParam, { tasks: freshTasks, deps: freshDeps, depIds: freshDepIds });
 
         // Lazily load schedule version after tasks are visible
@@ -1867,6 +1870,25 @@ const handleSaveModal = (data: any, newPreds: any) => {
   const taskActivity = selectedTask
     ? activity.filter(a => a.taskId === selectedTask.id || a.impact.toLowerCase().includes((selectedTask.phase || "").toLowerCase()))
     : [];
+
+  if (loadedForProject && loadedForProject !== projectIdParam) {
+    return (
+      <div className="flex w-full h-full min-h-[600px] border border-[#E2E8F0] rounded-xl overflow-hidden bg-white font-sans">
+        <div className="flex-1 flex flex-col min-w-0 animate-pulse p-4 gap-3">
+          <div className="flex items-center gap-3 pb-2 border-b border-[#E2E8F0]">
+            <div className="h-5 w-20 bg-[#E2E8F0] rounded" />
+            <div className="h-5 w-32 bg-[#E2E8F0] rounded-full" />
+          </div>
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="flex items-center gap-3">
+              <div className="h-4 rounded bg-[#E2E8F0]" style={{ width: `${120 + (i % 3) * 40}px` }} />
+              <div className="flex-1 h-4 bg-[#F1F5F9] rounded" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   if (dataLoading) {
     return (
