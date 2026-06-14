@@ -8,7 +8,7 @@
 // =============================================================================
 
 function getBaseUrl() {
-  return `https://graph.facebook.com/v19.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+  return `https://graph.facebook.com/v25.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
 }
 
 async function post(body: object): Promise<void> {
