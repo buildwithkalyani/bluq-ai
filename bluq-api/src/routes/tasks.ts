@@ -1,7 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
 import { tasks, taskDependencies, projects, scheduleVersions } from "../db/schema.js";
-import { eq, and, ne, lte, gte, isNull, desc } from "drizzle-orm";
+import { eq, and, ne, lte, gte, isNull, desc, or } from "drizzle-orm";
 import { verifySession } from "../lib/verifySession.js";
 import { detectPhase } from "../lib/detect-phase.js";
 
@@ -96,7 +96,9 @@ export async function tasksRoute(app: FastifyInstance) {
       }
 
       const conditions = [eq(tasks.projectId, projectId), eq(tasks.workspaceId, workspaceId)];
-      if (resolvedVersionId) conditions.push(eq(tasks.scheduleVersionId, resolvedVersionId));
+      if (resolvedVersionId) {
+        conditions.push(or(eq(tasks.scheduleVersionId, resolvedVersionId), isNull(tasks.scheduleVersionId))!);
+      }
       return db.select().from(tasks).where(and(...conditions));
     } catch (err: any) {
       console.error("GET /tasks error:", err.message, err.cause);

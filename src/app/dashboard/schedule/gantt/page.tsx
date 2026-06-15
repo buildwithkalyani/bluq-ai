@@ -1662,7 +1662,6 @@ const handleSaveModal = (data: any, newPreds: any) => {
           contractor: data.contractor || undefined,
           area: data.space || undefined,
           phase: data.phase || undefined,
-          scheduleVersionId: versionId || undefined,
         }).then(created => {
           setTasks(p => p.map(t => t.id === targetId ? { ...t, id: created.id } : t));
           setDeps(p => p.map(d => d.to === targetId ? { ...d, to: created.id } : d));
