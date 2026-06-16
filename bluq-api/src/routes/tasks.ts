@@ -404,6 +404,7 @@ export async function tasksRoute(app: FastifyInstance) {
         isMilestone?: boolean;
         parentTaskId?: string;
         sortOrder?: number;
+        scheduleVersionId?: string;
       };
       if (!body.workspaceId || !body.projectId || !body.title) return reply.status(400).send({ error: "workspaceId, projectId, title required" });
       if (!UUID_REGEX.test(body.workspaceId) || !UUID_REGEX.test(body.projectId)) {
