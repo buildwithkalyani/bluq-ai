@@ -339,7 +339,6 @@ export const tasks = pgTable("tasks", {
 	isMilestone: boolean("is_milestone").default(false),
 	parentTaskId: uuid("parent_task_id"),
 	scheduleVersionId: uuid("schedule_version_id"),
-	taskSource: text("task_source").default("manual").notNull(),
 	sortOrder: integer("sort_order").default(0),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),

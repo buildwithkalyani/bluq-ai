@@ -17,7 +17,7 @@
 import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
 import { scheduleVersions, documents, tasks, gapCheckFeedback, users } from "../db/schema.js";
-import { eq, and, desc, sql, like, isNull, or, inArray } from "drizzle-orm";
+import { eq, and, desc, sql, like } from "drizzle-orm";
 import { aiSchedulerQueue } from "../lib/queues.js";
 import type { ScheduleJobData } from "../workers/ai-scheduler.worker.js";
 import { verifySession } from "../lib/verifySession.js";
@@ -525,17 +525,14 @@ export async function scheduleRoute(app: FastifyInstance) {
         return reply.status(400).send({ error: "projectId and workspaceId must be valid UUIDs" });
       }
 
-      // Save current baseline ID before demoting (needed for manual task carryover)
-      const [prevBaseline] = await db
-        .select({ id: scheduleVersions.id, vn: scheduleVersions.versionNumber })
+      // Next version number
+      const existing = await db
+        .select({ vn: scheduleVersions.versionNumber })
         .from(scheduleVersions)
-        .where(and(
-          eq(scheduleVersions.projectId, body.projectId),
-          eq(scheduleVersions.workspaceId, body.workspaceId),
-          eq(scheduleVersions.isBaseline, true),
-        ))
+        .where(and(eq(scheduleVersions.projectId, body.projectId), eq(scheduleVersions.workspaceId, body.workspaceId)))
+        .orderBy(desc(scheduleVersions.versionNumber))
         .limit(1);
-      const nextVersion = (prevBaseline?.vn ?? 0) + 1;
+      const nextVersion = (existing[0]?.vn ?? 0) + 1;
 
       // Demote all previous baselines for this project
       await db
@@ -557,58 +554,6 @@ export async function scheduleRoute(app: FastifyInstance) {
           scheduleJson: {},
         })
         .returning();
-
-      // Carry over manually added tasks from the previous baseline into the new version
-      const prevBaselineId = prevBaseline?.id ?? null;
-      const versionFilter = prevBaselineId
-        ? or(eq(tasks.scheduleVersionId, prevBaselineId), isNull(tasks.scheduleVersionId))!
-        : isNull(tasks.scheduleVersionId);
-
-      const manualTasks = await db
-        .select()
-        .from(tasks)
-        .where(and(
-          eq(tasks.projectId, body.projectId),
-          eq(tasks.workspaceId, body.workspaceId),
-          eq(tasks.taskSource, "manual"),
-          versionFilter,
-        ));
-
-      if (manualTasks.length > 0) {
-        const nullVersionIds = manualTasks.filter(t => !t.scheduleVersionId).map(t => t.id);
-        if (nullVersionIds.length > 0) {
-          await db.update(tasks)
-            .set({ scheduleVersionId: created.id })
-            .where(inArray(tasks.id, nullVersionIds));
-        }
-
-        const prevVersionTasks = manualTasks.filter(t => t.scheduleVersionId === prevBaselineId);
-        if (prevVersionTasks.length > 0) {
-          await db.insert(tasks).values(
-            prevVersionTasks.map(t => ({
-              workspaceId: t.workspaceId,
-              projectId: t.projectId,
-              scheduleVersionId: created.id,
-              taskSource: "manual" as const,
-              title: t.title,
-              description: t.description,
-              assignedTo: t.assignedTo,
-              status: t.status,
-              priority: t.priority,
-              startDate: t.startDate,
-              endDate: t.endDate,
-              durationDays: t.durationDays,
-              percentComplete: t.percentComplete,
-              contractor: t.contractor,
-              area: t.area,
-              phase: t.phase,
-              isMilestone: t.isMilestone,
-              parentTaskId: t.parentTaskId,
-              sortOrder: t.sortOrder,
-            }))
-          );
-        }
-      }
 
       // Re-fetch with user name join to match the shape GET /schedule/versions returns
       const [row] = await db

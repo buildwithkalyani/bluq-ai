@@ -37,7 +37,7 @@ import { Worker, Job } from "bullmq";
 import { redisConnection } from "../lib/redis.js";
 import { db } from "../db/client.js";
 import { documents, tasks, scheduleVersions, taskDependencies } from "../db/schema.js";
-import { eq, and, like, inArray, isNull, or } from "drizzle-orm";
+import { eq, and, like, inArray } from "drizzle-orm";
 
 // Pipeline modules
 import { parseFiles, fetchFileBuffer } from "../lib/parsers.js";
@@ -531,15 +531,13 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
 
   // Get next version number and save the current baseline ID (for manual task carryover)
   const existingVersions = await db
-    .select({ versionNumber: scheduleVersions.versionNumber, id: scheduleVersions.id, isBaseline: scheduleVersions.isBaseline })
+    .select({ versionNumber: scheduleVersions.versionNumber })
     .from(scheduleVersions)
     .where(eq(scheduleVersions.projectId, projectId));
 
   const nextVersion = existingVersions.length > 0
     ? Math.max(...existingVersions.map(v => v.versionNumber)) + 1
     : 1;
-
-  const prevBaselineId = existingVersions.find(v => v.isBaseline)?.id ?? null;
 
   // Save the schedule version (full snapshot as JSON)
   const scheduleJson = {
@@ -711,7 +709,6 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     workspaceId,
     projectId,
     scheduleVersionId: savedVersion.id,
-    taskSource: "ai" as const,
     title: t.fullName,
     description: `${t.originalCode} | ${t.phase} | Qty: ${t.estimatedQuantity} ${t.unit} | Crew: ${crewToString(t.crew)}`,
     status: "not_started" as const,
@@ -793,62 +790,6 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     if (batch.length > 0) {
       await db.insert(taskDependencies).values(batch);
     }
-  }
-
-  // Carry over manually added tasks from the previous baseline (or null-version tasks)
-  // into the new version so they don't disappear when the baseline changes.
-  const versionFilter = prevBaselineId
-    ? or(eq(tasks.scheduleVersionId, prevBaselineId), isNull(tasks.scheduleVersionId))!
-    : isNull(tasks.scheduleVersionId);
-
-  const manualTasks = await db
-    .select()
-    .from(tasks)
-    .where(and(
-      eq(tasks.projectId, projectId),
-      eq(tasks.workspaceId, workspaceId),
-      eq(tasks.taskSource, "manual"),
-      versionFilter,
-    ));
-
-  if (manualTasks.length > 0) {
-    // Tasks with null scheduleVersionId migrate into the new version (UPDATE)
-    const nullVersionIds = manualTasks.filter(t => !t.scheduleVersionId).map(t => t.id);
-    if (nullVersionIds.length > 0) {
-      await db.update(tasks)
-        .set({ scheduleVersionId: savedVersion.id })
-        .where(inArray(tasks.id, nullVersionIds));
-    }
-
-    // Tasks from the previous baseline get copied into the new version (INSERT)
-    const prevVersionTasks = manualTasks.filter(t => t.scheduleVersionId === prevBaselineId);
-    if (prevVersionTasks.length > 0) {
-      await db.insert(tasks).values(
-        prevVersionTasks.map(t => ({
-          workspaceId: t.workspaceId,
-          projectId: t.projectId,
-          scheduleVersionId: savedVersion.id,
-          taskSource: "manual" as const,
-          title: t.title,
-          description: t.description,
-          assignedTo: t.assignedTo,
-          status: t.status,
-          priority: t.priority,
-          startDate: t.startDate,
-          endDate: t.endDate,
-          durationDays: t.durationDays,
-          percentComplete: t.percentComplete,
-          contractor: t.contractor,
-          area: t.area,
-          phase: t.phase,
-          isMilestone: t.isMilestone,
-          parentTaskId: t.parentTaskId,
-          sortOrder: t.sortOrder,
-        }))
-      );
-    }
-
-    console.log(`[worker] Carried over ${manualTasks.length} manual task(s) to version ${nextVersion}`);
   }
 
   console.log(

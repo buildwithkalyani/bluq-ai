@@ -1,7 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
 import { tasks, taskDependencies, projects, scheduleVersions } from "../db/schema.js";
-import { eq, and, ne, lte, gte, isNull, desc } from "drizzle-orm";
+import { eq, and, ne, lte, gte, desc } from "drizzle-orm";
 import { verifySession } from "../lib/verifySession.js";
 import { detectPhase } from "../lib/detect-phase.js";
 
@@ -321,7 +321,6 @@ export async function tasksRoute(app: FastifyInstance) {
         workspaceId: body.workspaceId,
         projectId: body.projectId,
         scheduleVersionId: body.scheduleVersionId ?? null,
-        taskSource: "import" as const,
         title: t.title,
         startDate: t.startDate ?? null,
         endDate: t.endDate ?? null,
@@ -411,6 +410,18 @@ export async function tasksRoute(app: FastifyInstance) {
         return reply.status(400).send({ error: "workspaceId and projectId must be valid UUIDs" });
       }
       if (!body.phase) body.phase = detectPhase(body.title) ?? undefined;
+
+      // If no scheduleVersionId provided, attach to the current baseline so the
+      // task doesn't disappear when a new version is generated.
+      if (!body.scheduleVersionId) {
+        const [baseline] = await db
+          .select({ id: scheduleVersions.id })
+          .from(scheduleVersions)
+          .where(and(eq(scheduleVersions.projectId, body.projectId), eq(scheduleVersions.isBaseline, true)))
+          .orderBy(desc(scheduleVersions.versionNumber))
+          .limit(1);
+        if (baseline) body.scheduleVersionId = baseline.id;
+      }
 
       // Fetch parent project to compute project-relative status
       const [project] = await db.select().from(projects).where(eq(projects.id, body.projectId));
