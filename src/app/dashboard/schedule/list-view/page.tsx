@@ -804,6 +804,7 @@ function ListViewPageContent() {
                         contractor: newTask.contractor || undefined,
                         area: newTask.space || undefined,
                         phase: newTask.phase || undefined,
+                        scheduleVersionId: versionId || undefined,
                       }).then(created => {
                         setTasks(prev => [...prev, {
                           id: created.id, projectId: 0, name: newTask.name.trim(), phase: newTask.phase,
