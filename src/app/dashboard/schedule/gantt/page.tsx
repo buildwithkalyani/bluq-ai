@@ -1239,7 +1239,7 @@ function GanttChartContent() {
   const urlProjectEndDate = searchParams.get("projectEndDate") ?? null;
   const urlProjectStartDate = searchParams.get("projectStartDate") ?? null;
   const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
-  const { resolvedVersionId } = useScheduleVersion(projectIdParam, workspaceId, real);
+  const { resolvedVersionId } = useScheduleVersion(projectIdParam, workspaceId ?? undefined, real);
 
   const [projectEndDate, setProjectEndDate] = useState<string | null>(urlProjectEndDate);
   const [projectStartDate, setProjectStartDate] = useState<string | null>(urlProjectStartDate);

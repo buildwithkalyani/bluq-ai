@@ -118,7 +118,7 @@ function ListViewPageContent() {
   const urlWs = searchParams.get("workspaceId");
   const workspaceId = (urlWs && urlWs !== "null") ? urlWs : ctxWorkspaceId;
   const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
-  const { resolvedVersionId } = useScheduleVersion(projectIdParam, workspaceId, real);
+  const { resolvedVersionId } = useScheduleVersion(projectIdParam, workspaceId ?? undefined, real);
   const selectedTaskData = tasks.find(t => t.id === selectedTask) ?? null;
 
   useEffect(() => {
