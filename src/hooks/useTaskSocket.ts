@@ -71,18 +71,35 @@ interface ScheduleGeneratedPayload {
   taskCount: number;
 }
 
+interface WorkPackagesReadyPayload {
+  jobId: string;
+  projectId: string;
+  versionNumber: number;
+  constructionType: string;
+  summary: {
+    totalPackages: number;
+    boqDerived: number;
+    drawingMeasured: number;
+    estimated: number;
+    missingData: string[];
+    conflictCount: number;
+  };
+}
+
 interface UseTaskSocketOptions {
   /** UUID of the project to subscribe to. Pass null/undefined to disable. */
   projectId: string | null | undefined;
   /** UUID of the workspace — also joins workspace room for schedule:generated events. */
   workspaceId?: string | null | undefined;
-  /** React setState dispatch for the tasks array */
-  setTasks: React.Dispatch<React.SetStateAction<ScheduleTask[]>>;
+  /** React setState dispatch for the tasks array. Optional — omit if only subscribing to schedule events. */
+  setTasks?: React.Dispatch<React.SetStateAction<ScheduleTask[]>>;
   /** Called when a new schedule version is generated for this project */
   onScheduleGenerated?: (payload: ScheduleGeneratedPayload) => void;
+  /** Called when work packages are extracted and ready for PM review */
+  onWorkPackagesReady?: (payload: WorkPackagesReadyPayload) => void;
 }
 
-export function useTaskSocket({ projectId, workspaceId, setTasks, onScheduleGenerated }: UseTaskSocketOptions): void {
+export function useTaskSocket({ projectId, workspaceId, setTasks, onScheduleGenerated, onWorkPackagesReady }: UseTaskSocketOptions): void {
   const socketRef = useRef<Socket | null>(null);
   const { data: session } = authClient.useSession();
   const token = (session as any)?.session?.token as string | undefined;
@@ -123,6 +140,7 @@ export function useTaskSocket({ projectId, workspaceId, setTasks, onScheduleGene
     });
 
     socket.on("task:updated", (payload: TaskUpdatePayload) => {
+      if (!setTasks) return;
       const mappedStatus = mapStatus(payload.status);
       setTasks((prev) =>
         prev.map((task) => {
@@ -144,6 +162,12 @@ export function useTaskSocket({ projectId, workspaceId, setTasks, onScheduleGene
       }
     });
 
+    socket.on("work_packages_ready", (payload: WorkPackagesReadyPayload) => {
+      if (payload.projectId === projectId) {
+        onWorkPackagesReady?.(payload);
+      }
+    });
+
     socket.on("error", (msg: string) => {
       console.warn("[useTaskSocket] Socket error:", msg);
       socket.disconnect();
@@ -157,5 +181,5 @@ export function useTaskSocket({ projectId, workspaceId, setTasks, onScheduleGene
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [projectId, workspaceId, token, setTasks, onScheduleGenerated]);
+  }, [projectId, workspaceId, token, setTasks, onScheduleGenerated, onWorkPackagesReady]);
 }
