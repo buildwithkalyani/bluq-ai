@@ -57,13 +57,14 @@ function BaselineActualPageContent() {
   const projectIdParam = searchParams.get("projectId") ?? "0";
   const urlWs = searchParams.get("workspaceId");
   const workspaceId = (urlWs && urlWs !== "null") ? urlWs : ctxWorkspaceId;
+  const versionId = searchParams.get("versionId") ?? undefined;
   const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
 
   useEffect(() => {
     if (wsLoading) return;
     setLoading(true);
     const load = real
-      ? fetchTasks(projectIdParam, workspaceId!)
+      ? fetchTasks(projectIdParam, workspaceId!, undefined, versionId)
       : isDesignMode
         ? getScheduleTasks(Number(projectIdParam))
         : Promise.resolve([]);
@@ -73,7 +74,7 @@ function BaselineActualPageContent() {
         if (v?.createdAt) setUploadedAt(fmtDate(v.createdAt));
       });
     }
-  }, [projectIdParam, workspaceId, wsLoading, isDesignMode]);
+  }, [projectIdParam, workspaceId, wsLoading, isDesignMode, versionId]);
 
   const togglePhase = (p: string) =>
     setCollapsedPhases(prev => { const s = new Set(prev); s.has(p) ? s.delete(p) : s.add(p); return s; });

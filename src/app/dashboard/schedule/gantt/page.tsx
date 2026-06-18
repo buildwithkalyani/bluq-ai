@@ -10,6 +10,7 @@ import { useWorkspace } from "@/context/workspace";
 import { useActivityFeed } from "@/context/activity-feed";
 import { usePermissions } from "@/context/permissions";
 import { useTaskSocket } from "@/hooks/useTaskSocket";
+import { useScheduleVersion } from "@/hooks/useScheduleVersion";
 
 // ─────────────────────────────────────────────────────────────
 // Data & Types
@@ -1235,10 +1236,10 @@ function GanttChartContent() {
   const projectIdParam = searchParams.get("projectId") ?? "0";
   const urlWs = searchParams.get("workspaceId");
   const workspaceId = (urlWs && urlWs !== "null") ? urlWs : ctxWorkspaceId;
-  const versionId = searchParams.get("versionId") ?? undefined;
   const urlProjectEndDate = searchParams.get("projectEndDate") ?? null;
   const urlProjectStartDate = searchParams.get("projectStartDate") ?? null;
   const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
+  const { resolvedVersionId } = useScheduleVersion(projectIdParam, workspaceId, real);
 
   const [projectEndDate, setProjectEndDate] = useState<string | null>(urlProjectEndDate);
   const [projectStartDate, setProjectStartDate] = useState<string | null>(urlProjectStartDate);
@@ -1307,7 +1308,7 @@ function GanttChartContent() {
 
       // Fetch tasks + deps first (critical path); schedule version is non-blocking
       Promise.all([
-        fetchTasks(projectIdParam, workspaceId!, signal, versionId),
+        fetchTasks(projectIdParam, workspaceId!, signal, resolvedVersionId),
         fetchTaskDependencies(projectIdParam, workspaceId!, signal),
       ]).then(([freshTasks, depRows]) => {
         const freshDeps = depRows.map(r => ({ from: r.predecessorId, to: r.successorId, type: r.dependencyType, label: r.dependencyType }));
@@ -1338,7 +1339,7 @@ function GanttChartContent() {
       setTasks([]);
       setDeps([]);
     }
-  }, [projectIdParam, workspaceId, isDesignMode, versionId]);
+  }, [projectIdParam, workspaceId, isDesignMode, resolvedVersionId]);
 
   const gapCheckGaps: SuspectedGap[] =
     scheduleVersion?.scheduleJson?.gapCheck?.suspectedGaps?.filter(g => !g.alreadyCovered) ?? [];
@@ -1346,7 +1347,7 @@ function GanttChartContent() {
   const refreshTasksAndDeps = useCallback(() => {
     if (!real) return;
     Promise.all([
-      fetchTasks(projectIdParam, workspaceId!, undefined, versionId),
+      fetchTasks(projectIdParam, workspaceId!, undefined, resolvedVersionId),
       fetchTaskDependencies(projectIdParam, workspaceId!),
     ]).then(([freshTasks, depRows]) => {
       const freshDeps = depRows.map(r => ({ from: r.predecessorId, to: r.successorId, type: r.dependencyType, label: r.dependencyType }));
@@ -1357,7 +1358,7 @@ function GanttChartContent() {
       setDepIds(freshDepIds);
       writeGanttCache(projectIdParam, { tasks: freshTasks, deps: freshDeps, depIds: freshDepIds });
     }).catch(console.error);
-  }, [real, projectIdParam, workspaceId, versionId]);
+  }, [real, projectIdParam, workspaceId, resolvedVersionId]);
 
   const refreshTasks = refreshTasksAndDeps;
 
@@ -1662,7 +1663,7 @@ const handleSaveModal = (data: any, newPreds: any) => {
           contractor: data.contractor || undefined,
           area: data.space || undefined,
           phase: data.phase || undefined,
-          scheduleVersionId: versionId || undefined,
+          scheduleVersionId: resolvedVersionId,
         }).then(created => {
           setTasks(p => p.map(t => t.id === targetId ? { ...t, id: created.id } : t));
           setDeps(p => p.map(d => d.to === targetId ? { ...d, to: created.id } : d));

@@ -16,7 +16,7 @@
 
 import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
-import { scheduleVersions, documents, tasks, gapCheckFeedback, users } from "../db/schema.js";
+import { scheduleVersions, documents, tasks, gapCheckFeedback, users, pendingWorkPackages, projectMembers } from "../db/schema.js";
 import { eq, and, desc, sql, like } from "drizzle-orm";
 import { aiSchedulerQueue } from "../lib/queues.js";
 import type { ScheduleJobData } from "../workers/ai-scheduler.worker.js";
@@ -207,6 +207,17 @@ export async function scheduleRoute(app: FastifyInstance) {
 
         case "completed": {
           const result = job.returnvalue as any;
+          if (result?.phase === "awaiting_review") {
+            return {
+              jobId,
+              status: "awaiting_review",
+              message: "Work packages extracted — review and confirm before the schedule is built.",
+              result: {
+                phase: "awaiting_review",
+                pendingId: result.pendingId,
+              },
+            };
+          }
           return {
             jobId,
             status: "completed",
@@ -577,6 +588,166 @@ export async function scheduleRoute(app: FastifyInstance) {
     } catch (err: any) {
       console.error("POST /schedule/versions error:", err.message);
       return reply.status(500).send({ error: "Failed to create schedule version" });
+    }
+  });
+
+  // =========================================================================
+  // GET /schedule/work-packages/:jobId — fetch extracted work packages for review
+  // =========================================================================
+  app.get("/schedule/work-packages/:jobId", { preHandler: verifySession }, async (request, reply) => {
+    try {
+      const { jobId } = request.params as { jobId: string };
+      const userId = request.userId;
+
+      const [row] = await db
+        .select()
+        .from(pendingWorkPackages)
+        .where(eq(pendingWorkPackages.jobId, jobId));
+
+      if (!row) {
+        return reply.status(404).send({
+          error: "Work packages not found",
+          suggestion: "They may have already been confirmed or cancelled. Start a new generation.",
+        });
+      }
+
+      const [membership] = await db
+        .select({ id: projectMembers.id })
+        .from(projectMembers)
+        .where(and(
+          eq(projectMembers.projectId, row.projectId),
+          eq(projectMembers.userId, userId),
+        ));
+
+      if (!membership) {
+        return reply.status(403).send({ error: "Access denied" });
+      }
+
+      return reply.send({
+        jobId: row.jobId,
+        projectId: row.projectId,
+        versionNumber: row.versionNumber,
+        constructionType: row.constructionType,
+        status: row.status,
+        data: row.data,
+        createdAt: row.createdAt,
+      });
+    } catch (err: any) {
+      console.error("GET /schedule/work-packages error:", err.message);
+      return reply.status(500).send({ error: "Failed to fetch work packages" });
+    }
+  });
+
+  // =========================================================================
+  // POST /schedule/work-packages/:jobId/confirm — PM confirms edited packages
+  // =========================================================================
+  app.post("/schedule/work-packages/:jobId/confirm", { preHandler: verifySession }, async (request, reply) => {
+    try {
+      const { jobId } = request.params as { jobId: string };
+      const body = request.body as { edits?: Array<{ id: string; [key: string]: any }> } | undefined;
+      const userId = request.userId;
+
+      const [row] = await db
+        .select()
+        .from(pendingWorkPackages)
+        .where(eq(pendingWorkPackages.jobId, jobId));
+
+      if (!row) {
+        return reply.status(404).send({ error: "Work packages not found" });
+      }
+
+      if (row.status === "confirmed") {
+        return reply.status(409).send({ error: "Already confirmed" });
+      }
+
+      const [membership] = await db
+        .select({ id: projectMembers.id })
+        .from(projectMembers)
+        .where(and(
+          eq(projectMembers.projectId, row.projectId),
+          eq(projectMembers.userId, userId),
+        ));
+
+      if (!membership) {
+        return reply.status(403).send({ error: "Access denied" });
+      }
+
+      // Apply PM edits to work packages if provided
+      let data = row.data as any;
+      if (body?.edits && body.edits.length > 0) {
+        const editMap = new Map(body.edits.map(e => [e.id, e]));
+        data = {
+          ...data,
+          workPackages: data.workPackages.map((wp: any) => {
+            const edit = editMap.get(wp.id);
+            if (!edit) return wp;
+            return {
+              ...wp,
+              ...edit,
+              ...(edit.productivityRate !== undefined && { productivityBasis: "user_input" }),
+            };
+          }),
+        };
+      }
+
+      await db
+        .update(pendingWorkPackages)
+        .set({
+          status: "confirmed",
+          data,
+          confirmedAt: new Date().toISOString(),
+        })
+        .where(eq(pendingWorkPackages.jobId, jobId));
+
+      // Phase 3: enqueue RCPSP optimizer job here
+      // TODO: aiSchedulerQueue.add("optimize-schedule", { pendingId: row.id, projectId: row.projectId, ... })
+
+      return reply.send({
+        message: "Work packages confirmed. Schedule optimization will run in Phase 3.",
+        versionNumber: row.versionNumber,
+        projectId: row.projectId,
+      });
+    } catch (err: any) {
+      console.error("POST /schedule/work-packages/confirm error:", err.message);
+      return reply.status(500).send({ error: "Failed to confirm work packages" });
+    }
+  });
+
+  // =========================================================================
+  // POST /schedule/work-packages/:jobId/cancel — discard and start over
+  // =========================================================================
+  app.post("/schedule/work-packages/:jobId/cancel", { preHandler: verifySession }, async (request, reply) => {
+    try {
+      const { jobId } = request.params as { jobId: string };
+      const userId = request.userId;
+
+      const [row] = await db
+        .select({ id: pendingWorkPackages.id, projectId: pendingWorkPackages.projectId })
+        .from(pendingWorkPackages)
+        .where(eq(pendingWorkPackages.jobId, jobId));
+
+      if (!row) {
+        return reply.status(404).send({ error: "Work packages not found" });
+      }
+
+      const [membership] = await db
+        .select({ id: projectMembers.id })
+        .from(projectMembers)
+        .where(and(
+          eq(projectMembers.projectId, row.projectId),
+          eq(projectMembers.userId, userId),
+        ));
+
+      if (!membership) {
+        return reply.status(403).send({ error: "Access denied" });
+      }
+
+      await db.delete(pendingWorkPackages).where(eq(pendingWorkPackages.jobId, jobId));
+
+      return reply.send({ message: "Extraction cancelled. Start a new schedule generation when ready." });
+    } catch (err: any) {
+      console.error("POST /schedule/work-packages/cancel error:", err.message);
+      return reply.status(500).send({ error: "Failed to cancel" });
     }
   });
 

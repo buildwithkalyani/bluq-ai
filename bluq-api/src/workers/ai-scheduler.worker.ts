@@ -37,7 +37,7 @@ import { Worker, Job } from "bullmq";
 import { redisConnection } from "../lib/redis.js";
 import { db } from "../db/client.js";
 import { documents, tasks, scheduleVersions, taskDependencies } from "../db/schema.js";
-import { eq, and, like, inArray } from "drizzle-orm";
+import { eq, and, like, inArray, desc } from "drizzle-orm";
 
 // Pipeline modules
 import { parseFiles, fetchFileBuffer } from "../lib/parsers.js";
@@ -46,12 +46,12 @@ import { selectTasks, printTaskSummary, type RulesEngineResult } from "../lib/ru
 import { calculateSchedule, type ScheduleResult, type ScheduledTask } from "../lib/duration-calculator.js";
 import { generateNovelTasks } from "../lib/novel-task-generator.js";
 import { checkTaskGaps, type GapCheckResult } from "../lib/gap-checker.js";
-import { getIO } from "../lib/socket.js";
+import { getIO, emitWorkPackagesReady } from "../lib/socket.js";
 
 // Infra pipeline modules
-import { extractInfrastructureParameters, type InfrastructureType } from "../lib/infra/infrastructure-parameter-extractor.js";
-import { runInfrastructureRulesEngine } from "../lib/infra/infrastructure-rules-engine.js";
-import { calculateInfraSchedule } from "../lib/infra/infra-duration-calculator.js";
+import { type InfrastructureType } from "../lib/infra/infrastructure-parameter-extractor.js";
+import { extractWorkPackages } from "../lib/infra/work-package-extractor.js";
+import { pendingWorkPackages } from "../db/schema.js";
 
 // ---------------------------------------------------------------------------
 // JOB TYPES
@@ -154,9 +154,11 @@ export function startSchedulerWorker() {
 // ---------------------------------------------------------------------------
 
 async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
-  scheduleVersionId: string;
-  taskCount: number;
-  durationDays: number;
+  phase: "awaiting_review" | "complete";
+  pendingId?: string;
+  scheduleVersionId?: string;
+  taskCount?: number;
+  durationDays?: number;
 }> {
   const { projectId, workspaceId, userId } = job.data;
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -279,148 +281,68 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
 
   if (infraType) {
     // -----------------------------------------------------------------------
-    // INFRASTRUCTURE PIPELINE
+    // INFRASTRUCTURE PIPELINE — PHASE 2: WORK PACKAGE EXTRACTION
+    // Extracts work packages from documents, stores in DB, notifies frontend.
+    // Optimizer runs in Phase 3 after PM reviews and confirms.
     // -----------------------------------------------------------------------
 
-    // Step 3: Extract infra parameters via Claude
+    // Step 3: Extract work packages via Claude
     await updateProgress(job, 3, totalSteps, `AI is reading your ${infraType} project documents...`);
     const step3Start = Date.now();
 
-    const parsedDocs = parsed.map(p => ({ name: p.fileName, content: p.contents.map((c: any) => c.text ?? "").join("\n") }));
-    const infraParams = await extractInfrastructureParameters(
-      infraType,
-      parsedDocs,
-      job.data.extractionRuns ?? 1,
-    );
-
-    // Apply date overrides
-    if (job.data.city) (infraParams as any).region = job.data.city;
-
-    // Apply tunnel-specific overrides when user filled the form fields
-    if (infraType === "tunnel") {
-      const tp = infraParams as import("../lib/infra/infrastructure-parameter-extractor.js").TunnelParameters;
-      if (job.data.tunnelLength   && !isNaN(Number(job.data.tunnelLength)))   tp.totalLengthM      = Number(job.data.tunnelLength);
-      if (job.data.tunnelDiameter && !isNaN(Number(job.data.tunnelDiameter))) tp.internalDiameterM = Number(job.data.tunnelDiameter);
-      if (job.data.tunnelMethod) {
-        // Frontend sends "cutcover"; TunnelParameters expects "cut_and_cover"
-        const m = job.data.tunnelMethod;
-        tp.excavationMethod = m === "cutcover" ? "cut_and_cover" : (m as "natm" | "tbm");
-      }
-    }
-
-    // Apply railway overrides — frontend gauge values: "broad" | "metre" | "standard"
-    if (infraType === "railway") {
-      const rp = infraParams as import("../lib/infra/infrastructure-parameter-extractor.js").RailwayParameters;
-      if (job.data.trackLength  && !isNaN(Number(job.data.trackLength)))  rp.totalLengthKm    = Number(job.data.trackLength);
-      if (job.data.stationCount && !isNaN(Number(job.data.stationCount))) rp.numberOfStations = Number(job.data.stationCount);
-      if (job.data.trackGauge) {
-        const g = job.data.trackGauge;
-        rp.trackGauge =
-          g === "broad"    ? "broad_gauge"    :
-          g === "metre"    ? "metre_gauge"    :
-          g === "standard" ? "standard_gauge" :
-          rp.trackGauge;
-      }
-    }
-
-    // Apply metro overrides — gaugeMM is numeric for MetroParameters
-    if (infraType === "metro") {
-      const mp = infraParams as import("../lib/infra/infrastructure-parameter-extractor.js").MetroParameters;
-      if (job.data.trackLength  && !isNaN(Number(job.data.trackLength)))  mp.totalLengthKm    = Number(job.data.trackLength);
-      if (job.data.stationCount && !isNaN(Number(job.data.stationCount))) mp.numberOfStations = Number(job.data.stationCount);
-      if (job.data.trackGauge) {
-        const g = job.data.trackGauge;
-        mp.gaugeMM =
-          g === "broad"    ? 1676 :
-          g === "metre"    ? 1000 :
-          g === "standard" ? 1435 :
-          mp.gaugeMM;
-      }
-    }
-
-    // Apply highway overrides
-    if (infraType === "highway") {
-      const hp = infraParams as import("../lib/infra/infrastructure-parameter-extractor.js").HighwayParameters;
-      if (job.data.roadLength  && !isNaN(Number(job.data.roadLength)))  hp.totalLengthKm  = Number(job.data.roadLength);
-      if (job.data.laneCount   && !isNaN(Number(job.data.laneCount)))   hp.numberOfLanes  = Number(job.data.laneCount);
-      if (job.data.pavementType) {
-        const p = job.data.pavementType;
-        if (p === "flexible" || p === "rigid" || p === "composite") hp.pavementType = p;
-      }
-    }
-
-    // Apply bridge overrides — frontend deckType values map to BridgeParameters.superstructureType
-    if (infraType === "bridge") {
-      const bp = infraParams as import("../lib/infra/infrastructure-parameter-extractor.js").BridgeParameters;
-      if (job.data.totalSpan && !isNaN(Number(job.data.totalSpan))) bp.totalLengthM  = Number(job.data.totalSpan);
-      if (job.data.pierCount && !isNaN(Number(job.data.pierCount))) bp.numberOfPiers = Number(job.data.pierCount);
-      if (job.data.deckType) {
-        const d = job.data.deckType;
-        bp.superstructureType =
-          d === "psc"       ? "psc_girder"         :
-          d === "steel"     ? "steel_truss"         :
-          d === "composite" ? "composite"           :
-          d === "cable"     ? "cable_stayed"        :
-          bp.superstructureType;
-      }
-    }
-    console.log(`[worker] Infra params extracted: ${JSON.stringify(infraParams).slice(0, 200)}...`);
-    console.log(`[worker] Step 3 completed in ${Date.now() - step3Start}ms`);
-
-    // Step 4: Select tasks via infra rules engine
-    await updateProgress(job, 4, totalSteps, "Selecting infrastructure tasks...");
-    const step4Start = Date.now();
-
-    const infraRulesResult = runInfrastructureRulesEngine(infraType, infraParams);
-
-    if (infraRulesResult.selectedTasks.length === 0) {
-      throw new Error("Infrastructure rules engine returned zero tasks. Check task library configuration.");
-    }
-
-    console.log(`[worker] Infra rules engine: ${infraRulesResult.totalTaskCount} tasks selected`);
-    if (infraRulesResult.longLeadItems.length > 0) {
-      console.log(
-        `[worker] Long-lead items: ${infraRulesResult.longLeadItems.map(t => `${t.code}(${t.leadTimeDays}d)`).join(", ")}`
-      );
-    }
-    console.log(`[worker] Step 4 completed in ${Date.now() - step4Start}ms`);
-
-    // Step 5: Calculate durations and schedule
-    await updateProgress(job, 5, totalSteps, "Calculating durations and scheduling...");
-    const step5Start = Date.now();
-
-    const effectiveStartDate = job.data.startDate ?? new Date().toISOString().split("T")[0];
-    const infraSchedule = calculateInfraSchedule(infraRulesResult, infraType, infraParams, effectiveStartDate);
-
-    allTasks = infraSchedule.tasks;
-    totalDurationDays = infraSchedule.totalDurationDays;
-
-    if (infraRulesResult.longLeadItems.length > 0) {
-      schedulingWarnings.push(
-        `Long-lead procurement items: ${infraRulesResult.longLeadItems
-          .map(t => `${t.name} (${t.leadTimeDays} days lead time)`)
-          .join("; ")}. Start procurement immediately.`
-      );
-    }
+    const extracted = await extractWorkPackages(infraType, parsed);
 
     console.log(
-      `[worker] Infra schedule: ${allTasks.length} tasks, ${totalDurationDays} days, ` +
-      `${infraSchedule.criticalPathTasks} critical path tasks`
+      `[worker] Work packages extracted: ${extracted.extractionSummary.totalPackages} packages ` +
+      `(BOQ: ${extracted.extractionSummary.boqDerived}, drawn: ${extracted.extractionSummary.drawingMeasured}, ` +
+      `estimated: ${extracted.extractionSummary.estimated})`
     );
-    console.log(`[worker] Step 5 completed in ${Date.now() - step5Start}ms`);
+    console.log(`[worker] Step 3 completed in ${Date.now() - step3Start}ms`);
 
-    // Step 6: No novel task generation for infra (task libraries are comprehensive)
-    await updateProgress(job, 6, totalSteps, "Finalising infrastructure schedule...");
+    // Step 4: Store in DB and notify frontend
+    await updateProgress(job, 4, totalSteps, "Work packages ready — waiting for your review...");
 
-    aiReasoning =
-      `Infrastructure type: ${infraType}. ` +
-      `Extracted parameters from ${parsedDocs.length} document(s). ` +
-      `Selected ${allTasks.length} tasks using infrastructure rules engine. ` +
-      `Schedule duration: ${totalDurationDays} days. ` +
-      `Critical path tasks: ${infraSchedule.criticalPathTasks}. ` +
-      (infraRulesResult.longLeadItems.length > 0
-        ? `Long-lead items requiring early procurement: ${infraRulesResult.longLeadItems.map(t => t.name).join(", ")}.`
-        : "No long-lead procurement items flagged.");
+    // Pre-calculate version number (same logic as Step 7 in the building pipeline)
+    const existingVers = await db
+      .select({ versionNumber: scheduleVersions.versionNumber })
+      .from(scheduleVersions)
+      .where(eq(scheduleVersions.projectId, projectId))
+      .orderBy(desc(scheduleVersions.versionNumber))
+      .limit(1);
+    const nextVersion = (existingVers[0]?.versionNumber ?? 0) + 1;
+
+    const [pendingRow] = await db
+      .insert(pendingWorkPackages)
+      .values({
+        jobId: job.id!,
+        projectId,
+        workspaceId,
+        versionNumber: nextVersion,
+        constructionType: job.data.constructionType ?? infraType,
+        data: extracted as any,
+        status: "pending_review",
+      })
+      .returning({ id: pendingWorkPackages.id });
+
+    emitWorkPackagesReady({
+      jobId: job.id!,
+      projectId,
+      versionNumber: nextVersion,
+      constructionType: job.data.constructionType ?? infraType,
+      summary: {
+        totalPackages: extracted.extractionSummary.totalPackages,
+        boqDerived: extracted.extractionSummary.boqDerived,
+        drawingMeasured: extracted.extractionSummary.drawingMeasured,
+        estimated: extracted.extractionSummary.estimated,
+        missingData: extracted.extractionSummary.missingData,
+        conflictCount: extracted.extractionSummary.productivityConflicts?.length ?? 0,
+      },
+    });
+
+    console.log(`[worker] Stored pending work packages, version v${nextVersion}, id=${pendingRow.id}`);
+    console.log(`[worker] Total pipeline: ${Date.now() - pipelineStart}ms`);
+
+    return { phase: "awaiting_review", pendingId: pendingRow.id };
 
   } else {
     // -----------------------------------------------------------------------
@@ -810,6 +732,7 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
   console.log(`[worker] Pipeline total: ${Date.now() - pipelineStart}ms`);
 
   return {
+    phase: "complete",
     scheduleVersionId: savedVersion.id,
     taskCount: insertedTasks.length,
     durationDays: totalDurationDays,
