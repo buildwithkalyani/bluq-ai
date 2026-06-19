@@ -1021,6 +1021,22 @@ function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete,
   const [formData, setFormData] = useState(emptyForm);
   const [selectedPreds, setSelectedPreds] = useState<{id: string, type: string}[]>([]);
   const [error, setError] = useState("");
+  const [spaceDropOpen, setSpaceDropOpen] = useState(false);
+  const spaceDropRef = useRef<HTMLDivElement>(null);
+  const zoneOptions = useMemo(
+    () => [...new Set((tasks as any[]).map((t: any) => t.space).filter(Boolean))].sort() as string[],
+    [tasks]
+  );
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (spaceDropRef.current && !spaceDropRef.current.contains(e.target as Node)) {
+        setSpaceDropOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -1091,9 +1107,28 @@ function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete,
                   {PHASE_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
-              <div>
+              <div ref={spaceDropRef}>
                 <label className={labelCls}>Space / zone</label>
-                <input type="text" placeholder="e.g. Zone A — L3" value={f.space} onChange={e => set("space", e.target.value)} className={inputCls} />
+                <div className="relative">
+                  <input type="text" placeholder="e.g. Zone A — L3" value={f.space}
+                    onChange={e => { set("space", e.target.value); setSpaceDropOpen(true); }}
+                    onFocus={() => setSpaceDropOpen(true)}
+                    className={inputCls} />
+                  {spaceDropOpen && zoneOptions.filter(z => !f.space || z.toLowerCase().includes(f.space.toLowerCase())).length > 0 && (
+                    <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-[#E2E8F0] rounded-md shadow-lg max-h-40 overflow-y-auto">
+                      {zoneOptions
+                        .filter(z => !f.space || z.toLowerCase().includes(f.space.toLowerCase()))
+                        .map(z => (
+                          <button key={z} type="button"
+                            className="w-full text-left px-3 py-2 text-[13px] hover:bg-[#F8FAFC] text-[#0F172A]"
+                            onMouseDown={() => { set("space", z); setSpaceDropOpen(false); }}>
+                            {z}
+                          </button>
+                        ))
+                      }
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
