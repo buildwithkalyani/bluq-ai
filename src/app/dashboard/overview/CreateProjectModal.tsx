@@ -40,6 +40,7 @@ export default function CreateProjectModal({ onClose, onCreate, editingProject, 
   const [suggestions, setSuggestions] = useState<NominatimResult[]>([]);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [noSuggestionsFound, setNoSuggestionsFound] = useState(false);
   const [stage, setStage] = useState(editingProject?.stage ?? "Foundation");
   const [type, setType] = useState("Residential");
   const [startDate, setStartDate] = useState(parseIsoDate(editingProject?.startDate ?? ""));
@@ -72,15 +73,26 @@ export default function CreateProjectModal({ onClose, onCreate, editingProject, 
   }, []);
 
   const fetchSuggestions = useCallback(async (query: string) => {
-    if (query.length < 4) { setSuggestions([]); setSuggestionsOpen(false); return; }
+    if (query.length < 2) { setSuggestions([]); setSuggestionsOpen(false); return; }
     setLoadingSuggestions(true);
     try {
-      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&addressdetails=0`;
-      const res = await fetch(url, { headers: { "Accept-Language": "en", "User-Agent": "BLUQ-ConstructionPM/1.0" } });
-      const data: NominatimResult[] = await res.json();
-      setSuggestions(data);
-      setSuggestionsOpen(true); // always open — shows suggestions or "use as typed" fallback
+      const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=5`);
+      const data = await res.json();
+      const mapped: NominatimResult[] = (data.features ?? []).map((f: any) => {
+        const p = f.properties;
+        const parts = [p.name, p.city, p.state, p.country].filter(Boolean);
+        return {
+          place_id: p.osm_id ?? Date.now(),
+          display_name: [...new Set(parts)].join(", "),
+          lat: String(f.geometry.coordinates[1]),
+          lon: String(f.geometry.coordinates[0]),
+        };
+      });
+      setNoSuggestionsFound(mapped.length === 0);
+      setSuggestions(mapped);
+      setSuggestionsOpen(true);
     } catch {
+      setNoSuggestionsFound(true);
       setSuggestions([]);
       setSuggestionsOpen(true);
     } finally {
@@ -92,6 +104,7 @@ export default function CreateProjectModal({ onClose, onCreate, editingProject, 
     setAddress(val);
     setAddressValidated(false);
     setCoords(null);
+    setNoSuggestionsFound(false);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => fetchSuggestions(val), 500);
   };
@@ -118,14 +131,12 @@ export default function CreateProjectModal({ onClose, onCreate, editingProject, 
 
     // If validated via "use as typed" (no coords), attempt geocoding one more time
     let resolvedCoords = coords;
-    if (!resolvedCoords && address.trim().length >= 4) {
+    if (!resolvedCoords && address.trim().length >= 2) {
       try {
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address.trim())}&format=json&limit=1`,
-          { headers: { "Accept-Language": "en", "User-Agent": "BLUQ-ConstructionPM/1.0" } }
-        );
-        const data: NominatimResult[] = await res.json();
-        if (data[0]) resolvedCoords = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+        const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(address.trim())}&limit=1`);
+        const data = await res.json();
+        const f = data.features?.[0];
+        if (f) resolvedCoords = { lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0] };
       } catch { /* proceed without coords */ }
     }
 
@@ -287,7 +298,7 @@ export default function CreateProjectModal({ onClose, onCreate, editingProject, 
                 )}
               </div>
             )}
-            {address.trim().length > 0 && !addressValidated && !suggestionsOpen && (
+            {noSuggestionsFound && !addressValidated && !loadingSuggestions && !suggestionsOpen && address.trim().length >= 2 && (
               <p className="text-red-500 text-[11px] mt-1">Please select a valid address from the suggestions.</p>
             )}
           </div>

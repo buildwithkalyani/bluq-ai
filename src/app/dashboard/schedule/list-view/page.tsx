@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useMemo, useCallback, Suspense } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef, Suspense } from 'react';
 import { Search, Pencil, Trash2, Plus } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import {
@@ -91,6 +91,8 @@ function ListViewPageContent() {
   const [isExporting, setIsExporting] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [projectDates, setProjectDates] = useState<{ startDate: string | null; endDate: string | null }>({ startDate: null, endDate: null });
+  const [spaceDropOpen, setSpaceDropOpen] = useState(false);
+  const spaceDropRef = useRef<HTMLDivElement>(null);
 
   const openAddModal = (ctx?: { phase?: string; space?: string }) => {
     setEditingTaskId(null);
@@ -119,6 +121,20 @@ function ListViewPageContent() {
   const versionId = searchParams.get("versionId") ?? undefined;
   const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
   const selectedTaskData = tasks.find(t => t.id === selectedTask) ?? null;
+  const zoneOptions = useMemo(
+    () => [...new Set(tasks.map(t => t.space).filter(Boolean))].sort() as string[],
+    [tasks]
+  );
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (spaceDropRef.current && !spaceDropRef.current.contains(e.target as Node)) {
+        setSpaceDropOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   useEffect(() => {
     if (wsLoading) return;
@@ -686,11 +702,29 @@ function ListViewPageContent() {
                       <option key={p} value={p}>{p}</option>)}
                   </select>
                 </div>
-                <div className="flex-1">
+                <div className="flex-1" ref={spaceDropRef}>
                   <label className="block text-[11px] font-bold text-[#475569] mb-1.5 uppercase tracking-wider">Space / Zone</label>
-                  <input type="text" placeholder="e.g. Zone A — L3"
-                    value={newTask.space} onChange={e => setNewTask({ ...newTask, space: e.target.value })}
-                    className="w-full bg-white border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#2563EB]" />
+                  <div className="relative">
+                    <input type="text" placeholder="e.g. Zone A — L3"
+                      value={newTask.space}
+                      onChange={e => { setNewTask({ ...newTask, space: e.target.value }); setSpaceDropOpen(true); }}
+                      onFocus={() => setSpaceDropOpen(true)}
+                      className="w-full bg-white border border-[#E2E8F0] rounded-md px-3 py-2 text-[13px] outline-none focus:border-[#2563EB]" />
+                    {spaceDropOpen && zoneOptions.filter(z => !newTask.space || z.toLowerCase().includes(newTask.space.toLowerCase())).length > 0 && (
+                      <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-[#E2E8F0] rounded-md shadow-lg max-h-40 overflow-y-auto">
+                        {zoneOptions
+                          .filter(z => !newTask.space || z.toLowerCase().includes(newTask.space.toLowerCase()))
+                          .map(z => (
+                            <button key={z} type="button"
+                              className="w-full text-left px-3 py-2 text-[13px] hover:bg-[#F8FAFC] text-[#0F172A]"
+                              onMouseDown={() => { setNewTask({ ...newTask, space: z }); setSpaceDropOpen(false); }}>
+                              {z}
+                            </button>
+                          ))
+                        }
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
