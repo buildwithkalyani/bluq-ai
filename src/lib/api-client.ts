@@ -984,7 +984,7 @@ export interface ScheduleGenerateResult {
 
 export interface ScheduleStatusResult {
   jobId: string;
-  status: "queued" | "processing" | "completed" | "failed";
+  status: "queued" | "processing" | "completed" | "failed" | "awaiting_review";
   message: string;
   progress?: {
     step: number;
@@ -993,9 +993,11 @@ export interface ScheduleStatusResult {
     status: string;
   };
   result?: {
-    scheduleVersionId: string;
-    taskCount: number;
-    durationDays: number;
+    scheduleVersionId?: string;
+    taskCount?: number;
+    durationDays?: number;
+    phase?: "awaiting_review" | "complete";
+    pendingId?: string;
   };
   error?: string;
   suggestion?: string;
@@ -1049,4 +1051,32 @@ export async function generateSchedule(data: {
 /** GET /schedule/status/:jobId → poll generation progress */
 export async function pollScheduleStatus(jobId: string): Promise<ScheduleStatusResult> {
   return apiFetch<ScheduleStatusResult>(`/schedule/status/${jobId}`);
+}
+
+export interface PendingWorkPackagesResult {
+  jobId: string;
+  projectId: string;
+  versionNumber: number;
+  constructionType: string;
+  status: "pending_review" | "confirmed";
+  data: unknown;
+  createdAt: string;
+}
+
+/** GET /schedule/work-packages/:jobId → fetch pending work packages for review */
+export async function fetchPendingWorkPackages(jobId: string): Promise<PendingWorkPackagesResult> {
+  return apiFetch<PendingWorkPackagesResult>(`/schedule/work-packages/${jobId}`);
+}
+
+/** POST /schedule/work-packages/:jobId/cancel → discard extracted work packages */
+export async function cancelWorkPackages(jobId: string): Promise<void> {
+  return apiPost(`/schedule/work-packages/${jobId}/cancel`, {});
+}
+
+/** POST /schedule/work-packages/:jobId/confirm → confirm (with optional inline edits) */
+export async function confirmWorkPackages(
+  jobId: string,
+  edits?: Array<{ id: string; [key: string]: unknown }>
+): Promise<{ message: string; versionNumber: number; projectId: string }> {
+  return apiPost(`/schedule/work-packages/${jobId}/confirm`, { edits });
 }

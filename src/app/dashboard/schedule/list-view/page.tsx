@@ -13,6 +13,7 @@ import {
 import { Card, StatusBadge, Btn } from "@/components/ui/bluq-ui";
 import { fetchTasks, fetchProject, isRealProject, createTask, updateTask, deleteTask } from "@/lib/api-client";
 import { useWorkspace } from "@/context/workspace";
+import { useScheduleVersion } from "@/hooks/useScheduleVersion";
 
 const PHASE_ORDER = [
   "Surveys & Investigations","Regulatory Approvals","Land Acquisition","Site Preparation","Earthworks","Civil & Earthworks",
@@ -116,15 +117,15 @@ function ListViewPageContent() {
   const projectIdParam = searchParams.get("projectId") ?? "0";
   const urlWs = searchParams.get("workspaceId");
   const workspaceId = (urlWs && urlWs !== "null") ? urlWs : ctxWorkspaceId;
-  const versionId = searchParams.get("versionId") ?? undefined;
   const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
+  const { resolvedVersionId } = useScheduleVersion(projectIdParam, workspaceId ?? undefined, real);
   const selectedTaskData = tasks.find(t => t.id === selectedTask) ?? null;
 
   useEffect(() => {
     if (wsLoading) return;
     setLoading(true);
     const taskLoader = real
-      ? fetchTasks(projectIdParam, workspaceId!, undefined, versionId)
+      ? fetchTasks(projectIdParam, workspaceId!, undefined, resolvedVersionId)
       : isDesignMode
         ? getScheduleTasks(Number(projectIdParam))
         : Promise.resolve([]);
@@ -140,13 +141,13 @@ function ListViewPageContent() {
       setCollapsedAreas(new Set());
       setCollapsedTasks(new Set());
     });
-  }, [projectIdParam, workspaceId, wsLoading, isDesignMode, versionId]);
+  }, [projectIdParam, workspaceId, wsLoading, isDesignMode, resolvedVersionId]);
 
   // Refetch tasks when an import completes on the import-csv page
   const refetchTasks = useCallback(() => {
     if (!real) return;
-    fetchTasks(projectIdParam, workspaceId!, undefined, versionId).then(t => setTasks(t)).catch(console.error);
-  }, [real, projectIdParam, workspaceId, versionId]);
+    fetchTasks(projectIdParam, workspaceId!, undefined, resolvedVersionId).then(t => setTasks(t)).catch(console.error);
+  }, [real, projectIdParam, workspaceId, resolvedVersionId]);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -804,6 +805,7 @@ function ListViewPageContent() {
                         contractor: newTask.contractor || undefined,
                         area: newTask.space || undefined,
                         phase: newTask.phase || undefined,
+                        scheduleVersionId: resolvedVersionId,
                       }).then(created => {
                         setTasks(prev => [...prev, {
                           id: created.id, projectId: 0, name: newTask.name.trim(), phase: newTask.phase,

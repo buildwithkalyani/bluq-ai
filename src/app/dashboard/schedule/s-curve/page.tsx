@@ -166,6 +166,7 @@ function SCurveContent() {
   const projectIdParam = searchParams.get("projectId") ?? "0";
   const urlWs = searchParams.get("workspaceId");
   const workspaceId = (urlWs && urlWs !== "null") ? urlWs : ctxWorkspaceId;
+  const versionId = searchParams.get("versionId") ?? undefined;
   const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!workspaceId;
 
   const [tasks, setTasks] = useState<ScheduleTask[]>([]);
@@ -177,7 +178,7 @@ function SCurveContent() {
 
   useEffect(() => {
     const loader = real
-      ? fetchTasks(projectIdParam, workspaceId!)
+      ? fetchTasks(projectIdParam, workspaceId!, undefined, versionId)
       : isDesignMode
         ? getScheduleTasks(Number(projectIdParam))
         : Promise.resolve([]);
@@ -192,7 +193,7 @@ function SCurveContent() {
       }
       setTasks(loaded);
     });
-  }, [projectIdParam, workspaceId, real, isDesignMode]);
+  }, [projectIdParam, workspaceId, real, isDesignMode, versionId]);
 
   const { plannedPts, actualPts, xLabels, plannedAtToday, actualNow, todayFrac } =
     useMemo(() => computeCurves(tasks, startDate, endDate), [tasks, startDate, endDate]);

@@ -308,3 +308,29 @@ export function emitTaskUpdate(payload: TaskUpdatePayload): void {
   if (!io) return;
   io.to(`project:${payload.projectId}`).emit("task:updated", payload);
 }
+
+// ---------------------------------------------------------------------------
+// emitWorkPackagesReady — called by worker after work package extraction
+//
+// Emits to the project room so the frontend can redirect to the review page.
+// ---------------------------------------------------------------------------
+
+export interface WorkPackagesReadyPayload {
+  jobId: string;
+  projectId: string;
+  versionNumber: number;
+  constructionType: string;
+  summary: {
+    totalPackages: number;
+    boqDerived: number;
+    drawingMeasured: number;
+    estimated: number;
+    missingData: string[];
+    conflictCount: number;
+  };
+}
+
+export function emitWorkPackagesReady(payload: WorkPackagesReadyPayload): void {
+  if (!io) return;
+  io.to(`project:${payload.projectId}`).emit("work_packages_ready", payload);
+}

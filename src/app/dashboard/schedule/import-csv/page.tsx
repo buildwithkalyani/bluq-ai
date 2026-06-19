@@ -20,11 +20,13 @@ import {
   createScheduleVersion,
   createScheduleVersionFromImport,
   bulkImportTasks,
+  cancelWorkPackages,
   type ScheduleStatusResult,
   type BackendDocument,
   type ScheduleVersion,
 } from "@/lib/api-client";
-import { SCHEDULE_JOB_PREFIX, SCHEDULE_RESULT_PREFIX } from "@/hooks/useSchedulePoller";
+import { SCHEDULE_JOB_PREFIX, SCHEDULE_RESULT_PREFIX, SCHEDULE_PENDING_PREFIX } from "@/hooks/useSchedulePoller";
+import { useTaskSocket } from "@/hooks/useTaskSocket";
 import { uploadFileToStorage } from "@/lib/supabase-storage";
 
 // ─── DOCS CACHE ─────────────────────────────────────────────────────────────
@@ -88,7 +90,7 @@ type FileEntry = {
   docCategory?: string;
 };
 
-type RealStep = "idle" | "uploading" | "ready" | "generating" | "done" | "error";
+type RealStep = "idle" | "uploading" | "ready" | "generating" | "done" | "error" | "review_ready";
 
 const DOC_CATEGORIES: Array<{
   id: string;
@@ -99,15 +101,16 @@ const DOC_CATEGORIES: Array<{
   hint: string;
   Icon: LucideIcon;
 }> = [
-  { id: "gfc",          label: "GFC Drawings",         color: "#2563EB", bg: "#EFF6FF", border: "#93C5FD",  hint: "Good-For-Construction architectural & structural drawings", Icon: Layers },
-  { id: "boq",          label: "BOQ",                  color: "#059669", bg: "#DCFCE7", border: "#A7F3D0",  hint: "Bill of Quantities and cost estimates",                      Icon: Calculator },
-  { id: "specs",        label: "Specifications",        color: "#0891B2", bg: "#ECFEFF", border: "#67E8F9",  hint: "Technical specs, IS codes, material standards",              Icon: ScrollText },
-  { id: "contract",     label: "Contract / Milestones", color: "#7C3AED", bg: "#F5F3FF", border: "#C4B5FD",  hint: "Contract conditions, contractual milestones",                Icon: Milestone },
-  { id: "productivity", label: "Productivity Sheet",    color: "#D97706", bg: "#FFFBEB", border: "#FCD34D",  hint: "Resource norms, crew output rates, productivity data",       Icon: BarChart3 },
-  { id: "wbs",          label: "WBS Template",          color: "#0F766E", bg: "#F0FDFA", border: "#99F6E4",  hint: "Work Breakdown Structure template",                          Icon: GitBranch },
-  { id: "procurement",  label: "Procurement Schedule",  color: "#9333EA", bg: "#FAF5FF", border: "#D8B4FE",  hint: "Material procurement and delivery schedule",                 Icon: Package },
-  { id: "survey",       label: "Site Survey / Geotech", color: "#B45309", bg: "#FEF3C7", border: "#FDE68A",  hint: "Site survey, soil investigation, geotech report",            Icon: MapPin },
-  { id: "qs",           label: "QS Report",             color: "#DC2626", bg: "#FEF2F2", border: "#FCA5A5",  hint: "Quantity Surveyor report, rate analysis",                    Icon: Receipt },
+  { id: "gfc",              label: "GFC Drawings",           color: "#2563EB", bg: "#EFF6FF", border: "#93C5FD",  hint: "Good-For-Construction architectural & structural drawings",          Icon: Layers },
+  { id: "boq",              label: "BOQ",                    color: "#059669", bg: "#DCFCE7", border: "#A7F3D0",  hint: "Bill of Quantities and cost estimates",                            Icon: Calculator },
+  { id: "specs",            label: "Specifications",          color: "#0891B2", bg: "#ECFEFF", border: "#67E8F9",  hint: "Technical specs, IS codes, material standards",                    Icon: ScrollText },
+  { id: "contract",         label: "Contract / Milestones",   color: "#7C3AED", bg: "#F5F3FF", border: "#C4B5FD",  hint: "Contract conditions, contractual milestones",                      Icon: Milestone },
+  { id: "method_statement", label: "Method Statement",        color: "#0F766E", bg: "#F0FDFA", border: "#99F6E4",  hint: "Construction method, equipment deployment plan, mobilisation list", Icon: ClipboardList },
+  { id: "productivity",     label: "Productivity Sheet",      color: "#D97706", bg: "#FFFBEB", border: "#FCD34D",  hint: "Resource norms, crew output rates, productivity data",             Icon: BarChart3 },
+  { id: "wbs",              label: "WBS Template",            color: "#0F766E", bg: "#F0FDFA", border: "#99F6E4",  hint: "Work Breakdown Structure template",                                Icon: GitBranch },
+  { id: "procurement",      label: "Procurement Schedule",    color: "#9333EA", bg: "#FAF5FF", border: "#D8B4FE",  hint: "Material procurement and delivery schedule",                       Icon: Package },
+  { id: "survey",           label: "Site Survey / Geotech",   color: "#B45309", bg: "#FEF3C7", border: "#FDE68A",  hint: "Site survey, soil investigation, geotech report",                  Icon: MapPin },
+  { id: "qs",               label: "QS Report",               color: "#DC2626", bg: "#FEF2F2", border: "#FCA5A5",  hint: "Quantity Surveyor report, rate analysis",                          Icon: Receipt },
 ];
 
 const CONSTRUCTION_TYPES: Array<{
@@ -720,6 +723,12 @@ function RealImport({
   const [jobStatus, setJobStatus] = useState<ScheduleStatusResult | null>(null);
   const [genResult, setGenResult] = useState<ScheduleStatusResult["result"] | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
+  const [pendingJobId, setPendingJobId] = useState<string | null>(null);
+  const [pendingVersionNumber, setPendingVersionNumber] = useState<number | null>(null);
+  const [pendingPackageSummary, setPendingPackageSummary] = useState<{
+    totalPackages: number; boqDerived: number; drawingMeasured: number;
+    estimated: number; missingData: string[]; conflictCount: number;
+  } | null>(null);
   const [existingDocs, setExistingDocs] = useState<BackendDocument[]>([]);
   const [deleteError, setDeleteError] = useState("");
 
@@ -734,6 +743,16 @@ function RealImport({
         setStep("done");
         return;
       } catch { localStorage.removeItem(`${SCHEDULE_RESULT_PREFIX}${projectId}`); }
+    }
+
+    const pendingRaw = localStorage.getItem(`${SCHEDULE_PENDING_PREFIX}${projectId}`);
+    if (pendingRaw) {
+      try {
+        const parsed = JSON.parse(pendingRaw);
+        setPendingJobId(parsed?.pendingId ?? null);
+        setStep("review_ready");
+        return;
+      } catch { localStorage.removeItem(`${SCHEDULE_PENDING_PREFIX}${projectId}`); }
     }
 
     const savedJobRaw = localStorage.getItem(`${SCHEDULE_JOB_PREFIX}${projectId}`);
@@ -776,6 +795,23 @@ function RealImport({
       .catch(err => console.error("fetchDocuments failed:", err));
   }, [projectId, workspaceId]);
 
+  // Socket.IO fast path — get work_packages_ready instantly instead of waiting for next poll
+  useTaskSocket({
+    projectId: isRealProject(projectId) ? projectId : null,
+    onWorkPackagesReady: (payload) => {
+      window.dispatchEvent(
+        new CustomEvent("bluq_schedule_awaiting_review", {
+          detail: {
+            projectId,
+            pendingId: payload.jobId,
+            versionNumber: payload.versionNumber,
+            summary: payload.summary,
+          },
+        })
+      );
+    },
+  });
+
   // Warn on browser refresh/close when pending files exist
   useEffect(() => {
     const pending = files.some(f => f.status === "pending");
@@ -805,11 +841,22 @@ function RealImport({
       }
     };
 
+    const handleAwaitingReview = (e: Event) => {
+      const { projectId: pid, pendingId, versionNumber, summary } = (e as CustomEvent).detail;
+      if (pid !== projectId) return;
+      setPendingJobId(pendingId ?? null);
+      setPendingVersionNumber(versionNumber ?? null);
+      setPendingPackageSummary(summary ?? null);
+      setStep("review_ready");
+    };
+
     window.addEventListener("bluq_schedule_progress", handleProgress);
     window.addEventListener("bluq_schedule_done", handleDone);
+    window.addEventListener("bluq_schedule_awaiting_review", handleAwaitingReview);
     return () => {
       window.removeEventListener("bluq_schedule_progress", handleProgress);
       window.removeEventListener("bluq_schedule_done", handleDone);
+      window.removeEventListener("bluq_schedule_awaiting_review", handleAwaitingReview);
     };
   }, [projectId]);
 
@@ -1039,6 +1086,85 @@ function RealImport({
             Upload new files
           </button>
         </div>
+      </div>
+    );
+  }
+
+  // ── REVIEW READY STATE (infra pipeline: work packages extracted, awaiting PM review) ──
+  if (step === "review_ready") {
+    const handleCancelReview = async () => {
+      if (pendingJobId) {
+        try { await cancelWorkPackages(pendingJobId); } catch { /* no-op if already gone */ }
+      }
+      localStorage.removeItem(`${SCHEDULE_PENDING_PREFIX}${projectId}`);
+      setPendingJobId(null);
+      setPendingVersionNumber(null);
+      setPendingPackageSummary(null);
+      setStep(existingDocs.length > 0 ? "ready" : "idle");
+    };
+
+    return (
+      <div className="p-5 space-y-4 max-w-2xl">
+        <SectionTitle>Work Packages Extracted</SectionTitle>
+        <Card className="space-y-5">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 bg-[#F0FDF4] rounded-lg flex items-center justify-center shrink-0">
+              <CheckCircle size={18} className="text-[#059669]" />
+            </div>
+            <div>
+              <div className="text-[13px] font-semibold text-[#0F172A]">
+                AI extracted work packages for <span className="text-[#2563EB]">{projectName}</span>
+              </div>
+              <div className="text-[12px] text-[#475569] mt-0.5">
+                Review and confirm before the schedule is built.
+                {pendingVersionNumber != null && (
+                  <> Schedule <span className="font-semibold text-[#0F172A]">v{pendingVersionNumber}</span> will be created after confirmation.</>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {pendingPackageSummary && (
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-[#F8FAFC] rounded-lg p-3 text-center border border-[#E2E8F0]">
+                <div className="text-[20px] font-bold text-[#0F172A]">{pendingPackageSummary.totalPackages}</div>
+                <div className="text-[11px] text-[#64748B] mt-0.5">Work packages</div>
+              </div>
+              <div className={`rounded-lg p-3 text-center border ${pendingPackageSummary.missingData.length > 0 ? "bg-[#FEF2F2] border-[#FCA5A5]" : "bg-[#F0FDF4] border-[#A7F3D0]"}`}>
+                <div className={`text-[20px] font-bold ${pendingPackageSummary.missingData.length > 0 ? "text-[#DC2626]" : "text-[#059669]"}`}>
+                  {pendingPackageSummary.missingData.length}
+                </div>
+                <div className="text-[11px] text-[#64748B] mt-0.5">Need input</div>
+              </div>
+              <div className={`rounded-lg p-3 text-center border ${pendingPackageSummary.conflictCount > 0 ? "bg-[#FFFBEB] border-[#FCD34D]" : "bg-[#F0FDF4] border-[#A7F3D0]"}`}>
+                <div className={`text-[20px] font-bold ${pendingPackageSummary.conflictCount > 0 ? "text-[#D97706]" : "text-[#059669]"}`}>
+                  {pendingPackageSummary.conflictCount}
+                </div>
+                <div className="text-[11px] text-[#64748B] mt-0.5">Conflicts</div>
+              </div>
+            </div>
+          )}
+
+          <Btn
+            onClick={() =>
+              router.push(
+                `/dashboard/schedule/review-packages?jobId=${pendingJobId}&projectId=${projectId}&workspaceId=${workspaceId}`
+              )
+            }
+            className="w-full justify-center"
+          >
+            Review &amp; Confirm work packages →
+          </Btn>
+
+          <div className="pt-2 border-t border-[#f0f1f3]">
+            <button
+              onClick={handleCancelReview}
+              className="text-[12px] text-[#8C959F] hover:text-[#CF222E] font-semibold transition-colors"
+            >
+              Cancel — discard and start over
+            </button>
+          </div>
+        </Card>
       </div>
     );
   }
@@ -1421,6 +1547,7 @@ function RealImport({
         const hasContract = taggedCategories.has("contract");
         const hasSurvey = taggedCategories.has("survey");
         const hasBoq = taggedCategories.has("boq");
+        const hasMethodStatement = taggedCategories.has("method_statement");
 
         const ct = constructionType;
         const isBuilding  = ct === "residential" || ct === "commercial" || ct === "mixed" || ct === "";
@@ -1525,6 +1652,17 @@ function RealImport({
                   { value: "no", label: "No" },
                 ]} />
               </div>
+              {hasMethodStatement ? (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#F0FDFA] border border-[#99F6E4]">
+                  <CheckCircle size={12} className="text-[#0F766E] shrink-0" />
+                  <span className="text-[11px] text-[#0F766E]">Method statement uploaded — tower crane model, formwork system type, concrete pump output, and crew deployment read from it</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#F8FAFC] border border-dashed border-[#CBD5E1]">
+                  <ClipboardList size={12} className="text-[#94A3B8] shrink-0" />
+                  <span className="text-[11px] text-[#64748B]">Upload a <strong>Method Statement</strong> to read tower crane spec, formwork system, and crew sizes — otherwise standard deployment will be assumed</span>
+                </div>
+              )}
             </>
           )}
 
@@ -1564,6 +1702,17 @@ function RealImport({
                   { value: "no", label: "No" },
                 ]} />
               </div>
+              {hasMethodStatement ? (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#F0FDFA] border border-[#99F6E4]">
+                  <CheckCircle size={12} className="text-[#0F766E] shrink-0" />
+                  <span className="text-[11px] text-[#0F766E]">Method statement uploaded — mobile crane capacity, PEB erection crew size, and bay sequence read from it</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#F8FAFC] border border-dashed border-[#CBD5E1]">
+                  <ClipboardList size={12} className="text-[#94A3B8] shrink-0" />
+                  <span className="text-[11px] text-[#64748B]">Upload a <strong>Method Statement</strong> to read erection crane, PEB assembly crew, and equipment deployment plan — otherwise standard assumed</span>
+                </div>
+              )}
               <div className="h-px bg-[#F1F5F9]" />
             </>
           )}
@@ -1617,6 +1766,17 @@ function RealImport({
                   <span className="text-[11px] text-[#D97706]">BOQ uploaded — pavement layers and quantities read from it</span>
                 </div>
               )}
+              {hasMethodStatement ? (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#F0FDFA] border border-[#99F6E4]">
+                  <CheckCircle size={12} className="text-[#0F766E] shrink-0" />
+                  <span className="text-[11px] text-[#0F766E]">Method statement uploaded — excavator count, paving train type, and batching plant capacity read from it</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#F8FAFC] border border-dashed border-[#CBD5E1]">
+                  <ClipboardList size={12} className="text-[#94A3B8] shrink-0" />
+                  <span className="text-[11px] text-[#64748B]">Upload a <strong>Method Statement</strong> to read your planned equipment fleet — otherwise standard deployment will be assumed</span>
+                </div>
+              )}
               <div className="h-px bg-[#F1F5F9]" />
             </>
           )}
@@ -1658,6 +1818,17 @@ function RealImport({
                 <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#FFFBEB] border border-[#FCD34D]">
                   <CheckCircle size={12} className="text-[#D97706] shrink-0" />
                   <span className="text-[11px] text-[#D97706]">Site survey uploaded — alignment and gauge data read from it</span>
+                </div>
+              )}
+              {hasMethodStatement ? (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#F0FDFA] border border-[#99F6E4]">
+                  <CheckCircle size={12} className="text-[#0F766E] shrink-0" />
+                  <span className="text-[11px] text-[#0F766E]">Method statement uploaded — track laying machine type, TBM specs, and crew deployment read from it</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#F8FAFC] border border-dashed border-[#CBD5E1]">
+                  <ClipboardList size={12} className="text-[#94A3B8] shrink-0" />
+                  <span className="text-[11px] text-[#64748B]">Upload a <strong>Method Statement</strong> to read your planned equipment fleet — otherwise standard deployment will be assumed</span>
                 </div>
               )}
               <div className="h-px bg-[#F1F5F9]" />
@@ -1709,6 +1880,17 @@ function RealImport({
                   <span className="text-[11px] text-[#D97706]">BOQ uploaded — deck type and quantities read from it</span>
                 </div>
               )}
+              {hasMethodStatement ? (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#F0FDFA] border border-[#99F6E4]">
+                  <CheckCircle size={12} className="text-[#0F766E] shrink-0" />
+                  <span className="text-[11px] text-[#0F766E]">Method statement uploaded — piling rig count, launching gantry type, and formwork crew size read from it</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#F8FAFC] border border-dashed border-[#CBD5E1]">
+                  <ClipboardList size={12} className="text-[#94A3B8] shrink-0" />
+                  <span className="text-[11px] text-[#64748B]">Upload a <strong>Method Statement</strong> to read your planned equipment fleet — otherwise standard deployment will be assumed</span>
+                </div>
+              )}
               <div className="h-px bg-[#F1F5F9]" />
             </>
           )}
@@ -1743,6 +1925,17 @@ function RealImport({
                   { value: "cutcover", label: "Cut & Cover" },
                 ]} />
               </div>
+              {hasMethodStatement ? (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#F0FDFA] border border-[#99F6E4]">
+                  <CheckCircle size={12} className="text-[#0F766E] shrink-0" />
+                  <span className="text-[11px] text-[#0F766E]">Method statement uploaded — TBM specs, NATM heading crew size, and adit schedule read from it</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#F8FAFC] border border-dashed border-[#CBD5E1]">
+                  <ClipboardList size={12} className="text-[#94A3B8] shrink-0" />
+                  <span className="text-[11px] text-[#64748B]">Upload a <strong>Method Statement</strong> to read TBM specs or NATM crew deployment — otherwise standard assumptions will be used</span>
+                </div>
+              )}
               <div className="h-px bg-[#F1F5F9]" />
             </>
           )}
