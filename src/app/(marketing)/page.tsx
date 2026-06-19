@@ -411,16 +411,16 @@ export default function Home() {
                 <li><a href="/about">About</a></li>
                 <li><a href="/#demo">Book a Demo</a></li>
                 <li><a href="/contact">Contact</a></li>
-                <li><a href="#">Privacy Policy</a></li>
-                <li><a href="#">Terms of Service</a></li>
+                <li><a href="/privacy">Privacy Policy</a></li>
+                <li><a href="/terms">Terms of Service</a></li>
               </ul>
             </div>
           </div>
           <div className="n-footer-bottom">
             <span className="n-footer-copy">© 2026 BluQ Technologies Pvt Ltd. Building in public.</span>
             <div className="n-footer-legal">
-              <a href="#">Privacy</a>
-              <a href="#">Terms</a>
+              <a href="/privacy">Privacy</a>
+              <a href="/terms">Terms</a>
               <a href="/contact">Support</a>
             </div>
           </div>
