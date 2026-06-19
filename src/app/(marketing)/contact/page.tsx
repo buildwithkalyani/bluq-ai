@@ -269,7 +269,7 @@ export default function Contact() {
                 <li><a href="/#demo">Book a Demo</a></li>
                 <li><a href="/contact">Contact</a></li>
                 <li><a href="#">Privacy Policy</a></li>
-                <li><a href="#">Terms of Service</a></li>
+                <li><a href="/terms">Terms of Service</a></li>
               </ul>
             </div>
           </div>
@@ -277,7 +277,7 @@ export default function Contact() {
             <span className="n-footer-copy">© 2026 BluQ Technologies. Building in public.</span>
             <div className="n-footer-legal">
               <a href="#">Privacy</a>
-              <a href="#">Terms</a>
+              <a href="/terms">Terms</a>
               <a href="/contact">Support</a>
             </div>
           </div>
