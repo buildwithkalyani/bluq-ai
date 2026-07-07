@@ -139,7 +139,7 @@ export function startSchedulerWorker() {
   });
 
   worker.on("failed", (job, err) => {
-    console.error(`❌ Schedule job ${job?.id} failed:`, err.message);
+    console.error(`❌ Schedule job ${job?.id} failed:`, err.stack ?? err.message);
   });
 
   worker.on("error", (err) => {
