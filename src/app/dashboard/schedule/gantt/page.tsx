@@ -1024,7 +1024,7 @@ function TaskModal({ isOpen, mode, task, tasks, deps, onClose, onSave, onDelete,
   const [spaceDropOpen, setSpaceDropOpen] = useState(false);
   const spaceDropRef = useRef<HTMLDivElement>(null);
   const zoneOptions = useMemo(
-    () => [...new Set((tasks as any[]).map((t: any) => t.space).filter(Boolean))].sort() as string[],
+    () => Array.from(new Set((tasks as any[]).map((t: any) => t.space).filter(Boolean))).sort() as string[],
     [tasks]
   );
 
