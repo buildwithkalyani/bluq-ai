@@ -123,7 +123,7 @@ function ListViewPageContent() {
   const { resolvedVersionId } = useScheduleVersion(projectIdParam, workspaceId ?? undefined, real);
   const selectedTaskData = tasks.find(t => t.id === selectedTask) ?? null;
   const zoneOptions = useMemo(
-    () => [...new Set(tasks.map(t => t.space).filter(Boolean))].sort() as string[],
+    () => Array.from(new Set(tasks.map(t => t.space).filter(Boolean))).sort() as string[],
     [tasks]
   );
 

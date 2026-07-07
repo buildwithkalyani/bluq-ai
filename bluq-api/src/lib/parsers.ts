@@ -597,10 +597,13 @@ export function toClaudeContent(
   }
 
   // Add the actual prompt at the end (Claude reads documents first, then instructions)
-  content.push({
-    type: "text" as const,
-    text: promptText,
-  });
+  // Skip if empty — callers that move the prompt to the system block pass "" here.
+  if (promptText) {
+    content.push({
+      type: "text" as const,
+      text: promptText,
+    });
+  }
 
   return content;
 }

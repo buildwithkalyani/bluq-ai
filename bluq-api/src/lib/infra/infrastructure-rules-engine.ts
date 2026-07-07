@@ -13,6 +13,7 @@ import { getICDTasks, type ICDTaskTemplate } from "./icd-task-library.js";
 import { getLCTTasks, type LiquidCargoTerminalTaskTemplate } from "./liquid-cargo-terminal-task-library.js";
 import { getTunnelTasks, type TunnelTaskTemplate } from "./tunnel-task-library.js";
 import { getRailwayTasks, type RailwayTaskTemplate } from "./railway-task-library.js";
+import { getBuildingTasks, getBuildingTypeConfig, type BuildingTaskTemplate } from "./building-task-library.js";
 import type {
   InfrastructureType,
   PortParameters,
@@ -26,6 +27,7 @@ import type {
   LiquidCargoTerminalParameters,
   TunnelParameters,
   RailwayParameters,
+  BuildingParameters,
 } from "./infrastructure-parameter-extractor.js";
 
 // ─── Task Union ────────────────────────────────────────────────────────────────
@@ -41,7 +43,8 @@ export type InfrastructureTask =
   | (ICDTaskTemplate                       & { infraType: "icd" })
   | (LiquidCargoTerminalTaskTemplate       & { infraType: "liquid_cargo_terminal" })
   | (TunnelTaskTemplate                    & { infraType: "tunnel" })
-  | (RailwayTaskTemplate                   & { infraType: "railway" });
+  | (RailwayTaskTemplate                   & { infraType: "railway" })
+  | (BuildingTaskTemplate                  & { infraType: "building" });
 
 export interface SelectedInfraTask {
   code: string;
@@ -51,6 +54,8 @@ export interface SelectedInfraTask {
   inclusionReason: string;
   leadTimeDays?: number;
   isCriticalPath?: boolean;
+  // Link to the section this instance belongs to — scheduler looks up full section data from params.sections
+  sectionId?: string;
 }
 
 // ─── Port Rules ────────────────────────────────────────────────────────────────
@@ -1020,6 +1025,197 @@ function selectRailwayTasks(params: RailwayParameters): SelectedInfraTask[] {
   return selected;
 }
 
+// ─── Building Rules ────────────────────────────────────────────────────────────
+
+function selectBuildingTasks(params: BuildingParameters): SelectedInfraTask[] {
+  const allTasks = getBuildingTasks(params.projectType);
+  const config = getBuildingTypeConfig(params.projectType);
+  const mandatorySet = new Set(config.mandatoryTaskCodes);
+  const excludedSet = new Set(config.excludedTaskCodes);
+  const selected: SelectedInfraTask[] = [];
+
+  for (const task of allTasks) {
+    if (excludedSet.has(task.code)) continue;
+
+    // Restrict to applicable building types if specified
+    if (task.applicableBuildingTypes && !task.applicableBuildingTypes.includes(params.projectType)) continue;
+    if (task.excludedBuildingTypes && task.excludedBuildingTypes.includes(params.projectType)) continue;
+
+    let include = task.isCore || mandatorySet.has(task.code);
+    let reason = task.isCore ? "core task" : mandatorySet.has(task.code) ? `mandatory for ${params.projectType}` : "";
+
+    // Pile foundation — only if foundationType is pile
+    if (task.code === "BL-EX-02") {
+      include = params.foundationType === "pile";
+      reason = include ? `pile foundation specified (${params.pileDepthM ?? "?"}m depth)` : "";
+    }
+
+    // Raft foundation — only if raft
+    if (task.code === "BL-EX-04") {
+      include = params.foundationType === "raft";
+      reason = include ? "raft foundation specified" : "";
+    }
+
+    // Isolated footing — only if isolated_footing
+    if (task.code === "BL-EX-05") {
+      include = params.foundationType === "isolated_footing";
+      reason = include ? "isolated footing foundation" : "";
+    }
+
+    // Pile cap only if pile foundation
+    if (task.code === "BL-EX-03") {
+      include = params.foundationType === "pile";
+      reason = include ? "pile cap required with pile foundation" : "";
+    }
+
+    // Basement works — only if basementLevels > 0
+    if (task.code === "BL-BM-01" || task.code === "BL-BM-02") {
+      include = params.basementLevels > 0;
+      reason = include ? `${params.basementLevels} basement level(s)` : "";
+    }
+
+    // CGWA NoC — only if groundwater is shallow (< 5m)
+    if (task.code === "BL-AP-04") {
+      include = params.basementLevels > 0 && (params.groundwaterDepthM ?? 10) < 5;
+      reason = include ? `shallow groundwater (${params.groundwaterDepthM}m) + basement excavation` : "";
+    }
+
+    // Environmental clearance — only if required
+    if (task.code === "BL-AP-02") {
+      include = params.environmentalClearanceRequired;
+      reason = include ? `BUA ${params.totalBuiltUpAreaSqm}sqm > 20,000sqm — SEIAA EC required` : "";
+    }
+
+    // RERA — only for residential
+    if (task.code === "BL-SI-03" || task.code === "BL-CH-04") {
+      include = params.reraRegistrationRequired;
+      reason = include ? "RERA registration mandatory for residential project" : "";
+    }
+
+    // Tower crane — only for 10+ floors
+    if (task.code === "BL-PW-04") {
+      include = params.numberOfFloors >= 10;
+      reason = include ? `${params.numberOfFloors} floors — tower crane required` : "";
+    }
+
+    // Facade system (curtain wall / ACP) — conditional
+    if (task.code === "BL-EV-03") {
+      include = params.hasFacadeSystem;
+      reason = include ? "facade system (curtain wall / ACP / glass) specified" : "";
+    }
+
+    // Fire detection & sprinklers — high-rise mandatory
+    if (task.code === "BL-ME-04") {
+      include = params.hasFireFighting || params.hasSprinklers || params.numberOfFloors >= 4;
+      reason = include ? `fire fighting system — ${params.numberOfFloors} floors (NBC Part 4 mandatory > 15m)` : "";
+    }
+
+    // Fire NOC — mandatory for > 15m height (~ 4+ floors at 4m/floor)
+    if (task.code === "BL-AP-03") {
+      include = params.numberOfFloors >= 4 || params.floorHeightM * params.numberOfFloors > 15;
+      reason = include ? `building height > 15m — fire NOC required` : "";
+    }
+
+    // Lifts — conditional
+    if (task.code === "BL-ME-05") {
+      include = params.hasLift;
+      reason = include ? `${params.numberOfLifts ?? "?"} lift(s) specified` : "";
+    }
+
+    // CEI lift inspection — only if lifts exist
+    if (task.code === "BL-CH-02") {
+      include = params.hasLift;
+      reason = include ? "CEI inspection mandatory before lift commissioning" : "";
+    }
+
+    // HVAC — conditional
+    if (task.code === "BL-ME-03") {
+      include = params.hasHVAC;
+      reason = include ? "HVAC system specified" : "";
+    }
+
+    // False ceiling & partitions — commercial/hospital/hotel/DC only
+    if (task.code === "BL-FF-05") {
+      include = ["commercial_office", "hospital", "hotel", "data_center"].includes(params.projectType);
+      reason = include ? `false ceiling required for ${params.projectType}` : "";
+    }
+
+    // Precast superstructure — only if structuralSystem is precast
+    if (task.code === "BL-ST-04") {
+      include = params.structuralSystem === "precast";
+      reason = include ? "precast structural system" : "";
+    }
+
+    // For non-precast: exclude precast task; for precast: keep RCC slab (hybrid common)
+    if (task.code === "BL-ST-01" || task.code === "BL-ST-02" || task.code === "BL-ST-03") {
+      if (params.structuralSystem === "precast") {
+        // precast still needs slab topping — keep BL-ST-02 as topping slab, suppress columns
+        if (task.code === "BL-ST-01") { include = false; reason = ""; }
+      }
+    }
+
+    if (include) {
+      selected.push({
+        code: task.code,
+        name: task.name,
+        phase: task.phase,
+        infraType: "building",
+        inclusionReason: reason,
+        leadTimeDays: task.leadTimeDays,
+        isCriticalPath: task.taskCategory === "A" || (task.leadTimeDays !== undefined && task.leadTimeDays >= 60),
+      });
+    }
+  }
+
+  return selected;
+}
+
+// ─── Section Expansion ─────────────────────────────────────────────────────────
+// Linear phases: tasks in these phases are distributed along the project length/area
+// and get expanded into one instance per section.
+// Non-linear phases (approvals, commissioning, procurement) stay singular.
+
+const LINEAR_PHASES: Record<InfrastructureType, ReadonlySet<string>> = {
+  highway:               new Set(["earthworks", "pavement_layers", "drainage_structures"]),
+  bridge:                new Set(["foundation_piling", "substructure", "superstructure"]),
+  metro:                 new Set(["foundation_piling", "viaduct_structure", "station_civil", "track_works"]),
+  tunnel:                new Set(["portal_works", "tunnel_excavation", "primary_support", "waterproofing_lining", "drainage_invert"]),
+  port:                  new Set(["marine_works", "reclamation", "quay_berth", "yard_pavement"]),
+  railway:               new Set(["earthworks", "track_laying", "bridges_culverts"]),
+  airport:               new Set(["earthworks_grading", "runway_taxiway_pavement", "drainage"]),
+  water_treatment:       new Set<string>(),
+  mmlp:                  new Set(["warehouse_shed", "intermodal_yard", "site_preparation"]),
+  icd:                   new Set(["civil_earthworks", "pavement_yard", "warehousing_sheds"]),
+  liquid_cargo_terminal: new Set(["marine_structures", "storage_tanks", "pipeline_piping"]),
+  building:              new Set(["superstructure"]),
+};
+
+function expandToSections(
+  tasks: SelectedInfraTask[],
+  sections: { id: string; name: string }[],
+  infraType: InfrastructureType,
+): SelectedInfraTask[] {
+  if (sections.length === 0) return tasks;
+  const spatialPhases = LINEAR_PHASES[infraType];
+  const result: SelectedInfraTask[] = [];
+
+  for (const task of tasks) {
+    if (!spatialPhases.has(task.phase)) {
+      result.push(task);
+      continue;
+    }
+    for (const section of sections) {
+      result.push({
+        ...task,
+        code:      `${task.code}_${section.id}`,
+        name:      `${task.name} — ${section.name}`,
+        sectionId: section.id,
+      });
+    }
+  }
+  return result;
+}
+
 // ─── Main Entry Point ──────────────────────────────────────────────────────────
 
 export interface InfraRulesEngineResult {
@@ -1043,7 +1239,8 @@ export function runInfrastructureRulesEngine(
     | ICDParameters
     | LiquidCargoTerminalParameters
     | TunnelParameters
-    | RailwayParameters,
+    | RailwayParameters
+    | BuildingParameters,
 ): InfraRulesEngineResult {
   let selectedTasks: SelectedInfraTask[] = [];
 
@@ -1081,7 +1278,12 @@ export function runInfrastructureRulesEngine(
     case "railway":
       selectedTasks = selectRailwayTasks(parameters as RailwayParameters);
       break;
+    case "building":
+      selectedTasks = selectBuildingTasks(parameters as BuildingParameters);
+      break;
   }
+
+  selectedTasks = expandToSections(selectedTasks, parameters.sections, infraType);
 
   const criticalPathTasks = selectedTasks.filter((t) => t.isCriticalPath);
   const longLeadItems = selectedTasks

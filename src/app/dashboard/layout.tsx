@@ -156,7 +156,7 @@ function NewProjectModal({
         const parts = [p.name, p.city, p.state, p.country].filter(Boolean);
         return {
           place_id: p.osm_id ?? Date.now(),
-          display_name: [...new Set(parts)].join(", "),
+          display_name: Array.from(new Set(parts)).join(", "),
           lat: String(f.geometry.coordinates[1]),
           lon: String(f.geometry.coordinates[0]),
         };

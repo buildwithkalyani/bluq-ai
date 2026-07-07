@@ -310,27 +310,21 @@ export function emitTaskUpdate(payload: TaskUpdatePayload): void {
 }
 
 // ---------------------------------------------------------------------------
-// emitWorkPackagesReady — called by worker after work package extraction
-//
-// Emits to the project room so the frontend can redirect to the review page.
+// emitInfraParamsReady — called by worker after infrastructure parameter extraction
+// Emits to the project room so the frontend redirects to the parameter review page.
 // ---------------------------------------------------------------------------
 
-export interface WorkPackagesReadyPayload {
-  jobId: string;
-  projectId: string;
-  versionNumber: number;
+export interface InfraParamsReadyPayload {
+  jobId:            string;
+  projectId:        string;
+  versionNumber:    number;
   constructionType: string;
-  summary: {
-    totalPackages: number;
-    boqDerived: number;
-    drawingMeasured: number;
-    estimated: number;
-    missingData: string[];
-    conflictCount: number;
-  };
+  missingData:      string[];
+  confidence:       "high" | "medium" | "low";
 }
 
-export function emitWorkPackagesReady(payload: WorkPackagesReadyPayload): void {
+export function emitInfraParamsReady(payload: InfraParamsReadyPayload): void {
   if (!io) return;
-  io.to(`project:${payload.projectId}`).emit("work_packages_ready", payload);
+  io.to(`project:${payload.projectId}`).emit("infra_params_ready", payload);
 }
+

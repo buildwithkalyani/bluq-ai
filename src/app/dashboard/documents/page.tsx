@@ -1219,10 +1219,11 @@ function DocumentsPageContent() {
                     <button onClick={async () => {
                       setMenuOpenId(null); setMenuPos(null);
                       if (!workspaceId) return;
+                      const win = window.open("about:blank", "_blank");
                       try {
                         const url = await getDocumentDownloadUrl(f.backendId!, workspaceId);
-                        window.open(url);
-                      } catch { alert("Could not generate download link. Try again."); }
+                        if (win) win.location.href = url;
+                      } catch { win?.close(); alert("Could not generate download link. Try again."); }
                     }}
                       className="w-full text-left px-3 py-2 text-[13px] text-[#0F172A] hover:bg-[#F8FAFC] flex items-center gap-2">
                       <Download size={12} className="text-[#64748B]" /> Download

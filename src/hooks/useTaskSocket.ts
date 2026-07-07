@@ -71,19 +71,13 @@ interface ScheduleGeneratedPayload {
   taskCount: number;
 }
 
-interface WorkPackagesReadyPayload {
-  jobId: string;
-  projectId: string;
-  versionNumber: number;
+interface InfraParamsReadyPayload {
+  jobId:            string;
+  projectId:        string;
+  versionNumber:    number;
   constructionType: string;
-  summary: {
-    totalPackages: number;
-    boqDerived: number;
-    drawingMeasured: number;
-    estimated: number;
-    missingData: string[];
-    conflictCount: number;
-  };
+  missingData:      string[];
+  confidence:       "high" | "medium" | "low";
 }
 
 interface UseTaskSocketOptions {
@@ -95,11 +89,11 @@ interface UseTaskSocketOptions {
   setTasks?: React.Dispatch<React.SetStateAction<ScheduleTask[]>>;
   /** Called when a new schedule version is generated for this project */
   onScheduleGenerated?: (payload: ScheduleGeneratedPayload) => void;
-  /** Called when work packages are extracted and ready for PM review */
-  onWorkPackagesReady?: (payload: WorkPackagesReadyPayload) => void;
+  /** Called when infra parameters are extracted and ready for PM review */
+  onInfraParamsReady?: (payload: InfraParamsReadyPayload) => void;
 }
 
-export function useTaskSocket({ projectId, workspaceId, setTasks, onScheduleGenerated, onWorkPackagesReady }: UseTaskSocketOptions): void {
+export function useTaskSocket({ projectId, workspaceId, setTasks, onScheduleGenerated, onInfraParamsReady }: UseTaskSocketOptions): void {
   const socketRef = useRef<Socket | null>(null);
   const { data: session } = authClient.useSession();
   const token = (session as any)?.session?.token as string | undefined;
@@ -162,9 +156,9 @@ export function useTaskSocket({ projectId, workspaceId, setTasks, onScheduleGene
       }
     });
 
-    socket.on("work_packages_ready", (payload: WorkPackagesReadyPayload) => {
+    socket.on("infra_params_ready", (payload: InfraParamsReadyPayload) => {
       if (payload.projectId === projectId) {
-        onWorkPackagesReady?.(payload);
+        onInfraParamsReady?.(payload);
       }
     });
 
@@ -181,5 +175,5 @@ export function useTaskSocket({ projectId, workspaceId, setTasks, onScheduleGene
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [projectId, workspaceId, token, setTasks, onScheduleGenerated, onWorkPackagesReady]);
+  }, [projectId, workspaceId, token, setTasks, onScheduleGenerated, onInfraParamsReady]);
 }

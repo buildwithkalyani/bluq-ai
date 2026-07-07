@@ -164,3 +164,128 @@ return tasks;
 **Effort:** 1 hour.
 
 **Trigger:** Do after Alice Technology schedule integration — need real timing data first. Alice schedules can take 3-4+ minutes; a premature 30s timeout would kill valid jobs. Measure p95 response time in production logs, then set timeout to 2x that.
+
+---
+
+## 8. Fix "Accept Gap" route to read from `tasks` table instead of `schedule_json`
+
+`bluq-api/src/routes/schedule.ts` ~line 406
+
+When a user accepts an AI gap suggestion, the backend reads `scheduleJson.tasks` to find the last `endDate` in the target phase and auto-places the new task. Problem: `schedule_json` is the AI's original snapshot — it goes stale if tasks are edited after generation. Should query the `tasks` table instead (`WHERE scheduleVersionId = X AND phase = Y ORDER BY endDate DESC LIMIT 1`).
+
+**Effort:** Half a day.
+
+---
+
+## 9. Backfill `scheduleVersionId = NULL` tasks
+
+Tasks created manually before the versioning fix (June 2026) have `scheduleVersionId = NULL` in the `tasks` table. They won't show up when the Gantt filters by a specific version. Need a one-time migration to assign these orphaned tasks to the correct version for each project.
+
+**Effort:** 1 hour (SQL migration).
+
+---
+
+## 10. Overview Page — Infinite Scroll for Project Cards
+
+**What:** Overview page loads all projects at once. As project count grows, initial load gets heavy.
+
+**Why infinite scroll (not pagination):** Project cards are visually dense (status badges, dates, member avatars). Tapping through page numbers to find a project is poor UX on mobile. Infinite scroll feels native.
+
+**Rules:**
+1. **Batch size: 10–15 cards.** A phone screen shows 2–3 cards at once; 10 cards = enough to scroll immediately without over-fetching.
+2. **Backend: add `limit` + `cursor` params to `GET /projects`.** Return `nextCursor` in response. Frontend requests next batch when user nears bottom.
+
+**Frontend implementation:**
+- Use `IntersectionObserver` on a sentinel div at bottom of list (or a "Load more" trigger)
+- Append new cards to existing list — do not replace
+- Show skeleton cards while next batch loads
+
+**Exception — archived/old projects:** Do not use infinite scroll to surface 3-year-old closed projects. Instead, add a "Status" filter (`Active / Closed / Archived`) at top of overview. Closed projects go behind the filter, not in the main scroll.
+
+**Files to touch:**
+- `bluq-api/src/routes/projects.ts` — add `limit`/`cursor` query params
+- `src/lib/api-client.ts` — update `fetchProjects` to accept cursor
+- `src/app/dashboard/overview/page.tsx` — replace single fetch with paginated load
+
+**Effort:** 1 day.
+
+**Trigger:** When a workspace has 20+ active projects and overview load time becomes noticeable.
+
+---
+
+## 11. Element-Level Task Tracking (Drill-Down Gantt)
+
+**What:** Two-layer task system — scheduling grain (work packages, Gantt rows) + tracking grain (individual elements like columns, beams, chainage segments).
+
+**Why:** Site supervisors think in element IDs ("poured C-14 and C-15 today"), not percentages. Currently the Gantt has no way to track which specific element is done vs. pending. WhatsApp updates are already parsed — the missing piece is element-level tasks to update.
+
+**How it works:**
+
+Main Gantt stays clean — one bar per work package. Clicking a task opens a drill-down panel:
+
+```
+Main Gantt:
+  L3 Column Formwork    ████████░░░░  48%  [↓]
+  L3 Column Rebar       ██████░░░░░░  35%  [↓]
+
+Click [↓]:
+  ← L3 Column Formwork (47 elements)
+  C-01  Grid A/1  ✅ Done
+  C-02  Grid A/2  ✅ Done
+  C-03  Grid B/1  🔄 In Progress
+  C-14  Grid C/3  ⚠️  Delayed
+  ...
+```
+
+% complete on Gantt = elements done / total elements (auto-computed).
+
+**Where element IDs come from:**
+- Structural drawings: column schedule (C-01 to C-N), beam schedule (B-01 to B-N)
+- Road/infra: chainage segments (0+000→0+100, etc.) — already element-granular
+- Extracted by Claude during work package extraction if drawing has element schedule
+
+**WhatsApp integration:** "done C-03 and C-04 today" → two elements flip to ✅ → task % updates → Gantt bar updates live via Socket.IO.
+
+**Schema change needed:**
+- New `elements` table: `id, taskId, elementCode, label, gridRef, status, updatedAt`
+- `tasks.percentComplete` computed from `elements` count when elements exist; manual otherwise
+
+**Files to touch:**
+- `bluq-api/src/db/schema.ts` — add `elements` table
+- `bluq-api/src/lib/infra/infrastructure-parameter-extractor.ts` — extract element IDs from structural schedules during parameter extraction
+- `bluq-api/src/lib/whatsapp-parser.ts` — parse element codes from field messages
+- `bluq-api/src/routes/tasks.ts` — GET /tasks/:id/elements, PATCH /tasks/:id/elements/:elementId
+- `src/app/dashboard/schedule/gantt/` — drill-down panel component
+
+**Effort:** 3-4 days.
+
+**Trigger:** After Phase 3 optimizer is live and Gantt is stable. Needed before scaling to large structural projects (30+ floor buildings, long road corridors).
+
+---
+
+## 12. Drawing Vision Extraction (Spatial Constraints from Drawings)
+
+**What:** Use Claude Vision to extract spatial constraints directly from engineering drawings (cross-sections, pile layout plans, site layout plans) rather than relying solely on text descriptions.
+
+**Why:** The infrastructure parameter extractor currently reads only text documents (DPR, BOQ, technical specs). Spatial constraints like formation width, cutting dimensions, pile cap sizes, and access road widths are often only in drawings — not described in text. This means `maxConcurrentActivities` per section defaults to norm-based estimates when the actual geometry is available in drawings.
+
+**How it works:**
+1. User uploads drawings alongside text documents (PDF or image)
+2. Backend converts each PDF page to an image
+3. Claude Vision call per drawing: extract formation widths, zone dimensions, access road widths, pile layouts
+4. Merge drawing-extracted dimensions with text-extracted parameters — drawing values override defaults for `maxConcurrentActivities` and `accessRoute`
+
+**What Claude Vision can read:**
+- Road cross-sections → formation width, cutting depth, embankment height → max machines per section
+- Pile layout plans → pile cap size, pile spacing → piling rigs per pier
+- Tunnel cross-sections → bore diameter → heading crew count
+- Site layout plans → zone boundaries, access road widths → concurrent activity limits
+
+**Files to touch:**
+- `bluq-api/src/lib/infra/infrastructure-parameter-extractor.ts` — add `extractSpatialFromDrawings(imageBase64[])` function
+- `bluq-api/src/routes/schedule.ts` — accept drawing file uploads alongside text documents
+- Frontend upload UI — allow attaching drawing PDFs to schedule generation
+
+**Effort:** 2-3 days.
+
+**Trigger:** When projects have poor spatial constraint extraction — planner overrides `maxConcurrentActivities` manually more than once per project. Drawing upload is a premium feature; text-only extraction is good enough for most projects.
