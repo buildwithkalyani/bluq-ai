@@ -90,8 +90,9 @@ interface WhatsappJobData {
 // REDIS STATE (separate client — not BullMQ connection)
 // ---------------------------------------------------------------------------
 
-const waRedis = new Redis(process.env.UPSTASH_REDIS_URL!, {
-  tls: { rejectUnauthorized: false },
+const waRedisUrl = process.env.UPSTASH_REDIS_URL!;
+const waRedis = new Redis(waRedisUrl, {
+  ...(waRedisUrl.startsWith("rediss://") ? { tls: { rejectUnauthorized: false } } : {}),
 });
 const STATE_TTL_SECONDS = 60 * 60 * 24; // 24 hours
 
