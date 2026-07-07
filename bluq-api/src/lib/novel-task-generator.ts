@@ -143,7 +143,7 @@ Generate one task per item. Output ONLY a JSON array.`.trim();
         "anthropic-beta": "prompt-caching-2024-07-31",
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
+        model: "claude-sonnet-4-6",
         max_tokens: 2048,
         system: [
           {

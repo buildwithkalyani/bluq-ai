@@ -997,7 +997,7 @@ export interface ScheduleStatusResult {
     taskCount?: number;
     durationDays?: number;
     phase?: "awaiting_review" | "complete";
-    pendingId?: string;
+    pendingId?: string;  // present when phase === "awaiting_review"
   };
   error?: string;
   suggestion?: string;
@@ -1053,30 +1053,34 @@ export async function pollScheduleStatus(jobId: string): Promise<ScheduleStatusR
   return apiFetch<ScheduleStatusResult>(`/schedule/status/${jobId}`);
 }
 
-export interface PendingWorkPackagesResult {
-  jobId: string;
-  projectId: string;
-  versionNumber: number;
+export interface PendingInfraParamsResult {
+  jobId:            string;
+  projectId:        string;
+  versionNumber:    number;
   constructionType: string;
-  status: "pending_review" | "confirmed";
-  data: unknown;
+  status:           "pending_review" | "confirmed";
+  data: {
+    params:    Record<string, unknown>;  // InfrastructureParameters — typed on the review page
+    startDate: string;
+    userId:    string;
+  };
   createdAt: string;
 }
 
-/** GET /schedule/work-packages/:jobId → fetch pending work packages for review */
-export async function fetchPendingWorkPackages(jobId: string): Promise<PendingWorkPackagesResult> {
-  return apiFetch<PendingWorkPackagesResult>(`/schedule/work-packages/${jobId}`);
+/** GET /schedule/work-packages/:jobId → fetch pending infra parameters for PM review */
+export async function fetchPendingInfraParams(jobId: string): Promise<PendingInfraParamsResult> {
+  return apiFetch<PendingInfraParamsResult>(`/schedule/work-packages/${jobId}`);
 }
 
-/** POST /schedule/work-packages/:jobId/cancel → discard extracted work packages */
-export async function cancelWorkPackages(jobId: string): Promise<void> {
+/** POST /schedule/work-packages/:jobId/cancel → discard extraction, start over */
+export async function cancelInfraParams(jobId: string): Promise<void> {
   return apiPost(`/schedule/work-packages/${jobId}/cancel`, {});
 }
 
-/** POST /schedule/work-packages/:jobId/confirm → confirm (with optional inline edits) */
-export async function confirmWorkPackages(
+/** POST /schedule/work-packages/:jobId/confirm → PM confirms (with optional param edits) → schedule built */
+export async function confirmInfraParams(
   jobId: string,
-  edits?: Array<{ id: string; [key: string]: unknown }>
-): Promise<{ message: string; versionNumber: number; projectId: string }> {
-  return apiPost(`/schedule/work-packages/${jobId}/confirm`, { edits });
+  editedParams?: Record<string, unknown>,
+): Promise<{ scheduleVersionId: string; versionNumber: number; taskCount: number; durationDays: number }> {
+  return apiPost(`/schedule/work-packages/${jobId}/confirm`, { editedParams });
 }

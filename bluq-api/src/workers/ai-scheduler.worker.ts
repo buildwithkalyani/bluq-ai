@@ -46,12 +46,14 @@ import { selectTasks, printTaskSummary, type RulesEngineResult } from "../lib/ru
 import { calculateSchedule, type ScheduleResult, type ScheduledTask } from "../lib/duration-calculator.js";
 import { generateNovelTasks } from "../lib/novel-task-generator.js";
 import { checkTaskGaps, type GapCheckResult } from "../lib/gap-checker.js";
-import { getIO, emitWorkPackagesReady } from "../lib/socket.js";
+import { getIO, emitInfraParamsReady } from "../lib/socket.js";
+import { pendingWorkPackages } from "../db/schema.js";
 
 // Infra pipeline modules
-import { type InfrastructureType } from "../lib/infra/infrastructure-parameter-extractor.js";
-import { extractWorkPackages } from "../lib/infra/work-package-extractor.js";
-import { pendingWorkPackages } from "../db/schema.js";
+import {
+  type InfrastructureType,
+  extractInfrastructureParameters,
+} from "../lib/infra/infrastructure-parameter-extractor.js";
 
 // ---------------------------------------------------------------------------
 // JOB TYPES
@@ -153,13 +155,10 @@ export function startSchedulerWorker() {
 // MAIN PIPELINE
 // ---------------------------------------------------------------------------
 
-async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
-  phase: "awaiting_review" | "complete";
-  pendingId?: string;
-  scheduleVersionId?: string;
-  taskCount?: number;
-  durationDays?: number;
-}> {
+async function processScheduleJob(job: Job<ScheduleJobData>): Promise<
+  | { phase: "awaiting_review"; pendingId: string }
+  | { phase: "complete"; scheduleVersionId: string; taskCount: number; durationDays: number }
+> {
   const { projectId, workspaceId, userId } = job.data;
   const apiKey = process.env.ANTHROPIC_API_KEY;
 
@@ -264,7 +263,7 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
   console.log(`[worker] Step 2 completed in ${Date.now() - step2Start}ms`);
 
   // =========================================================================
-  // STEP 3–6: Branched pipeline — infra vs building
+  // STEP 3–6: Infra pipeline (all types including building)
   // =========================================================================
 
   const infraType = resolveInfraType(job.data.constructionType);
@@ -281,28 +280,30 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
 
   if (infraType) {
     // -----------------------------------------------------------------------
-    // INFRASTRUCTURE PIPELINE — PHASE 2: WORK PACKAGE EXTRACTION
-    // Extracts work packages from documents, stores in DB, notifies frontend.
-    // Optimizer runs in Phase 3 after PM reviews and confirms.
+    // INFRASTRUCTURE PIPELINE — PHASE A
+    // Extract parameters via Claude, store for PM review.
+    // Phase B (rules engine + RCPSP + save) runs in POST /work-packages/:jobId/confirm
+    // after the PM reviews and edits the extracted parameters.
     // -----------------------------------------------------------------------
 
-    // Step 3: Extract work packages via Claude
-    await updateProgress(job, 3, totalSteps, `AI is reading your ${infraType} project documents...`);
+    // Step 3: Extract infrastructure parameters via Claude
+    await updateProgress(job, 3, totalSteps, `Extracting ${infraType} project parameters...`);
     const step3Start = Date.now();
 
-    const extracted = await extractWorkPackages(infraType, parsed);
-
+    const infraParams = await extractInfrastructureParameters(
+      infraType,
+      parsed,
+      job.data.extractionRuns ?? 1,
+    );
     console.log(
-      `[worker] Work packages extracted: ${extracted.extractionSummary.totalPackages} packages ` +
-      `(BOQ: ${extracted.extractionSummary.boqDerived}, drawn: ${extracted.extractionSummary.drawingMeasured}, ` +
-      `estimated: ${extracted.extractionSummary.estimated})`
+      `[worker] Infra params extracted: confidence=${infraParams.confidence}, ` +
+      `missing=${infraParams.missingData.length} fields`
     );
     console.log(`[worker] Step 3 completed in ${Date.now() - step3Start}ms`);
 
-    // Step 4: Store in DB and notify frontend
-    await updateProgress(job, 4, totalSteps, "Work packages ready — waiting for your review...");
+    // Step 4: Store in DB — PM reviews before Phase B runs
+    await updateProgress(job, 4, totalSteps, "Parameters extracted — review before schedule is built...");
 
-    // Pre-calculate version number (same logic as Step 7 in the building pipeline)
     const existingVers = await db
       .select({ versionNumber: scheduleVersions.versionNumber })
       .from(scheduleVersions)
@@ -314,33 +315,31 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
     const [pendingRow] = await db
       .insert(pendingWorkPackages)
       .values({
-        jobId: job.id!,
+        jobId:            job.id!,
         projectId,
         workspaceId,
-        versionNumber: nextVersion,
+        versionNumber:    nextVersion,
         constructionType: job.data.constructionType ?? infraType,
-        data: extracted as any,
+        data: {
+          params:    infraParams,
+          startDate: job.data.startDate ?? new Date().toISOString().split("T")[0],
+          userId,
+        },
         status: "pending_review",
       })
       .returning({ id: pendingWorkPackages.id });
 
-    emitWorkPackagesReady({
-      jobId: job.id!,
+    emitInfraParamsReady({
+      jobId:            job.id!,
       projectId,
-      versionNumber: nextVersion,
+      versionNumber:    nextVersion,
       constructionType: job.data.constructionType ?? infraType,
-      summary: {
-        totalPackages: extracted.extractionSummary.totalPackages,
-        boqDerived: extracted.extractionSummary.boqDerived,
-        drawingMeasured: extracted.extractionSummary.drawingMeasured,
-        estimated: extracted.extractionSummary.estimated,
-        missingData: extracted.extractionSummary.missingData,
-        conflictCount: extracted.extractionSummary.productivityConflicts?.length ?? 0,
-      },
+      missingData:      infraParams.missingData,
+      confidence:       infraParams.confidence,
     });
 
-    console.log(`[worker] Stored pending work packages, version v${nextVersion}, id=${pendingRow.id}`);
-    console.log(`[worker] Total pipeline: ${Date.now() - pipelineStart}ms`);
+    console.log(`[worker] Stored infra params pending review, v${nextVersion}, id=${pendingRow.id}`);
+    console.log(`[worker] Total Phase A: ${Date.now() - pipelineStart}ms`);
 
     return { phase: "awaiting_review", pendingId: pendingRow.id };
 
@@ -732,10 +731,10 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
   console.log(`[worker] Pipeline total: ${Date.now() - pipelineStart}ms`);
 
   return {
-    phase: "complete",
+    phase:             "complete" as const,
     scheduleVersionId: savedVersion.id,
-    taskCount: insertedTasks.length,
-    durationDays: totalDurationDays,
+    taskCount:         insertedTasks.length,
+    durationDays:      totalDurationDays,
   };
 }
 
@@ -745,7 +744,6 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<{
 // ---------------------------------------------------------------------------
 
 // Maps frontend constructionType string → InfrastructureType enum used by infra pipeline.
-// Returns null for building types (residential, commercial, etc.) which use the existing pipeline.
 function resolveInfraType(constructionType?: string): InfrastructureType | null {
   const map: Record<string, InfrastructureType> = {
     road:                   "highway",
@@ -777,6 +775,20 @@ function resolveInfraType(constructionType?: string): InfrastructureType | null 
     railway_tunnel:         "tunnel",
     water_tunnel:           "tunnel",
     hill_tunnel:            "tunnel",
+    building:               "building",
+    residential:            "building",
+    residential_highrise:   "building",
+    commercial:             "building",
+    commercial_office:      "building",
+    office:                 "building",
+    industrial:             "building",
+    industrial_shed:        "building",
+    warehouse:              "building",
+    hospital:               "building",
+    healthcare:             "building",
+    data_center:            "building",
+    datacenter:             "building",
+    hotel:                  "building",
   };
   if (!constructionType) return null;
   return map[constructionType.toLowerCase()] ?? null;

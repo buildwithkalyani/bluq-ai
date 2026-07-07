@@ -20,7 +20,7 @@ import {
   createScheduleVersion,
   createScheduleVersionFromImport,
   bulkImportTasks,
-  cancelWorkPackages,
+  cancelInfraParams,
   type ScheduleStatusResult,
   type BackendDocument,
   type ScheduleVersion,
@@ -725,10 +725,6 @@ function RealImport({
   const [errorMsg, setErrorMsg] = useState("");
   const [pendingJobId, setPendingJobId] = useState<string | null>(null);
   const [pendingVersionNumber, setPendingVersionNumber] = useState<number | null>(null);
-  const [pendingPackageSummary, setPendingPackageSummary] = useState<{
-    totalPackages: number; boqDerived: number; drawingMeasured: number;
-    estimated: number; missingData: string[]; conflictCount: number;
-  } | null>(null);
   const [existingDocs, setExistingDocs] = useState<BackendDocument[]>([]);
   const [deleteError, setDeleteError] = useState("");
 
@@ -795,17 +791,18 @@ function RealImport({
       .catch(err => console.error("fetchDocuments failed:", err));
   }, [projectId, workspaceId]);
 
-  // Socket.IO fast path — get work_packages_ready instantly instead of waiting for next poll
+  // Socket.IO fast path — get infra_params_ready instantly instead of waiting for next poll
   useTaskSocket({
     projectId: isRealProject(projectId) ? projectId : null,
-    onWorkPackagesReady: (payload) => {
+    onInfraParamsReady: (payload) => {
       window.dispatchEvent(
         new CustomEvent("bluq_schedule_awaiting_review", {
           detail: {
             projectId,
-            pendingId: payload.jobId,
+            pendingId:    payload.jobId,
             versionNumber: payload.versionNumber,
-            summary: payload.summary,
+            missingData:  payload.missingData,
+            confidence:   payload.confidence,
           },
         })
       );
@@ -842,11 +839,10 @@ function RealImport({
     };
 
     const handleAwaitingReview = (e: Event) => {
-      const { projectId: pid, pendingId, versionNumber, summary } = (e as CustomEvent).detail;
+      const { projectId: pid, pendingId, versionNumber } = (e as CustomEvent).detail;
       if (pid !== projectId) return;
       setPendingJobId(pendingId ?? null);
       setPendingVersionNumber(versionNumber ?? null);
-      setPendingPackageSummary(summary ?? null);
       setStep("review_ready");
     };
 
@@ -1094,18 +1090,17 @@ function RealImport({
   if (step === "review_ready") {
     const handleCancelReview = async () => {
       if (pendingJobId) {
-        try { await cancelWorkPackages(pendingJobId); } catch { /* no-op if already gone */ }
+        try { await cancelInfraParams(pendingJobId); } catch { /* no-op if already gone */ }
       }
       localStorage.removeItem(`${SCHEDULE_PENDING_PREFIX}${projectId}`);
       setPendingJobId(null);
       setPendingVersionNumber(null);
-      setPendingPackageSummary(null);
       setStep(existingDocs.length > 0 ? "ready" : "idle");
     };
 
     return (
       <div className="p-5 space-y-4 max-w-2xl">
-        <SectionTitle>Work Packages Extracted</SectionTitle>
+        <SectionTitle>Review Extracted Parameters</SectionTitle>
         <Card className="space-y-5">
           <div className="flex items-start gap-3">
             <div className="w-9 h-9 bg-[#F0FDF4] rounded-lg flex items-center justify-center shrink-0">
@@ -1113,37 +1108,16 @@ function RealImport({
             </div>
             <div>
               <div className="text-[13px] font-semibold text-[#0F172A]">
-                AI extracted work packages for <span className="text-[#2563EB]">{projectName}</span>
+                Parameters extracted for <span className="text-[#2563EB]">{projectName}</span>
               </div>
               <div className="text-[12px] text-[#475569] mt-0.5">
-                Review and confirm before the schedule is built.
+                Review quantities, resources, and missing data before building the schedule.
                 {pendingVersionNumber != null && (
                   <> Schedule <span className="font-semibold text-[#0F172A]">v{pendingVersionNumber}</span> will be created after confirmation.</>
                 )}
               </div>
             </div>
           </div>
-
-          {pendingPackageSummary && (
-            <div className="grid grid-cols-3 gap-3">
-              <div className="bg-[#F8FAFC] rounded-lg p-3 text-center border border-[#E2E8F0]">
-                <div className="text-[20px] font-bold text-[#0F172A]">{pendingPackageSummary.totalPackages}</div>
-                <div className="text-[11px] text-[#64748B] mt-0.5">Work packages</div>
-              </div>
-              <div className={`rounded-lg p-3 text-center border ${pendingPackageSummary.missingData.length > 0 ? "bg-[#FEF2F2] border-[#FCA5A5]" : "bg-[#F0FDF4] border-[#A7F3D0]"}`}>
-                <div className={`text-[20px] font-bold ${pendingPackageSummary.missingData.length > 0 ? "text-[#DC2626]" : "text-[#059669]"}`}>
-                  {pendingPackageSummary.missingData.length}
-                </div>
-                <div className="text-[11px] text-[#64748B] mt-0.5">Need input</div>
-              </div>
-              <div className={`rounded-lg p-3 text-center border ${pendingPackageSummary.conflictCount > 0 ? "bg-[#FFFBEB] border-[#FCD34D]" : "bg-[#F0FDF4] border-[#A7F3D0]"}`}>
-                <div className={`text-[20px] font-bold ${pendingPackageSummary.conflictCount > 0 ? "text-[#D97706]" : "text-[#059669]"}`}>
-                  {pendingPackageSummary.conflictCount}
-                </div>
-                <div className="text-[11px] text-[#64748B] mt-0.5">Conflicts</div>
-              </div>
-            </div>
-          )}
 
           <Btn
             onClick={() =>
@@ -1153,7 +1127,7 @@ function RealImport({
             }
             className="w-full justify-center"
           >
-            Review &amp; Confirm work packages →
+            Review &amp; Confirm parameters →
           </Btn>
 
           <div className="pt-2 border-t border-[#f0f1f3]">

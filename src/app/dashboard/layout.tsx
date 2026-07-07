@@ -126,6 +126,7 @@ function NewProjectModal({
   const [suggestions, setSuggestions] = useState<{ place_id: number; display_name: string; lat: string; lon: string }[]>([]);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [noSuggestionsFound, setNoSuggestionsFound] = useState(false);
   const [category, setCategory] = useState("Residential");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -145,17 +146,26 @@ function NewProjectModal({
   }, []);
 
   const fetchSuggestions = useCallback(async (query: string) => {
-    if (query.length < 4) { setSuggestions([]); setSuggestionsOpen(false); return; }
+    if (query.length < 2) { setSuggestions([]); setSuggestionsOpen(false); return; }
     setLoadingSuggestions(true);
     try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&addressdetails=0`,
-        { headers: { "Accept-Language": "en", "User-Agent": "BLUQ-ConstructionPM/1.0" } }
-      );
+      const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=5`);
       const data = await res.json();
-      setSuggestions(data);
+      const mapped = (data.features ?? []).map((f: any) => {
+        const p = f.properties;
+        const parts = [p.name, p.city, p.state, p.country].filter(Boolean);
+        return {
+          place_id: p.osm_id ?? Date.now(),
+          display_name: Array.from(new Set(parts)).join(", "),
+          lat: String(f.geometry.coordinates[1]),
+          lon: String(f.geometry.coordinates[0]),
+        };
+      });
+      setNoSuggestionsFound(mapped.length === 0);
+      setSuggestions(mapped);
       setSuggestionsOpen(true);
     } catch {
+      setNoSuggestionsFound(true);
       setSuggestions([]);
       setSuggestionsOpen(true);
     } finally {
@@ -167,6 +177,7 @@ function NewProjectModal({
     setAddress(val);
     setAddressValidated(false);
     setCoords(null);
+    setNoSuggestionsFound(false);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => fetchSuggestions(val), 500);
   };
@@ -346,7 +357,7 @@ function NewProjectModal({
                 )}
               </div>
             )}
-            {address.trim().length > 0 && !addressValidated && !suggestionsOpen && (
+            {noSuggestionsFound && !addressValidated && !loadingSuggestions && !suggestionsOpen && address.trim().length >= 2 && (
               <p className="text-red-500 text-[11px] mt-1">Please select a valid address from the suggestions.</p>
             )}
           </div>

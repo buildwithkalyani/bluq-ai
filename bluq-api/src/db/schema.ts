@@ -502,6 +502,8 @@ export const reports = pgTable("reports", {
 	check("reports_type_check", sql`type = ANY (ARRAY['daily'::text, 'weekly'::text])`),
 ]);
 
+// Stores extracted InfrastructureParameters between Phase A (extraction) and
+// Phase B (rules engine + RCPSP), while the PM reviews and edits the parameters.
 export const pendingWorkPackages = pgTable("pending_work_packages", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	jobId: text("job_id").notNull(),
@@ -509,7 +511,7 @@ export const pendingWorkPackages = pgTable("pending_work_packages", {
 	workspaceId: uuid("workspace_id").notNull(),
 	versionNumber: integer("version_number").notNull(),
 	constructionType: text("construction_type").notNull(),
-	data: jsonb().notNull(),
+	data: jsonb().notNull(),   // { params: InfrastructureParameters, startDate: string, userId: string }
 	status: text().notNull().default("pending_review"),
 	confirmedAt: timestamp("confirmed_at", { withTimezone: true, mode: 'string' }),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
