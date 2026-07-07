@@ -296,7 +296,9 @@ Click [↓]:
 
 **What happened (2026-07-08):** Upstash account's payment lapsed, DB got rate-limited (`ERR Your database has been temporarily rate-limited`), which broke all BullMQ queues (ai-scheduler, whatsapp-processor, pdf-generator, cron) since they share one Redis connection. To keep testing without paying Upstash yet, switched the queue backend to a free Railway Redis plugin (plain `redis://`, no TLS) added to the `bluq-api` Railway project.
 
-**Code change made:** [bluq-api/src/lib/redis.ts](bluq-api/src/lib/redis.ts) — TLS config is now conditional on URL scheme:
+**Code changes made — two separate Redis clients in bluq-api both needed the same fix (grepped whole `bluq-api/` for `UPSTASH_REDIS_URL`/`rejectUnauthorized`, confirmed these are the only two):**
+
+1. [bluq-api/src/lib/redis.ts](bluq-api/src/lib/redis.ts) — main BullMQ connection (used by all 4 queues: ai-scheduler, whatsapp-processor, pdf-generator, cron):
 ```ts
 const useTls = redisUrl.startsWith("rediss://");
 export const redisConnection = new Redis(redisUrl, {
@@ -304,14 +306,23 @@ export const redisConnection = new Redis(redisUrl, {
   ...(useTls ? { tls: { rejectUnauthorized: false } } : {}),
 });
 ```
-Previously `tls: { rejectUnauthorized: false }` was always forced — that only works for Upstash's `rediss://` URL, not Railway's plain `redis://`.
 
-**Env var change made:** Railway → `bluq-api` service → Variables → `UPSTASH_REDIS_URL` was repointed from the Upstash `rediss://...` connection string to the Railway Redis plugin's `redis://...` URL.
+2. [bluq-api/src/workers/whatsapp.worker.ts](bluq-api/src/workers/whatsapp.worker.ts) — separate, second Redis client (`waRedis`) used only for WhatsApp conversation state, not part of the BullMQ connection above:
+```ts
+const waRedisUrl = process.env.UPSTASH_REDIS_URL!;
+const waRedis = new Redis(waRedisUrl, {
+  ...(waRedisUrl.startsWith("rediss://") ? { tls: { rejectUnauthorized: false } } : {}),
+});
+```
+
+Both previously forced `tls: { rejectUnauthorized: false }` unconditionally — only correct for Upstash's `rediss://` URL, not Railway's plain `redis://`. Symptom of missing #2: `[ioredis] Unhandled error event: Error: connect ETIMEDOUT` at `TLSSocket`, surfaced to frontend as a raw `Cannot read properties of undefined (reading '0')` crash from the worker.
+
+**Env var change made:** Railway → `bluq-api` service → Variables → `UPSTASH_REDIS_URL` was repointed from the Upstash `rediss://...` connection string to the Railway Redis plugin's `redis://...` URL. Both clients above read this same env var, so one env var change covers both.
 
 **To revert once Upstash is paid again (before onboarding paid clients):**
 1. Railway → `bluq-api` service → Variables → set `UPSTASH_REDIS_URL` back to the original Upstash `rediss://...` connection string (find it in Upstash console, or Railway variable history if not overwritten).
-2. Code in `redis.ts` does **not** need to be reverted — the conditional TLS logic works correctly for both `rediss://` (Upstash) and `redis://` (Railway) automatically. Safe to leave as-is permanently.
+2. Code in `redis.ts` and `whatsapp.worker.ts` does **not** need to be reverted — the conditional TLS logic in both works correctly for `rediss://` (Upstash) and `redis://` (Railway) automatically. Safe to leave as-is permanently.
 3. Optional cleanup: remove the Railway Redis plugin service from the Railway project once confirmed Upstash is working again (avoids paying for/running an unused service).
-4. Note: `src/lib/flow-engine.ts` (WhatsApp conversation state, Vercel frontend) uses `@upstash/redis` REST client (`UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`) — this was **never switched** to Railway (Railway Redis has no REST API, incompatible with that client). It stayed on Upstash the whole time and was broken during the rate-limit period. No action needed here on revert — it'll just start working again once Upstash is paid.
+4. Note: `src/lib/flow-engine.ts` (WhatsApp conversation state, Vercel **frontend**) uses `@upstash/redis` REST client (`UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`) — this is a third, separate Redis usage that was **never switched** to Railway (Railway Redis has no REST API, incompatible with that client). It stayed on Upstash the whole time and was broken during the rate-limit period. No action needed here on revert — it'll just start working again once Upstash is paid.
 
 **Trigger:** When first paid client is onboarded, or as soon as Upstash payment/plan is sorted — don't run production client traffic on a free Railway Redis plugin long-term (no SLA, not the intended use).
