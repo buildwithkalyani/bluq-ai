@@ -502,6 +502,34 @@ export const reports = pgTable("reports", {
 	check("reports_type_check", sql`type = ANY (ARRAY['daily'::text, 'weekly'::text])`),
 ]);
 
+export const pendingWorkPackages = pgTable("pending_work_packages", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	jobId: text("job_id").notNull(),
+	projectId: uuid("project_id").notNull(),
+	workspaceId: uuid("workspace_id").notNull(),
+	versionNumber: integer("version_number").notNull(),
+	constructionType: text("construction_type").notNull(),
+	data: jsonb().notNull(),
+	status: text().notNull().default("pending_review"),
+	confirmedAt: timestamp("confirmed_at", { withTimezone: true, mode: 'string' }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	index("idx_pwp_job").using("btree", table.jobId.asc().nullsLast().op("text_ops")),
+	index("idx_pwp_project").using("btree", table.projectId.asc().nullsLast().op("uuid_ops")),
+	unique("pending_work_packages_job_id_key").on(table.jobId),
+	foreignKey({
+		columns: [table.projectId],
+		foreignColumns: [projects.id],
+		name: "pending_work_packages_project_id_fkey",
+	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.workspaceId],
+		foreignColumns: [orgs.id],
+		name: "pending_work_packages_workspace_id_fkey",
+	}).onDelete("cascade"),
+	check("pending_work_packages_status_check", sql`status = ANY (ARRAY['pending_review'::text, 'confirmed'::text])`),
+]);
+
 export const session = pgTable("session", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	userId: uuid("user_id").notNull(),

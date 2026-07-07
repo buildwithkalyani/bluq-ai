@@ -4,6 +4,7 @@ import { pollScheduleStatus } from "@/lib/api-client";
 
 export const SCHEDULE_JOB_PREFIX = "bluq_schedule_job_";
 export const SCHEDULE_RESULT_PREFIX = "bluq_schedule_result_";
+export const SCHEDULE_PENDING_PREFIX = "bluq_schedule_pending_";
 
 export function useSchedulePoller() {
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -23,6 +24,22 @@ export function useSchedulePoller() {
         window.dispatchEvent(
           new CustomEvent("bluq_schedule_progress", { detail: { projectId, status } })
         );
+
+        if (status.status === "awaiting_review") {
+          localStorage.removeItem(`${SCHEDULE_JOB_PREFIX}${projectId}`);
+          const pendingId = status.result?.pendingId;
+          localStorage.setItem(
+            `${SCHEDULE_PENDING_PREFIX}${projectId}`,
+            JSON.stringify({ pendingId, savedAt: Date.now() })
+          );
+          stopPolling(projectId);
+          window.dispatchEvent(
+            new CustomEvent("bluq_schedule_awaiting_review", {
+              detail: { projectId, pendingId },
+            })
+          );
+          return;
+        }
 
         if (status.status === "completed") {
           localStorage.removeItem(`${SCHEDULE_JOB_PREFIX}${projectId}`);
@@ -77,6 +94,23 @@ export function useSchedulePoller() {
       } catch {
         startPolling(projectId, raw); // old format fallback
       }
+    }
+
+    // Re-surface any pending work-package reviews (page refresh after extraction)
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(SCHEDULE_PENDING_PREFIX)) continue;
+      const projectId = key.slice(SCHEDULE_PENDING_PREFIX.length);
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw);
+        window.dispatchEvent(
+          new CustomEvent("bluq_schedule_awaiting_review", {
+            detail: { projectId, pendingId: parsed?.pendingId },
+          })
+        );
+      } catch { /* ignore malformed entry */ }
     }
 
     // Pick up new jobs started after layout mounted

@@ -561,6 +561,7 @@ function DelayAnalyticsPageContent() {
   const { workspaceId: ctxWorkspaceId, isDesignMode, loading: wsLoading } = useWorkspace();
   const projectIdParam = searchParams.get("projectId") ?? "0";
   const workspaceId = searchParams.get("workspaceId");
+  const versionId = searchParams.get("versionId") ?? undefined;
   const wsId = workspaceId ?? ctxWorkspaceId;
   const real = !wsLoading && !isDesignMode && isRealProject(projectIdParam) && !!wsId;
   const prevProjectIdParam = useRef(projectIdParam);
@@ -568,7 +569,10 @@ function DelayAnalyticsPageContent() {
   useEffect(() => {
     prevProjectIdParam.current = projectIdParam;
     if (real) {
-      Promise.all([fetchProjects(wsId!), fetchTasks(projectIdParam, wsId!)]).then(([projects, tasks]) => {
+      Promise.all([
+        fetchProjects(wsId!),
+        fetchTasks(projectIdParam, wsId!, undefined, versionId),
+      ]).then(([projects, tasks]) => {
         setRawTasks(tasks);
         const p = projects.find(proj => proj.id === projectIdParam);
         if (p?.endDate) setProjectEndDate(p.endDate);
@@ -615,7 +619,7 @@ function DelayAnalyticsPageContent() {
         setSelected(data.length > 0 ? data[0].id : null);
       });
     }
-  }, [projectIdParam, workspaceId, groupBy, real]);
+  }, [projectIdParam, workspaceId, versionId, groupBy, real]);
 
   useEffect(() => {
     if (selected === null) { setDeepDive(null); return; }

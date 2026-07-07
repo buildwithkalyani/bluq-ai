@@ -2,6 +2,8 @@
 // Claude-based extraction of project parameters from uploaded documents
 // Analogous to parameter-extractor.ts for building projects
 
+import { ParsedDocument, toClaudeContent } from "../parsers.js";
+
 // ─── Parameter Interfaces ──────────────────────────────────────────────────────
 
 export interface PortParameters {
@@ -257,10 +259,10 @@ Return ONLY valid JSON matching the exact interface specified. Do not include ex
 If a value cannot be found, use null or sensible defaults based on Indian standards.
 For numerical ranges, use the midpoint or typical value for Indian projects.`;
 
-function buildPortPrompt(documentText: string): string {
+function buildPortPrompt(): string {
   return `${BASE_SYSTEM_PROMPT}
 
-Extract parameters for a PORT / MARINE project from the following documents.
+Extract parameters for a PORT / MARINE project from the uploaded documents above.
 Return JSON matching this exact TypeScript interface:
 
 interface PortParameters {
@@ -291,16 +293,13 @@ Guidance:
 - settlementMonitoringRequired: true if reclamation area > 20ha or soft clay soil.
 - dredgeDepthM: design depth below chart datum (typically 12–17m for container terminals).
 
-Documents:
-${documentText}
-
 Respond with ONLY the JSON object, no markdown.`;
 }
 
-function buildAirportPrompt(documentText: string): string {
+function buildAirportPrompt(): string {
   return `${BASE_SYSTEM_PROMPT}
 
-Extract parameters for an AIRPORT project from the following documents.
+Extract parameters for an AIRPORT project from the uploaded documents above.
 Return JSON matching this exact TypeScript interface:
 
 interface AirportParameters {
@@ -332,16 +331,13 @@ Guidance:
 - aaiApprovalRequired: always true for civil airports in India.
 - Runway width: code C = 45m, D/E/F = 60m.
 
-Documents:
-${documentText}
-
 Respond with ONLY the JSON object, no markdown.`;
 }
 
-function buildHighwayPrompt(documentText: string): string {
+function buildHighwayPrompt(): string {
   return `${BASE_SYSTEM_PROMPT}
 
-Extract parameters for a HIGHWAY project from the following documents.
+Extract parameters for a HIGHWAY project from the uploaded documents above.
 Return JSON matching this exact TypeScript interface:
 
 interface HighwayParameters {
@@ -374,16 +370,13 @@ Guidance:
 - forestClearanceRequired: true if forest land involved (Stage I FC from MoEF needed).
 - black_cotton = expansive soil requiring lime treatment — important for pavement design.
 
-Documents:
-${documentText}
-
 Respond with ONLY the JSON object, no markdown.`;
 }
 
-function buildBridgePrompt(documentText: string): string {
+function buildBridgePrompt(): string {
   return `${BASE_SYSTEM_PROMPT}
 
-Extract parameters for a BRIDGE project from the following documents.
+Extract parameters for a BRIDGE project from the uploaded documents above.
 Return JSON matching this exact TypeScript interface:
 
 interface BridgeParameters {
@@ -416,16 +409,13 @@ Guidance:
 - isDrySeasonConstruction: true for river crossings in India (work restricted to Oct–Feb).
 - Seismic zone: Himalayas/NE India = V; Gujarat = V; Andaman = V; most peninsular India = II/III.
 
-Documents:
-${documentText}
-
 Respond with ONLY the JSON object, no markdown.`;
 }
 
-function buildMetroPrompt(documentText: string): string {
+function buildMetroPrompt(): string {
   return `${BASE_SYSTEM_PROMPT}
 
-Extract parameters for a METRO RAIL project from the following documents.
+Extract parameters for a METRO RAIL project from the uploaded documents above.
 Return JSON matching this exact TypeScript interface:
 
 interface MetroParameters {
@@ -459,16 +449,13 @@ Guidance:
 - Signaling: CBTC = modern CBTC/ETCS; conventional = older relay-based.
 - depotAreaHa: typically 30–80 ha for maintenance depot.
 
-Documents:
-${documentText}
-
 Respond with ONLY the JSON object, no markdown.`;
 }
 
-function buildWTPPrompt(documentText: string): string {
+function buildWTPPrompt(): string {
   return `${BASE_SYSTEM_PROMPT}
 
-Extract parameters for a WATER TREATMENT / SEWAGE TREATMENT PLANT project from the following documents.
+Extract parameters for a WATER TREATMENT / SEWAGE TREATMENT PLANT project from the uploaded documents above.
 Return JSON matching this exact TypeScript interface:
 
 interface WaterTreatmentParameters {
@@ -496,16 +483,13 @@ Guidance:
 - numberOfUnits: parallel treatment streams (at least 2 for redundancy).
 - capacityMLD: megalitres per day (1 MLD = 1000 m³/day).
 
-Documents:
-${documentText}
-
 Respond with ONLY the JSON object, no markdown.`;
 }
 
-function buildMMLPPrompt(documentText: string): string {
+function buildMMLPPrompt(): string {
   return `${BASE_SYSTEM_PROMPT}
 
-Extract parameters for a MMLP / LOGISTICS PARK project from the following documents.
+Extract parameters for a MMLP / LOGISTICS PARK project from the uploaded documents above.
 Return JSON matching this exact TypeScript interface:
 
 interface MMLPParameters {
@@ -533,16 +517,13 @@ Guidance:
 - hasAsrs: true if automated racking / ASRS mentioned.
 - RTG/RMG: overhead gantry cranes for container handling.
 
-Documents:
-${documentText}
-
 Respond with ONLY the JSON object, no markdown.`;
 }
 
-function buildICDPrompt(documentText: string): string {
+function buildICDPrompt(): string {
   return `${BASE_SYSTEM_PROMPT}
 
-Extract parameters for an ICD / DRY PORT / PRIVATE FREIGHT TERMINAL project from the following documents.
+Extract parameters for an ICD / DRY PORT / PRIVATE FREIGHT TERMINAL project from the uploaded documents above.
 Return JSON matching this exact TypeScript interface:
 
 interface ICDParameters {
@@ -569,16 +550,13 @@ Guidance:
 - hasXrayScanner: true if non-intrusive inspection scanner mentioned (CBIC mandate for major ICDs).
 - ECTS: Electronic Cargo Tracking System — GPS seals for containers from port.
 
-Documents:
-${documentText}
-
 Respond with ONLY the JSON object, no markdown.`;
 }
 
-function buildLCTPrompt(documentText: string): string {
+function buildLCTPrompt(): string {
   return `${BASE_SYSTEM_PROMPT}
 
-Extract parameters for a LIQUID CARGO TERMINAL / CHEMICAL JETTY / LPG TERMINAL project from the following documents.
+Extract parameters for a LIQUID CARGO TERMINAL / CHEMICAL JETTY / LPG TERMINAL project from the uploaded documents above.
 Return JSON matching this exact TypeScript interface:
 
 interface LiquidCargoTerminalParameters {
@@ -607,16 +585,13 @@ Guidance:
 - storageTankCapacityKL: total capacity in kilolitres (1 KL = 1 m³).
 - pesoApprovalRequired: always true (Petroleum and Explosives Safety Organisation).
 
-Documents:
-${documentText}
-
 Respond with ONLY the JSON object, no markdown.`;
 }
 
-function buildTunnelPrompt(documentText: string): string {
+function buildTunnelPrompt(): string {
   return `${BASE_SYSTEM_PROMPT}
 
-Extract parameters for a ROAD / RAILWAY / WATER CONVEYANCE TUNNEL project from the following documents.
+Extract parameters for a ROAD / RAILWAY / WATER CONVEYANCE TUNNEL project from the uploaded documents above.
 Return JSON matching this exact TypeScript interface:
 
 interface TunnelParameters {
@@ -643,16 +618,13 @@ Guidance:
 - dgmsApprovalRequired: true for all drill-and-blast tunnels (NATM). false for TBM or cut-and-cover only.
 - ingressWaterClass: high = water-bearing zone, springs expected; medium = moderate seepage; low = mostly dry rock.
 
-Documents:
-${documentText}
-
 Respond with ONLY the JSON object, no markdown.`;
 }
 
-function buildRailwayPrompt(documentText: string): string {
+function buildRailwayPrompt(): string {
   return `${BASE_SYSTEM_PROMPT}
 
-Extract parameters for a MAINLINE RAILWAY project from the following documents.
+Extract parameters for a MAINLINE RAILWAY project from the uploaded documents above.
 This is Indian Railways broad-gauge infrastructure — NOT metro/rapid transit.
 Return JSON matching this exact TypeScript interface:
 
@@ -698,30 +670,17 @@ Guidance:
 - crsInspectionRequired: true for all new/doubling lines; false for station redevelopment only.
 - soilType: check DPR / geotech report — black_cotton common in Vidarbha/Marathwada/AP; alluvial in Indo-Gangetic plain; rock in Deccan plateau / NE.
 
-Documents:
-${documentText}
-
 Respond with ONLY the JSON object, no markdown.`;
-}
-
-// ─── Document Concatenation Helper ────────────────────────────────────────────
-
-function concatDocuments(documents: Array<{ name: string; content: string }>): string {
-  return documents
-    .map((d) => `=== ${d.name} ===\n${d.content}`)
-    .join("\n\n");
 }
 
 // ─── Main Extraction Function ──────────────────────────────────────────────────
 
 export async function extractInfrastructureParameters(
   infraType: InfrastructureType,
-  documents: Array<{ name: string; content: string }>,
+  documents: ParsedDocument[],
   extractionRuns: number = 1,
 ): Promise<InfrastructureParameters> {
-  const documentText = concatDocuments(documents);
-
-  const promptBuilders: Record<InfrastructureType, (text: string) => string> = {
+  const promptBuilders: Record<InfrastructureType, () => string> = {
     port:                  buildPortPrompt,
     airport:               buildAirportPrompt,
     highway:               buildHighwayPrompt,
@@ -737,7 +696,8 @@ export async function extractInfrastructureParameters(
 
   const buildPrompt = promptBuilders[infraType];
 
-  async function callClaude(prompt: string): Promise<InfrastructureParameters> {
+  async function callClaude(promptText: string): Promise<InfrastructureParameters> {
+    const content = toClaudeContent(documents, promptText);
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -746,10 +706,10 @@ export async function extractInfrastructureParameters(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-opus-4-7",
+        model: "claude-opus-4-8",
         max_tokens: 2048,
         temperature: 0,
-        messages: [{ role: "user", content: prompt }],
+        messages: [{ role: "user", content }],
       }),
     });
     const data = (await response.json()) as { content: Array<{ type: string; text: string }> };
@@ -758,12 +718,12 @@ export async function extractInfrastructureParameters(
   }
 
   if (extractionRuns === 1) {
-    return callClaude(buildPrompt(documentText));
+    return callClaude(buildPrompt());
   }
 
   // Multiple runs for variance reduction — majority vote on string fields, average on numbers
   const runs = await Promise.all(
-    Array.from({ length: extractionRuns }, () => callClaude(buildPrompt(documentText))),
+    Array.from({ length: extractionRuns }, () => callClaude(buildPrompt())),
   );
 
   return mergeExtractionRuns(runs);
