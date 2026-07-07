@@ -16,11 +16,16 @@
 
 import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
-import { scheduleVersions, documents, tasks, gapCheckFeedback, users, pendingWorkPackages, projectMembers } from "../db/schema.js";
-import { eq, and, desc, sql, like } from "drizzle-orm";
+import { scheduleVersions, documents, tasks, gapCheckFeedback, users, projectMembers, pendingWorkPackages, taskDependencies } from "../db/schema.js";
+import { eq, and, desc, sql, like, inArray } from "drizzle-orm";
 import { aiSchedulerQueue } from "../lib/queues.js";
 import type { ScheduleJobData } from "../workers/ai-scheduler.worker.js";
 import { verifySession } from "../lib/verifySession.js";
+import { getIO } from "../lib/socket.js";
+import type { InfrastructureType, InfrastructureParameters } from "../lib/infra/infrastructure-parameter-extractor.js";
+import { runInfrastructureRulesEngine } from "../lib/infra/infrastructure-rules-engine.js";
+import { calculateInfraSchedule } from "../lib/infra/infra-duration-calculator.js";
+import { refineWithOrTools } from "../lib/infra/optimizer-client.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -639,12 +644,13 @@ export async function scheduleRoute(app: FastifyInstance) {
   });
 
   // =========================================================================
-  // POST /schedule/work-packages/:jobId/confirm — PM confirms edited packages
+  // POST /schedule/work-packages/:jobId/confirm — Phase B
+  // PM has reviewed/edited extracted parameters. Run rules engine + RCPSP + save.
   // =========================================================================
   app.post("/schedule/work-packages/:jobId/confirm", { preHandler: verifySession }, async (request, reply) => {
     try {
       const { jobId } = request.params as { jobId: string };
-      const body = request.body as { edits?: Array<{ id: string; [key: string]: any }> } | undefined;
+      const body = request.body as { editedParams?: Partial<InfrastructureParameters> } | undefined;
       const userId = request.userId;
 
       const [row] = await db
@@ -653,9 +659,8 @@ export async function scheduleRoute(app: FastifyInstance) {
         .where(eq(pendingWorkPackages.jobId, jobId));
 
       if (!row) {
-        return reply.status(404).send({ error: "Work packages not found" });
+        return reply.status(404).send({ error: "Pending parameters not found" });
       }
-
       if (row.status === "confirmed") {
         return reply.status(409).send({ error: "Already confirmed" });
       }
@@ -663,53 +668,176 @@ export async function scheduleRoute(app: FastifyInstance) {
       const [membership] = await db
         .select({ id: projectMembers.id })
         .from(projectMembers)
-        .where(and(
-          eq(projectMembers.projectId, row.projectId),
-          eq(projectMembers.userId, userId),
-        ));
+        .where(and(eq(projectMembers.projectId, row.projectId), eq(projectMembers.userId, userId)));
 
-      if (!membership) {
-        return reply.status(403).send({ error: "Access denied" });
-      }
+      if (!membership) return reply.status(403).send({ error: "Access denied" });
 
-      // Apply PM edits to work packages if provided
-      let data = row.data as any;
-      if (body?.edits && body.edits.length > 0) {
-        const editMap = new Map(body.edits.map(e => [e.id, e]));
-        data = {
-          ...data,
-          workPackages: data.workPackages.map((wp: any) => {
-            const edit = editMap.get(wp.id);
-            if (!edit) return wp;
-            return {
-              ...wp,
-              ...edit,
-              ...(edit.productivityRate !== undefined && { productivityBasis: "user_input" }),
-            };
-          }),
-        };
-      }
+      // Merge PM edits over the stored parameters
+      const stored = row.data as { params: InfrastructureParameters; startDate: string; userId: string };
+      const params: InfrastructureParameters = body?.editedParams
+        ? { ...stored.params, ...body.editedParams } as InfrastructureParameters
+        : stored.params;
+      const infraType = row.constructionType as InfrastructureType;
+      const startDate = stored.startDate;
+      const workspaceId = row.workspaceId;
+      const projectId   = row.projectId;
 
+      // ── Phase B: rules engine + RCPSP ────────────────────────────────────
+      const rulesResult = runInfrastructureRulesEngine(infraType, params);
+      let scheduleResult = calculateInfraSchedule(rulesResult, infraType, params, startDate);
+      scheduleResult = await refineWithOrTools(scheduleResult, params, startDate);
+
+      const allTasks        = scheduleResult.tasks;
+      const totalDurationDays = scheduleResult.totalDurationDays;
+      const aiReasoning =
+        `Infrastructure schedule (PM-confirmed): ${infraType}, ${allTasks.length} tasks, ` +
+        `${totalDurationDays} days. Critical path: ${scheduleResult.criticalPathTasks} tasks. ` +
+        `Confidence: ${params.confidence}.`;
+      const schedulingWarnings = params.missingData.length > 0
+        ? [`Parameters estimated (missing from documents): ${params.missingData.join(", ")}`]
+        : [];
+
+      // ── Save schedule version ─────────────────────────────────────────────
       await db
-        .update(pendingWorkPackages)
-        .set({
-          status: "confirmed",
-          data,
-          confirmedAt: new Date().toISOString(),
+        .update(scheduleVersions)
+        .set({ isBaseline: false })
+        .where(and(eq(scheduleVersions.projectId, projectId), eq(scheduleVersions.workspaceId, workspaceId)));
+
+      const scheduleJson = {
+        infraType,
+        tasks: allTasks.map(t => ({
+          code: t.code, originalCode: t.originalCode, phase: t.phase,
+          name: t.fullName, unit: t.unit, estimatedQuantity: t.estimatedQuantity,
+          durationDays: t.finalDurationDays, startDate: t.startDate, endDate: t.endDate,
+          predecessors: t.predecessors, crew: t.crew, isCriticalPath: t.isCriticalPath,
+          totalFloat: t.totalFloat, source: t.source,
+        })),
+        warnings: schedulingWarnings,
+        totalDurationDays,
+        longLeadItems: scheduleResult.longLeadItems,
+      };
+
+      const [savedVersion] = await db
+        .insert(scheduleVersions)
+        .values({
+          workspaceId, projectId,
+          versionNumber: row.versionNumber,
+          scheduleJson,
+          aiReasoning,
+          aiRisks:     { warnings: schedulingWarnings },
+          isBaseline:  true,
+          isLocked:    false,
+          generatedBy: "ai",
+          uploadedBy:  userId !== "system" ? userId : null,
         })
+        .returning();
+
+      // ── Save tasks ────────────────────────────────────────────────────────
+      const PHASE_DISPLAY: Record<string, string> = {
+        surveys_investigations: "Surveys & Investigations",
+        marine_works: "Marine Works", reclamation: "Reclamation",
+        quay_berth: "Quay & Berth", yard_pavement: "Yard & Pavement",
+        terminal_buildings: "Terminal Buildings", utilities: "Utilities",
+        equipment_installation: "Equipment Installation", navigational_aids: "Navigational Aids",
+        commissioning_handover: "Commissioning & Handover",
+        earthworks_grading: "Earthworks", runway_taxiway_pavement: "Runway & Taxiway",
+        drainage: "Drainage", terminal_building: "Terminal Building",
+        atc_facilities: "ATC Facilities", perimeter_security: "Perimeter & Security",
+        earthworks: "Earthworks", drainage_structures: "Drainage",
+        pavement_layers: "Pavement", structures: "Structures",
+        safety_furniture: "Safety & Furniture", toll_its: "Toll & ITS",
+        foundation_piling: "Foundation & Piling", substructure: "Substructure",
+        superstructure: "Superstructure", deck_finishes: "Deck & Finishes",
+        approaches: "Approaches",
+        viaduct_structure: "Viaduct", station_civil: "Stations",
+        track_works: "Track Works", systems_electromechanical: "Systems & E&M",
+        depot: "Depot", testing_commissioning: "Testing & Commissioning",
+        civil_structures: "Civil Structures", mechanical_equipment: "Mechanical Equipment",
+        piping_valves: "Piping & Valves", electrical_instrumentation: "Electrical & Instrumentation",
+        warehouse_shed: "Warehouse & Sheds", intermodal_yard: "Intermodal Yard",
+        civil_earthworks: "Civil & Earthworks", pavement_yard: "Pavement & Yard",
+        warehousing_sheds: "Warehousing & Sheds",
+        marine_structures: "Marine Structures", pipeline_piping: "Pipeline & Piping",
+        storage_tanks: "Storage Tanks", fire_safety_systems: "Fire & Safety Systems",
+        portal_works: "Portal Works", tunnel_excavation: "Tunnel Excavation",
+        primary_support: "Primary Support", waterproofing_lining: "Waterproofing & Lining",
+        drainage_invert: "Drainage & Invert",
+        land_acquisition: "Land Acquisition", bridges_culverts: "Bridges & Culverts",
+        track_laying: "Track Works", station_works: "Stations",
+        signalling_telecom: "Signalling & Telecom", traction_power: "Traction & Power",
+      };
+
+      const crewToString = (crew: Array<{ role: string; count: number }>): string =>
+        crew.map(c => `${c.count} ${c.role}`).join(", ");
+
+      const BATCH_SIZE = 50;
+      const taskInserts = allTasks.map((t, index) => ({
+        workspaceId, projectId,
+        scheduleVersionId: savedVersion.id,
+        title:       t.fullName,
+        description: `${t.originalCode} | ${t.phase} | Qty: ${t.estimatedQuantity} ${t.unit} | Crew: ${crewToString(t.crew)}`,
+        status:      "not_started" as const,
+        priority:    t.isCriticalPath ? ("high" as const) : ("medium" as const),
+        startDate:   t.startDate,
+        endDate:     t.endDate,
+        durationDays: t.finalDurationDays,
+        contractor:  t.contractorType,
+        phase:       t.phase ? (PHASE_DISPLAY[t.phase] ?? t.phase) : null,
+        area:        null,
+        isMilestone: false,
+        sortOrder:   index,
+      }));
+
+      const insertedTasks: Array<{ id: string; sortOrder: number | null }> = [];
+      for (let i = 0; i < taskInserts.length; i += BATCH_SIZE) {
+        const inserted = await db.insert(tasks).values(taskInserts.slice(i, i + BATCH_SIZE))
+          .returning({ id: tasks.id, sortOrder: tasks.sortOrder });
+        insertedTasks.push(...inserted);
+      }
+
+      const sortOrderToId = new Map(insertedTasks.map(t => [t.sortOrder, t.id]));
+      const codeToSortOrder = new Map(allTasks.map((t, i) => [t.code, i]));
+
+      const depInserts: Array<{ workspaceId: string; predecessorId: string; successorId: string; dependencyType: string; lagDays: number }> = [];
+      for (let i = 0; i < allTasks.length; i++) {
+        const successorId = sortOrderToId.get(i);
+        if (!successorId) continue;
+        for (const pred of allTasks[i].predecessors) {
+          const predIdx = codeToSortOrder.get(pred.taskCode);
+          if (predIdx === undefined) continue;
+          const predecessorId = sortOrderToId.get(predIdx);
+          if (!predecessorId) continue;
+          depInserts.push({ workspaceId, predecessorId, successorId, dependencyType: pred.type, lagDays: pred.lagDays });
+        }
+      }
+      for (let i = 0; i < depInserts.length; i += BATCH_SIZE) {
+        const batch = depInserts.slice(i, i + BATCH_SIZE);
+        if (batch.length > 0) await db.insert(taskDependencies).values(batch);
+      }
+
+      // ── Mark pending row confirmed + notify frontend ───────────────────────
+      await db.update(pendingWorkPackages)
+        .set({ status: "confirmed", confirmedAt: new Date().toISOString() })
         .where(eq(pendingWorkPackages.jobId, jobId));
 
-      // Phase 3: enqueue RCPSP optimizer job here
-      // TODO: aiSchedulerQueue.add("optimize-schedule", { pendingId: row.id, projectId: row.projectId, ... })
+      getIO()?.to(workspaceId).emit("schedule:generated", {
+        projectId,
+        versionNumber:    row.versionNumber,
+        scheduleVersionId: savedVersion.id,
+        taskCount:        insertedTasks.length,
+      });
+
+      console.log(`[confirm] Saved infra schedule: v${row.versionNumber}, ${insertedTasks.length} tasks`);
 
       return reply.send({
-        message: "Work packages confirmed. Schedule optimization will run in Phase 3.",
-        versionNumber: row.versionNumber,
-        projectId: row.projectId,
+        scheduleVersionId: savedVersion.id,
+        versionNumber:     row.versionNumber,
+        taskCount:         insertedTasks.length,
+        durationDays:      totalDurationDays,
       });
     } catch (err: any) {
       console.error("POST /schedule/work-packages/confirm error:", err.message);
-      return reply.status(500).send({ error: "Failed to confirm work packages" });
+      return reply.status(500).send({ error: "Failed to build schedule" });
     }
   });
 
