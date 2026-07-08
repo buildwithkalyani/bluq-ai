@@ -341,7 +341,7 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<
     console.log(`[worker] Stored infra params pending review, v${nextVersion}, id=${pendingRow.id}`);
     console.log(`[worker] Total Phase A: ${Date.now() - pipelineStart}ms`);
 
-    return { phase: "awaiting_review", pendingId: pendingRow.id };
+    return { phase: "awaiting_review", pendingId: job.id! };
 
   } else {
     // -----------------------------------------------------------------------
@@ -744,7 +744,7 @@ async function processScheduleJob(job: Job<ScheduleJobData>): Promise<
 // ---------------------------------------------------------------------------
 
 // Maps frontend constructionType string → InfrastructureType enum used by infra pipeline.
-function resolveInfraType(constructionType?: string): InfrastructureType | null {
+export function resolveInfraType(constructionType?: string): InfrastructureType | null {
   const map: Record<string, InfrastructureType> = {
     road:                   "highway",
     highway:                "highway",

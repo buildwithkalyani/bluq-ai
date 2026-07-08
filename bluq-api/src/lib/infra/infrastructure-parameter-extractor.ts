@@ -1217,7 +1217,6 @@ export async function extractInfrastructureParameters(
       body: JSON.stringify({
         model: "claude-opus-4-8",
         max_tokens: 4096,
-        temperature: 0,
         system: [
           {
             type: "text",
