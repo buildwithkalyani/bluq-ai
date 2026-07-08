@@ -75,7 +75,7 @@ function ReviewPageInner() {
       const result = await confirmInfraParams(jobId, editedParams);
       localStorage.removeItem(`${SCHEDULE_PENDING_PREFIX}${projectId}`);
       router.push(
-        `/dashboard/schedule?projectId=${projectId}&workspaceId=${workspaceId}&versionId=${result.scheduleVersionId}`
+        `/dashboard/schedule/gantt?projectId=${projectId}&workspaceId=${workspaceId}&versionId=${result.scheduleVersionId}`
       );
     } catch (e: any) {
       setError(e.message ?? "Failed to build schedule");
