@@ -4,6 +4,22 @@ Technical debt and future improvements. Not urgent — do after client demos.
 
 ---
 
+## VVVVV IMPORTANT — Security: No workspace/project access control on backend routes
+
+**What:** `verifySession` ([bluq-api/src/lib/verifySession.ts:12](bluq-api/src/lib/verifySession.ts#L12)) only checks that the session token is valid and not expired — it never checks whether the authenticated user actually belongs to the `workspaceId`/`projectId` they pass as request params. Workspace scoping today is **entirely client-side** (`src/context/workspace.tsx` tracks the selected org/workspace in the UI and sends it along), and the backend just trusts whatever `workspaceId`/`projectId` is in the request. Confirmed while debugging schedule.ts (2026-07-08) — none of `/schedule/versions`, `/schedule/generate`, etc. verify workspace membership server-side.
+
+**Why this matters:** Any authenticated user could, in principle, pass a different `workspaceId`/`projectId` than one they belong to and read/write another workspace's data — the API wouldn't stop them, only the frontend UI's own workspace picker limits what gets sent in practice.
+
+**Related:** A narrow, project-specific attempt at this existed in 3 `schedule.ts` work-package routes (checked `project_members` table) — but it was broken (table was empty for all tested projects, so it 403'd everyone) and inconsistent with every other route in the file, which had no check at all. Removed on 2026-07-08 to unblock testing — see git history for `schedule.ts` around that date.
+
+**Fix:** Add a shared authorization check — verify `workspaceId` (and `projectId` where applicable) against `workspace_members` for `request.userId`, ideally centralized (e.g. as a reusable Fastify pre-handler alongside/after `verifySession`) rather than repeated ad-hoc per route.
+
+**Effort:** Half a day for the workspace-level check as a shared pre-handler; longer if project-level scoping also needs to be reintroduced properly (backed by real data, unlike the broken `project_members` check).
+
+**Trigger:** Before onboarding any client whose data privacy matters across multiple workspaces/orgs on the platform — i.e. before real multi-tenant usage, not just internal testing.
+
+---
+
 ## 1. React Query Migration
 
 **What:** Replace all `useEffect + fetch + useState + localStorage cache` patterns with React Query.

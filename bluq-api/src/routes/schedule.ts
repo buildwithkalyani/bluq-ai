@@ -16,13 +16,14 @@
 
 import { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
-import { scheduleVersions, documents, tasks, gapCheckFeedback, users, projectMembers, pendingWorkPackages, taskDependencies } from "../db/schema.js";
-import { eq, and, desc, sql, like, inArray } from "drizzle-orm";
+import { scheduleVersions, documents, tasks, gapCheckFeedback, users, pendingWorkPackages, taskDependencies } from "../db/schema.js";
+import { eq, and, desc, sql, ilike, inArray } from "drizzle-orm";
 import { aiSchedulerQueue } from "../lib/queues.js";
 import type { ScheduleJobData } from "../workers/ai-scheduler.worker.js";
+import { resolveInfraType } from "../workers/ai-scheduler.worker.js";
 import { verifySession } from "../lib/verifySession.js";
 import { getIO } from "../lib/socket.js";
-import type { InfrastructureType, InfrastructureParameters } from "../lib/infra/infrastructure-parameter-extractor.js";
+import type { InfrastructureParameters } from "../lib/infra/infrastructure-parameter-extractor.js";
 import { runInfrastructureRulesEngine } from "../lib/infra/infrastructure-rules-engine.js";
 import { calculateInfraSchedule } from "../lib/infra/infra-duration-calculator.js";
 import { refineWithOrTools } from "../lib/infra/optimizer-client.js";
@@ -94,7 +95,7 @@ export async function scheduleRoute(app: FastifyInstance) {
           and(
             eq(documents.projectId, body.projectId),
             eq(documents.workspaceId, body.workspaceId),
-            like(documents.folder, "Schedules%")
+            ilike(documents.folder, "Schedules%")
           )
         );
 
@@ -602,7 +603,6 @@ export async function scheduleRoute(app: FastifyInstance) {
   app.get("/schedule/work-packages/:jobId", { preHandler: verifySession }, async (request, reply) => {
     try {
       const { jobId } = request.params as { jobId: string };
-      const userId = request.userId;
 
       const [row] = await db
         .select()
@@ -614,18 +614,6 @@ export async function scheduleRoute(app: FastifyInstance) {
           error: "Work packages not found",
           suggestion: "They may have already been confirmed or cancelled. Start a new generation.",
         });
-      }
-
-      const [membership] = await db
-        .select({ id: projectMembers.id })
-        .from(projectMembers)
-        .where(and(
-          eq(projectMembers.projectId, row.projectId),
-          eq(projectMembers.userId, userId),
-        ));
-
-      if (!membership) {
-        return reply.status(403).send({ error: "Access denied" });
       }
 
       return reply.send({
@@ -665,19 +653,15 @@ export async function scheduleRoute(app: FastifyInstance) {
         return reply.status(409).send({ error: "Already confirmed" });
       }
 
-      const [membership] = await db
-        .select({ id: projectMembers.id })
-        .from(projectMembers)
-        .where(and(eq(projectMembers.projectId, row.projectId), eq(projectMembers.userId, userId)));
-
-      if (!membership) return reply.status(403).send({ error: "Access denied" });
-
       // Merge PM edits over the stored parameters
       const stored = row.data as { params: InfrastructureParameters; startDate: string; userId: string };
       const params: InfrastructureParameters = body?.editedParams
         ? { ...stored.params, ...body.editedParams } as InfrastructureParameters
         : stored.params;
-      const infraType = row.constructionType as InfrastructureType;
+      const infraType = resolveInfraType(row.constructionType);
+      if (!infraType) {
+        return reply.status(400).send({ error: `Unrecognized constructionType: ${row.constructionType}` });
+      }
       const startDate = stored.startDate;
       const workspaceId = row.workspaceId;
       const projectId   = row.projectId;
@@ -847,7 +831,6 @@ export async function scheduleRoute(app: FastifyInstance) {
   app.post("/schedule/work-packages/:jobId/cancel", { preHandler: verifySession }, async (request, reply) => {
     try {
       const { jobId } = request.params as { jobId: string };
-      const userId = request.userId;
 
       const [row] = await db
         .select({ id: pendingWorkPackages.id, projectId: pendingWorkPackages.projectId })
@@ -856,18 +839,6 @@ export async function scheduleRoute(app: FastifyInstance) {
 
       if (!row) {
         return reply.status(404).send({ error: "Work packages not found" });
-      }
-
-      const [membership] = await db
-        .select({ id: projectMembers.id })
-        .from(projectMembers)
-        .where(and(
-          eq(projectMembers.projectId, row.projectId),
-          eq(projectMembers.userId, userId),
-        ));
-
-      if (!membership) {
-        return reply.status(403).send({ error: "Access denied" });
       }
 
       await db.delete(pendingWorkPackages).where(eq(pendingWorkPackages.jobId, jobId));

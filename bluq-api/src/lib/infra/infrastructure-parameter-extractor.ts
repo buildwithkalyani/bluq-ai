@@ -1217,7 +1217,6 @@ export async function extractInfrastructureParameters(
       body: JSON.stringify({
         model: "claude-opus-4-8",
         max_tokens: 4096,
-        temperature: 0,
         system: [
           {
             type: "text",
@@ -1228,7 +1227,13 @@ export async function extractInfrastructureParameters(
         messages: [{ role: "user", content }],
       }),
     });
-    const data = (await response.json()) as { content: Array<{ type: string; text: string }> };
+    const data = (await response.json()) as {
+      content?: Array<{ type: string; text: string }>;
+      error?: { type: string; message: string };
+    };
+    if (!response.ok || !data.content) {
+      throw new Error(`Claude API error (${response.status}): ${data.error?.message ?? "no content in response"}`);
+    }
     const text = data.content[0]?.type === "text" ? data.content[0].text : "";
     return JSON.parse(text.trim()) as InfrastructureParameters;
   }
